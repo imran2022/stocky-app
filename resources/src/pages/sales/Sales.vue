@@ -231,6 +231,9 @@
         <a-form-item label="Tracking Ref">
           <a-input v-model:value="bulkForm.tracking_ref" placeholder="Leave unchanged" />
         </a-form-item>
+        <a-form-item label="Consignment ID">
+          <a-input v-model:value="bulkForm.consignment_id" placeholder="Leave unchanged" />
+        </a-form-item>
       </a-form>
     </a-modal>
 
@@ -536,21 +539,21 @@ const columns = computed(() => [
   { title: t('Reference'), dataIndex: 'Ref', key: 'Ref', sorter: true },
   { title: 'Tracking Ref', dataIndex: 'tracking_ref', key: 'tracking_ref', exportValue: r => r.tracking_ref || '' },
   { title: 'Zone', dataIndex: 'zone_name', key: 'zone_name', exportValue: r => r.zone_name || '' },
-  { title: 'Courier', dataIndex: 'courier_name', key: 'courier_name', exportValue: r => r.courier_name || '' },
-  { title: 'Qty', dataIndex: 'total_qty', key: 'total_qty', align: 'right', exportValue: r => r.total_qty ?? 0 },
-  { title: t('Created_by'), dataIndex: 'created_by', key: 'created_by' },
   { title: t('Customer'), dataIndex: 'client_name', key: 'client_name', sorter: true },
   { title: t('warehouse'), dataIndex: 'warehouse_name', key: 'warehouse_name', sorter: true },
   { title: t('Status'), dataIndex: 'statut', key: 'statut', sorter: true, exportValue: r => r.statut },
+  { title: 'Qty', dataIndex: 'total_qty', key: 'total_qty', align: 'right', exportValue: r => r.total_qty ?? 0 },
   { title: t('Total'), dataIndex: 'GrandTotal', key: 'GrandTotal', sorter: true, align: 'right', exportValue: r => money(r.GrandTotal) },
   { title: t('Paid'), dataIndex: 'paid_amount', key: 'paid_amount', sorter: true, align: 'right', exportValue: r => money(r.paid_amount) },
   { title: t('Due'), dataIndex: 'due', key: 'due', align: 'right', exportValue: r => money(r.due) },
-  { title: 'Return', dataIndex: 'return_amount', key: 'return_amount', align: 'right', exportValue: r => money(r.return_amount) },
+  { title: 'Return', dataIndex: 'return_amount', key: 'return_amount', align: 'right', defaultHidden: true, exportValue: r => money(r.return_amount) },
   { title: t('PaymentStatus'), dataIndex: 'payment_status', key: 'payment_status', exportValue: r => r.payment_status },
   { title: t('Shipping_status'), dataIndex: 'shipping_status', key: 'shipping_status', exportValue: r => r.shipping_status || '' },
   { title: 'Shipping Charge', dataIndex: 'shipping', key: 'shipping', align: 'right', defaultHidden: true, exportValue: r => money(r.shipping || 0) },
-  { title: 'Consignment ID', dataIndex: 'consignment_id', key: 'consignment_id', defaultHidden: true, exportValue: r => r.consignment_id || '' },
-  { title: 'Sales Agent', dataIndex: 'sales_agent_name', key: 'sales_agent_name', defaultHidden: true, exportValue: r => r.sales_agent_name || '' },
+  { title: 'Courier', dataIndex: 'courier_name', key: 'courier_name', exportValue: r => r.courier_name || '' },
+  { title: 'Consignment ID', dataIndex: 'consignment_id', key: 'consignment_id', exportValue: r => r.consignment_id || '' },
+  { title: 'Sales Agent', dataIndex: 'sales_agent_name', key: 'sales_agent_name', exportValue: r => r.sales_agent_name || '' },
+  { title: t('Created_by'), dataIndex: 'created_by', key: 'created_by' },
 ]);
 
 // ---------------- list exports (PDF / Excel) ----------------
@@ -601,7 +604,7 @@ async function bulkPrint(kind) {
 
 const bulkUpdateOpen = ref(false);
 const bulkUpdating = ref(false);
-const bulkForm = ref({ shipping_status: undefined, zone_id: undefined, courier_id: undefined, tracking_ref: '' });
+const bulkForm = ref({ shipping_status: undefined, zone_id: undefined, courier_id: undefined, tracking_ref: '', consignment_id: '' });
 
 async function applyBulkUpdate() {
   const ids = crud.selectedIds.value;
@@ -612,6 +615,7 @@ async function applyBulkUpdate() {
   if (bulkForm.value.zone_id) payload.zone_id = bulkForm.value.zone_id;
   if (bulkForm.value.courier_id) payload.courier_id = bulkForm.value.courier_id;
   if (bulkForm.value.tracking_ref) payload.tracking_ref = bulkForm.value.tracking_ref;
+  if (bulkForm.value.consignment_id) payload.consignment_id = bulkForm.value.consignment_id;
 
   if (Object.keys(payload).length <= 1) {
     message.warning('Set at least one field to update.');
@@ -623,7 +627,7 @@ async function applyBulkUpdate() {
     await http.post('sales_bulk_update', payload);
     message.success(`Updated ${ids.length} sale(s).`);
     bulkUpdateOpen.value = false;
-    bulkForm.value = { shipping_status: undefined, zone_id: undefined, courier_id: undefined, tracking_ref: '' };
+    bulkForm.value = { shipping_status: undefined, zone_id: undefined, courier_id: undefined, tracking_ref: '', consignment_id: '' };
     await crud.fetchRows();
   } catch (e) {
     message.error(e?.data?.message || t('InvalidData'));

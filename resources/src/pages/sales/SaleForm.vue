@@ -213,11 +213,6 @@
                 </a-form-item>
               </a-col>
               <a-col :xs="24" :md="8">
-                <a-form-item label="Consignment ID">
-                  <a-input v-model:value="sale.consignment_id" placeholder="Consignment ID" />
-                </a-form-item>
-              </a-col>
-              <a-col :xs="24" :md="8">
                 <a-form-item label="Zone">
                   <CreatableSelect
                     v-model:value="sale.zone_id"

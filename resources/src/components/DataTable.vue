@@ -250,7 +250,7 @@ function sumFor(col) {
   font-family: var(--dt-font, inherit);
   font-size: var(--dt-font-size, 13px);
 }
-:deep(.dt-row-striped > td) {
+:deep(.dt-row-striped > td:not(.ant-table-cell-fix-left):not(.ant-table-cell-fix-right)) {
   background: rgba(128, 128, 128, 0.045);
 }
 

@@ -347,6 +347,55 @@ shows its Box column regardless of the setting — packing lists are a
 niche, business-specific document already, and an empty Box column there
 when the feature is off is harmless. Revisit if that ever bothers someone.
 
+## 8. Column reorder, fixed-column stripe bug, Sales Agent on Sale Detail, Consignment ID moved to bulk-only
+
+**Why:** Requested Sales-list column order; a real visual bug in the
+shared `DataTable` component found while using the new columns; showing
+Sales Agent on the Sale Detail page; and moving Consignment ID entry from
+the per-sale form to the list's bulk-update only (it's set after the
+courier assigns it, not known at sale-creation time).
+
+- **Column reorder** — `resources/src/pages/sales/Sales.vue`'s `columns`
+  array is just reordered to: Action, Date, Reference, Tracking Ref, Zone,
+  Customer, Warehouse, Status, Qty, Total, Paid, Due, Return, Payment
+  Status, Shipping Status, Shipping Charge, Courier, Consignment ID, Sales
+  Agent, Added by. This is array-order only — every `#bodyCell` template
+  branches on `column.key`, and sorting/export/search all reference
+  `dataIndex`/`key`, never array position — so reordering carries **no
+  functional risk**, confirmed by rerunning the full test suite after.
+  `Return` and `Shipping Charge` are `defaultHidden: true` (hidden by
+  default, visible via the Columns picker); `Courier`, `Consignment ID`,
+  `Sales Agent` are **not** hidden per this request (a change from how
+  Consignment ID/Sales Agent shipped in section 7 — they defaulted hidden
+  there, now don't).
+- **Real bug found and fixed**: `resources/src/components/DataTable.vue`'s
+  zebra-striping rule (`.dt-row-striped > td { background:
+  rgba(128,128,128,0.045); }`) was overriding Ant Design Vue's own opaque
+  `background: tableBg` on fixed/sticky columns (`.ant-table-cell-fix-left`
+  /`-right`, e.g. the "Action" column here). A translucent background on a
+  sticky column lets horizontally-scrolled content show through underneath
+  it — the "ugly transparency" on the left edge when scrolling. Fixed by
+  excluding those two Ant classes from the stripe selector, so fixed
+  columns keep Ant's own theme-correct (light/dark-aware) opaque
+  background and only non-fixed cells get the zebra tint. **This fix is in
+  the shared `DataTable` component, so it also corrects the same latent
+  bug on every other DataTable-backed list with a fixed column and
+  striping enabled** — not Sales-list-specific.
+- **Sales Agent on Sale Detail** — `SalesController@show` now eager-loads
+  `salesAgent` and returns `sales_agent_name`; `SaleDetails.vue` shows it
+  in the top info block with the same `v-if` (empty → not shown) pattern
+  as Tracking Ref/Consignment ID/Zone/Courier.
+- **Consignment ID removed from Create/Edit Sale form** — the input was
+  taken out of `SaleForm.vue` entirely; `sale.consignment_id` stays in the
+  component's internal state (loaded on Edit, included unchanged in the
+  submit payload) purely so **saving an edited sale never wipes an
+  existing Consignment ID** — `SalesController@update` sets the column to
+  `null` when the field isn't present/filled in the request, so silently
+  dropping it from the payload would have erased it on every edit. The bulk-
+  update modal (section 6) gained a Consignment ID input as the new (only)
+  way to set it, per the intended workflow: courier assigns it after the
+  sale exists, so it's set from the list, not at creation time.
+
 ## Known follow-ups (not done, intentionally)
 
 - "Zone / Courier Report" menu label (`Zone_Courier_Report`) has no

@@ -1452,7 +1452,7 @@ class SalesController extends BaseController
         // New way: Check user's record_view field (user-level boolean)
         // Backward compatibility: If record_view is null, fall back to role permission check
         $view_records = $user->hasRecordView();
-        $sale_data = Sale::with('details.product.unitSale')
+        $sale_data = Sale::with('details.product.unitSale', 'salesAgent')
             ->where('deleted_at', '=', null)
             ->findOrFail($id);
 
@@ -1470,6 +1470,7 @@ class SalesController extends BaseController
         $sale_details['Ref'] = $sale_data->Ref;
         $sale_details['tracking_ref'] = $sale_data->tracking_ref;
         $sale_details['consignment_id'] = $sale_data->consignment_id;
+        $sale_details['sales_agent_name'] = optional($sale_data->salesAgent)->name;
         $sale_details['zone_name'] = optional($sale_data->zone)->name;
         $sale_details['courier_name'] = optional($sale_data->courier)->name;
         $sale_details['date'] = $sale_data->date.' '.$sale_data->time;

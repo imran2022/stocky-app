@@ -90,6 +90,7 @@
             <div v-if="sale.warehouse" class="inv-meta-row"><span class="im-label">{{ $t('warehouse') }}</span><span class="im-value">{{ sale.warehouse }}</span></div>
             <div v-if="sale.tracking_ref" class="inv-meta-row"><span class="im-label">Tracking Ref</span><span class="im-value">{{ sale.tracking_ref }}</span></div>
             <div v-if="sale.consignment_id" class="inv-meta-row"><span class="im-label">Consignment ID</span><span class="im-value">{{ sale.consignment_id }}</span></div>
+            <div v-if="sale.sales_agent_name" class="inv-meta-row"><span class="im-label">Sales Agent</span><span class="im-value">{{ sale.sales_agent_name }}</span></div>
             <div v-if="sale.zone_name" class="inv-meta-row"><span class="im-label">Zone</span><span class="im-value">{{ sale.zone_name }}</span></div>
             <div v-if="sale.courier_name" class="inv-meta-row"><span class="im-label">Courier</span><span class="im-value">{{ sale.courier_name }}</span></div>
           </div>
