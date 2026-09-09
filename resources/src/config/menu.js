@@ -17,6 +17,7 @@
 export const MIGRATED_ROUTES = {
     '/app/dashboard': '/dashboard',
     '/app/products/store': '/products/create',
+    '/app/products/stock_lookup': '/products/stock-lookup',
     '/app/products/list': '/products',
     '/app/products/count_stock': '/products/count-stock',
     '/app/products/Batches': '/products/batches',
@@ -384,6 +385,7 @@ export const MENU = [
         children: [
             { label: 'AddProduct', to: '/app/products/store', permissions: ['products_add'] },
             { label: 'productsList', to: '/app/products/list', permissions: ['products_view'] },
+            { label: 'StockLookup', to: '/app/products/stock_lookup', permissions: ['products_view'] },
             { label: 'import_products', to: '/app/products/import', permissions: ['product_import'] },
             { label: 'Import (Update Only)', to: '/app/products/import-update', permissions: ['product_import'] },
             { label: 'Opening_Stock', to: '/app/products/opening_stock_import', permissions: ['opening_stock_import'] },

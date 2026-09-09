@@ -113,6 +113,7 @@ const TransferDetails = lazy('TransferDetails', () => import('../pages/transfers
 const TransferForm = lazy('TransferForm', () => import('../pages/transfers/TransferForm.vue'));
 const Products = lazy('Products', () => import('../pages/products/Products.vue'));
 const ProductDetails = lazy('ProductDetails', () => import('../pages/products/ProductDetails.vue'));
+const StockLookup = lazy('StockLookup', () => import('../pages/products/StockLookup.vue'));
 const CountStock = lazy('CountStock', () => import('../pages/products/CountStock.vue'));
 const Batches = lazy('Batches', () => import('../pages/products/Batches.vue'));
 const ProductForm = lazy('ProductForm', () => import('../pages/products/ProductForm.vue'));
@@ -724,6 +725,7 @@ const routes = [
             { path: 'transfers/:id(\\d+)/edit', name: 'transfer-edit', component: TransferForm, meta: { title: 'Edit Transfer', permission: 'transfer_edit' } },
             { path: 'transfers/:id(\\d+)', name: 'transfer-details', component: TransferDetails, meta: { title: 'Transfer Detail', permission: 'transfer_view' } },
             { path: 'products', name: 'products', component: Products, meta: { title: 'Products', permission: 'products_view' } },
+            { path: 'products/stock-lookup', name: 'stock-lookup', component: StockLookup, meta: { title: 'Stock Lookup', permission: 'products_view' } },
             { path: 'products/count-stock', name: 'count-stock', component: CountStock, meta: { title: 'Count Stock', permission: 'count_stock' } },
             { path: 'products/batches', name: 'batches', component: Batches, meta: { title: 'Batches', permission: ['view_batches', 'batch_view'] } },
             { path: 'products/import', name: 'products-import', component: ImportProducts, meta: { title: 'Import Products', permission: 'product_import' } },

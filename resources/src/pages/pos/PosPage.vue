@@ -674,6 +674,14 @@
             </svg>
             <span>{{ $t('Scan') }}</span>
           </button>
+          <!-- Stock Lookup button: search by SKU/name/barcode -> stock across all warehouses -->
+          <button @click="openStockLookup" title="Stock Lookup" class="pos-shell-action-btn" style="height: 36px; padding: 0 12px; background: transparent; color: #1f1f2c; border: 1px solid #e6e6ec; border-radius: 8px; font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; transition: all 120ms ease;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width: 16px; height: 16px;">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+              <path d="M3.27 6.96 12 12.01l8.73-5.05"/><path d="M12 22.08V12"/>
+            </svg>
+            <span>Stock Lookup</span>
+          </button>
           <!-- Vehicle Fitment button (feature-flagged) -->
           <button
             v-if="vehicle_fitment_enabled"
@@ -1022,6 +1030,101 @@
     />
     <div class="text-center mt-2">
       <b-button variant="primary" @click="$bvModal.hide('open_scan')">{{ $t('Close') }}</b-button>
+    </div>
+  </b-modal>
+
+  <!-- Stock Lookup: search a product by SKU/name/barcode, see how much is
+       in stock at every warehouse — for a multi-warehouse business where the
+       same item lives in several places. -->
+  <b-modal id="StockLookupModal" hide-footer title="Stock Lookup" size="lg">
+    <div style="display: flex; flex-direction: column; gap: 4px; margin-bottom: 4px; color: #6b7280; font-size: 13px;">
+      Search by SKU or Product Name
+    </div>
+    <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+      <b-form-input
+        v-model="stockLookupQuery"
+        placeholder="e.g. BB10 or Bag"
+        autofocus
+        @keyup.enter="runStockLookupSearch"
+      />
+      <b-button variant="primary" :disabled="stockLookupSearching" @click="runStockLookupSearch">
+        <b-spinner v-if="stockLookupSearching" small />
+        <span v-else>Search</span>
+      </b-button>
+    </div>
+
+    <div v-if="stockLookupError" class="text-danger" style="margin-bottom: 12px;">{{ stockLookupError }}</div>
+
+    <!-- Multiple matches: pick one -->
+    <div v-if="!stockLookupDetail && stockLookupResults.length > 1" style="display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto;">
+      <div
+        v-for="r in stockLookupResults" :key="r.id"
+        @click="selectStockLookupProduct(r.id)"
+        style="display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border: 1px solid #e6e6ec; border-radius: 8px; cursor: pointer;"
+      >
+        <div>
+          <div style="font-weight: 600; font-size: 13.5px;">{{ r.name }}</div>
+          <div style="font-size: 12px; color: #6b7280;">SKU: {{ r.code }}</div>
+        </div>
+        <div style="font-weight: 600; color: #6d28d9;">{{ formatPriceWithCurrentCurrency(r.price, 2) }}</div>
+      </div>
+    </div>
+
+    <div v-if="!stockLookupDetail && !stockLookupSearching && stockLookupQuery && stockLookupResults.length === 0" style="text-align: center; color: #6b7280; padding: 24px 0;">
+      No matching products.
+    </div>
+
+    <!-- Selected product: per-warehouse breakdown -->
+    <div v-if="stockLookupLoadingDetail" style="text-align: center; padding: 24px 0;"><b-spinner /></div>
+    <div v-else-if="stockLookupDetail">
+      <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 16px;">
+        <img
+          v-if="stockLookupDetail.product.image"
+          :src="'/images/' + stockLookupDetail.product.image"
+          style="width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid #e6e6ec;"
+        />
+        <div>
+          <div style="font-weight: 700; font-size: 16px;">{{ stockLookupDetail.product.name }}</div>
+          <div style="display: flex; gap: 8px; margin-top: 4px;">
+            <span style="background: #f3f4f6; padding: 2px 8px; border-radius: 6px; font-size: 12px;">SKU: {{ stockLookupDetail.product.code }}</span>
+            <span style="background: #ede9fe; color: #6d28d9; padding: 2px 8px; border-radius: 6px; font-size: 12px; font-weight: 600;">Price: {{ formatPriceWithCurrentCurrency(stockLookupDetail.product.price, 2) }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <div style="font-weight: 600; font-size: 13.5px;">Stock by Warehouse</div>
+      </div>
+      <div style="border: 1px solid #e6e6ec; border-radius: 8px; overflow: hidden;">
+        <div style="display: flex; justify-content: space-between; padding: 8px 14px; background: #ede9fe; color: #6d28d9; font-weight: 600; font-size: 12.5px;">
+          <span>Warehouse / Location</span>
+          <span>Available Stock</span>
+        </div>
+        <div
+          v-for="w in stockLookupDetail.warehouses" :key="w.id"
+          style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-top: 1px solid #f0f0f0;"
+        >
+          <div>
+            <div style="font-weight: 600; font-size: 13.5px;">{{ w.name }}</div>
+            <div v-if="w.location" style="font-size: 12px; color: #6b7280;">{{ w.location }}</div>
+          </div>
+          <span
+            style="padding: 2px 10px; border-radius: 6px; font-size: 12.5px; font-weight: 600;"
+            :style="{ background: w.qty > 0 ? '#eaf7ef' : '#fdecec', color: w.qty > 0 ? '#1e7a44' : '#a83232' }"
+          >{{ w.qty }} Pcs</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: #f9fafb; border-top: 1px solid #e6e6ec;">
+          <div>
+            <div style="font-weight: 700; font-size: 13.5px;">Total Stock</div>
+            <div style="font-size: 12px; color: #6b7280;">Across all warehouses</div>
+          </div>
+          <span style="padding: 2px 10px; border-radius: 6px; font-size: 13px; font-weight: 700; background: #ede9fe; color: #6d28d9;">{{ stockLookupDetail.total_qty }} Pcs</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="text-center mt-3">
+      <b-button variant="secondary" @click="$bvModal.hide('StockLookupModal')">{{ $t('Close') }}</b-button>
     </div>
   </b-modal>
 
@@ -3481,6 +3584,14 @@ export default {
       // ===== Mobile UI state (drives the phone layout) =====
       mobileActiveTab: 'home', // home | cart | hold | recent | more
 
+      // ===== Stock Lookup modal state (search by SKU/name/barcode -> per-warehouse stock) =====
+      stockLookupQuery: '',
+      stockLookupResults: [],
+      stockLookupSearching: false,
+      stockLookupDetail: null,
+      stockLookupLoadingDetail: false,
+      stockLookupError: '',
+
       // Calculator widget state
       calc: {
         display: '0',     // current operand shown big
@@ -4319,6 +4430,50 @@ export default {
     } catch (e) {}
   },
   methods: {
+    // ===== Stock Lookup modal (search by SKU/name/barcode -> per-warehouse stock) =====
+    openStockLookup() {
+      this.stockLookupQuery = '';
+      this.stockLookupResults = [];
+      this.stockLookupDetail = null;
+      this.stockLookupError = '';
+      this.$bvModal.show('StockLookupModal');
+    },
+    async runStockLookupSearch() {
+      const q = (this.stockLookupQuery || '').trim();
+      this.stockLookupDetail = null;
+      this.stockLookupError = '';
+      if (!q) {
+        this.stockLookupResults = [];
+        return;
+      }
+      this.stockLookupSearching = true;
+      try {
+        const { data } = await axios.get('stock_lookup/search', { params: { search: q } });
+        this.stockLookupResults = data.results || [];
+        // A single, exact SKU/barcode match — skip straight to its detail,
+        // same "type the code, see the answer" flow as the reference design.
+        const exact = this.stockLookupResults.find(r => r.code === q || r.gtin === q);
+        if (this.stockLookupResults.length === 1 || exact) {
+          await this.selectStockLookupProduct((exact || this.stockLookupResults[0]).id);
+        }
+      } catch (e) {
+        this.stockLookupError = this.$t('InvalidData') || 'Could not search products';
+      } finally {
+        this.stockLookupSearching = false;
+      }
+    },
+    async selectStockLookupProduct(id) {
+      this.stockLookupLoadingDetail = true;
+      this.stockLookupError = '';
+      try {
+        const { data } = await axios.get(`stock_lookup/${id}`);
+        this.stockLookupDetail = data;
+      } catch (e) {
+        this.stockLookupError = this.$t('InvalidData') || 'Could not load stock detail';
+      } finally {
+        this.stockLookupLoadingDetail = false;
+      }
+    },
     goToMobileTab(tab) {
       if (tab === 'home') {
         if (this.$route && this.$route.path !== '/') {

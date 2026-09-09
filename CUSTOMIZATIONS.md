@@ -396,6 +396,74 @@ courier assigns it, not known at sale-creation time).
   way to set it, per the intended workflow: courier assigns it after the
   sale exists, so it's set from the list, not at creation time.
 
+## 9. Stock Lookup — multi-warehouse "where is it" tool
+
+**Why:** This is a multi-warehouse business (the same SKU can sit in
+several warehouses at once). The only existing way to see a product's
+stock across all warehouses was the Product Details page's own warehouse
+table — useful, but requires navigating into that specific product first.
+This adds a dedicated search-first tool: type a SKU/barcode/name, see the
+per-warehouse breakdown immediately, from two places (POS and a new
+Products-menu page).
+
+**Important architecture note for whoever touches this next**: this app
+runs **two different frontends side by side**. Pages under
+`resources/src/pages/` (products, sales, reports, etc.) are the modern
+Vue 3 `<script setup>` + Ant Design Vue SPA — that's everywhere else in
+this document. **`resources/src/pages/pos/PosPage.vue` is NOT that** — it's
+still the legacy Vue 2 Options API (`<script>`, not `<script setup>`) +
+BootstrapVue (`<b-modal>`, `<b-button>`, `$bvModal.show(...)`) codebase,
+not yet migrated. Do not add Ant Design Vue components into PosPage.vue —
+they belong to a different Vue major version / component library and
+won't work there. Match whichever file you're in.
+
+**Backend** — `app/Http/Controllers/ProductsController.php` (two new
+methods, both permission-gated the same as the rest of this controller —
+`view` on `Product::class` — and both warehouse-scoped by the existing
+`is_all_warehouses`/`UserWarehouse` pattern used throughout this
+controller, verified with a restricted test user who correctly only saw
+their one assigned warehouse and its stock, not the other warehouse's):
+- `stockLookupSearch(Request $request)` — `GET stock_lookup/search?search=`.
+  Matches `code`, `gtin` (the barcode column — the "Show Barcode (GTIN,
+  UPC, EAN, ISBN)" setting seen in System Settings controls whether this
+  is a visible product field, not whether it's searchable here), or `name`,
+  LIKE `%search%`, ordered so an exact code/gtin match sorts first. Returns
+  up to 15 lightweight candidates (id, name, code, gtin, price, image).
+- `stockLookupDetail(Request $request, $id)` — `GET stock_lookup/{id}`.
+  Same per-warehouse `SUM(product_warehouse.qte)` grouping already used by
+  the Product Details page's own warehouse table, but returns it as a flat
+  list with a `location` string (city + country) and a `total_qty`, scoped
+  to only the warehouses the user is allowed to see.
+- Routes added in the same `products` resource-route block in
+  `routes/api.php` (so behind the same `auth:api` middleware group).
+
+**Frontend — two entry points, two different codebases:**
+- `resources/src/pages/products/StockLookup.vue` — new page (modern SPA),
+  registered in `router/index.js` (`/products/stock-lookup`,
+  `products_view` permission — same permission as the Products list, not a
+  new one) and `config/menu.js` (both the legacy-path redirect and a new
+  "Stock Lookup" entry in the Products submenu).
+- `resources/src/pages/pos/PosPage.vue` — a "Stock Lookup" button was
+  added next to the existing "Scan" button in the header, opening a new
+  `<b-modal id="StockLookupModal">` (BootstrapVue, matching every other
+  modal already in this file, e.g. `open_scan`). New `data()` fields
+  (`stockLookupQuery`, `stockLookupResults`, `stockLookupDetail`, etc.) and
+  three new `methods` (`openStockLookup`, `runStockLookupSearch`,
+  `selectStockLookupProduct`) were added without touching any existing
+  POS state or methods.
+- Both frontends call the exact same two backend endpoints — no
+  duplicated business logic, just two different UI shells (Ant Design
+  table/card markup in the SPA page, plain styled `<div>`s in the POS
+  modal since AntD isn't available there).
+- Typing an exact SKU/barcode match (or getting exactly one result) skips
+  straight to the detail view in both places — same "type the code, see
+  the answer" flow as the reference design the request included
+  screenshots of.
+- Price is shown via each context's own existing currency helper
+  (`money()` in the SPA via `useFormat`, `formatPriceWithCurrentCurrency()`
+  in POS) — a bug from an early draft that referenced a non-existent
+  `symbol` variable in the POS modal was caught and fixed before shipping.
+
 ## Known follow-ups (not done, intentionally)
 
 - "Zone / Courier Report" menu label (`Zone_Courier_Report`) has no

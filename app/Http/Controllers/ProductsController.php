@@ -2120,6 +2120,99 @@ class ProductsController extends BaseController
         return response()->json($data);
     }
 
+    /**
+     * Stock Lookup — search step. Matches products by code, GTIN/barcode, or
+     * name and returns a short list of lightweight candidates for the user
+     * to pick from (multi-warehouse business: the same item lives in several
+     * warehouses, so this is a dedicated "where is it" tool, distinct from
+     * the per-product warehouse table already on the Product Details page).
+     */
+    public function stockLookupSearch(Request $request)
+    {
+        $this->authorizeForUser($request->user('api'), 'view', Product::class);
+
+        $search = trim((string) $request->get('search', ''));
+        if ($search === '') {
+            return response()->json(['results' => []]);
+        }
+
+        $products = Product::whereNull('deleted_at')
+            ->where('is_active', 1)
+            ->where(function ($q) use ($search) {
+                $q->where('code', 'like', "%{$search}%")
+                    ->orWhere('gtin', 'like', "%{$search}%")
+                    ->orWhere('name', 'like', "%{$search}%");
+            })
+            ->orderByRaw('code = ? desc, gtin = ? desc', [$search, $search])
+            ->limit(15)
+            ->get(['id', 'name', 'code', 'gtin', 'price', 'image']);
+
+        $results = $products->map(function ($p) {
+            return [
+                'id' => $p->id,
+                'name' => $p->name,
+                'code' => $p->code,
+                'gtin' => $p->gtin,
+                'price' => number_format($p->price, helpers::price_decimals(), '.', ''),
+                'image' => $p->primaryProductImageFilename(),
+            ];
+        });
+
+        return response()->json(['results' => $results]);
+    }
+
+    /**
+     * Stock Lookup — detail step. Per-warehouse stock breakdown + total for
+     * one product, scoped to the user's assigned warehouses (same
+     * is_all_warehouses/UserWarehouse pattern as the rest of this
+     * controller), for the modal shown after picking a search result.
+     */
+    public function stockLookupDetail(Request $request, $id)
+    {
+        $this->authorizeForUser($request->user('api'), 'view', Product::class);
+
+        $product = Product::whereNull('deleted_at')->findOrFail($id);
+
+        $user_auth = auth()->user();
+        if ($user_auth->is_all_warehouses) {
+            $warehouses = Warehouse::whereNull('deleted_at')->orderBy('name')->get(['id', 'name', 'city', 'country']);
+        } else {
+            $allowedWarehouseIds = UserWarehouse::where('user_id', $user_auth->id)->pluck('warehouse_id')->toArray();
+            $warehouses = Warehouse::whereNull('deleted_at')->whereIn('id', $allowedWarehouseIds)->orderBy('name')->get(['id', 'name', 'city', 'country']);
+        }
+
+        $qtyByWarehouse = DB::table('product_warehouse')
+            ->where('product_id', $id)
+            ->whereNull('deleted_at')
+            ->whereIn('warehouse_id', $warehouses->pluck('id'))
+            ->selectRaw('warehouse_id, COALESCE(SUM(qte), 0) as qty')
+            ->groupBy('warehouse_id')
+            ->pluck('qty', 'warehouse_id');
+
+        $byWarehouse = $warehouses->map(function ($w) use ($qtyByWarehouse) {
+            return [
+                'id' => $w->id,
+                'name' => $w->name,
+                'location' => trim(collect([$w->city, $w->country])->filter()->implode(', ')),
+                'qty' => (float) ($qtyByWarehouse[$w->id] ?? 0),
+            ];
+        });
+
+        return response()->json([
+            'product' => [
+                'id' => $product->id,
+                'name' => $product->name,
+                'code' => $product->code,
+                'gtin' => $product->gtin,
+                'price' => number_format($product->price, helpers::price_decimals(), '.', ''),
+                'image' => $product->primaryProductImageFilename(),
+            ],
+            'warehouses' => $byWarehouse,
+            'total_qty' => (float) $byWarehouse->sum('qty'),
+            'updated_at' => optional($product->updated_at)->toIso8601String(),
+        ]);
+    }
+
     public function show($id)
     {
         //

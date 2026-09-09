@@ -1033,6 +1033,8 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     // ------------------------------------------------------------------\\
 
     Route::resource('products', 'ProductsController');
+    Route::get('stock_lookup/search', 'ProductsController@stockLookupSearch');
+    Route::get('stock_lookup/{id}', 'ProductsController@stockLookupDetail');
     Route::post('products/{id}/duplicate', 'ProductsController@duplicate');
 
     // Vehicle Fitment (catalog, per-product fitments, POS lookup)
