@@ -2757,12 +2757,8 @@ class SalesController extends BaseController
             abort(422, 'No sales selected.');
         }
 
-        $pageBreak = '<div style="page-break-after: always;"></div>';
-        $htmlParts = [];
-        foreach ($ids as $id) {
-            $htmlParts[] = $this->renderSaleInvoiceHtml($id);
-        }
-        $combinedHtml = implode($pageBreak, $htmlParts);
+        $htmlDocs = array_map(fn ($id) => $this->renderSaleInvoiceHtml($id), $ids);
+        $combinedHtml = $this->combineHtmlDocuments($htmlDocs);
 
         return PDF::loadHTML($combinedHtml, 'UTF-8')->download('sales-invoices.pdf');
     }
@@ -2782,8 +2778,7 @@ class SalesController extends BaseController
         $company = Setting::where('deleted_at', '=', null)->first();
         $symbol = $helpers->Get_Currency_Code();
 
-        $pageBreak = '<div style="page-break-after: always;"></div>';
-        $htmlParts = [];
+        $htmlDocs = [];
         foreach ($ids as $id) {
             $sale_data = Sale::where('deleted_at', '=', null)->findOrFail($id);
             $sale = [
@@ -2795,13 +2790,13 @@ class SalesController extends BaseController
                 'GrandTotal' => number_format($sale_data->GrandTotal, helpers::price_decimals(), '.', ''),
                 'payment_status' => $sale_data->payment_statut,
             ];
-            $htmlParts[] = view('pdf.shipping_label', [
+            $htmlDocs[] = view('pdf.shipping_label', [
                 'sale' => $sale,
                 'company' => $company,
                 'symbol' => $symbol,
             ])->render();
         }
-        $combinedHtml = implode($pageBreak, $htmlParts);
+        $combinedHtml = $this->combineHtmlDocuments($htmlDocs);
 
         return PDF::loadHTML($combinedHtml, 'UTF-8')->setPaper([0, 0, 340, 480])->download('shipping-labels.pdf');
     }
@@ -2842,6 +2837,64 @@ class SalesController extends BaseController
         $updated = Sale::whereIn('id', $ids)->whereNull('deleted_at')->update($payload);
 
         return response()->json(['success' => true, 'updated' => $updated]);
+    }
+
+    /**
+     * Splits a full standalone HTML document (as every pdf.* blade view
+     * renders) into its <style> block(s) and the inner content of <body>.
+     * Used by the bulk-print endpoints below: concatenating several FULL
+     * documents (each with their own <html>/<head>/<body>) into one string
+     * and handing that to the PDF renderer produces a stray blank page
+     * after every item (multiple <html> roots confuse the HTML parser) —
+     * found while testing the bulk PDF feature against real data. The fix
+     * is to build exactly one document: one <head> with the styles, one
+     * <body> holding every item's inner content back to back.
+     */
+    private function splitHtmlDocument(string $html): array
+    {
+        $doc = new \DOMDocument;
+        libxml_use_internal_errors(true);
+        $doc->loadHTML('<?xml encoding="utf-8" ?>'.$html, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+        libxml_clear_errors();
+
+        $styles = '';
+        foreach ($doc->getElementsByTagName('style') as $styleNode) {
+            $styles .= $doc->saveHTML($styleNode);
+        }
+
+        $bodyInner = '';
+        $bodyNode = $doc->getElementsByTagName('body')->item(0);
+        if ($bodyNode) {
+            foreach ($bodyNode->childNodes as $child) {
+                $bodyInner .= $doc->saveHTML($child);
+            }
+        }
+
+        return [$styles, $bodyInner];
+    }
+
+    /**
+     * Combines several full HTML documents (from splitHtmlDocument above)
+     * into one real document: the first item's <style> block (they're all
+     * identical — one shared template/settings), then every item's body
+     * content separated by a page break.
+     */
+    private function combineHtmlDocuments(array $htmlDocs): string
+    {
+        $styles = '';
+        $bodies = [];
+        foreach ($htmlDocs as $i => $html) {
+            [$docStyles, $bodyInner] = $this->splitHtmlDocument($html);
+            if ($i === 0) {
+                $styles = $docStyles;
+            }
+            $bodies[] = $bodyInner;
+        }
+
+        $pageBreak = '<div style="page-break-after: always;"></div>';
+
+        return '<!DOCTYPE html><html><head><meta charset="utf-8">'.$styles.'</head><body>'
+            .implode($pageBreak, $bodies).'</body></html>';
     }
 
     public function Sale_Shipping_Label(Request $request, $id)

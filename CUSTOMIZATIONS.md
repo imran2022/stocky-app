@@ -223,6 +223,23 @@ per-row total quantity column.
   `if (! function_exists('formatPrice')) { ... }`. Any other blade view
   that declares a bare function and might ever be rendered more than once
   per request needs the same guard.
+- **Second gotcha, found by the user after shipping the first version**:
+  the bulk PDFs rendered with a stray blank page after every item. Cause:
+  every `pdf.*` blade view is a full standalone HTML document (its own
+  `<!DOCTYPE>`/`<html>`/`<head>`/`<body>`); naively concatenating several
+  of those with a `page-break-after` div between them produces a string
+  with multiple `<html>` roots, which HTML parsers handle unpredictably —
+  in this case, dompdf treated each embedded `<html>` boundary as its own
+  page. Fixed with two new private helpers, `splitHtmlDocument()` (parses
+  one rendered document via `DOMDocument`, returns its `<style>` block(s)
+  and the inner content of `<body>`) and `combineHtmlDocuments()` (builds
+  exactly one real document: the first item's styles — they're identical
+  across items, same template/settings — then every item's body content
+  joined by a single page-break div between each, never after the last
+  one). Verified by rendering through `Dompdf` directly in a test and
+  calling `getCanvas()->get_page_count()` — confirmed N sales -> N pages,
+  not 2N. Any future bulk-combine feature over these `pdf.*` views should
+  use `combineHtmlDocuments()` rather than raw string concatenation.
 - Bulk PDF/label routes sit in the same unguarded "Print & PDF" route
   block as `sale_pdf/{id}` etc. (see section 5 above for why); `bulkUpdate`
   is a normal authenticated route next to `sales_delete_by_selection`.
@@ -240,6 +257,18 @@ per-row total quantity column.
   "Update Selected" opens a modal (Shipping Status select, Zone/Courier
   `CreatableSelect`, Tracking Ref input) that POSTs only the fields the
   user actually touched to `sales_bulk_update`.
+
+## Convention: hide low-priority list columns by default
+
+`DataTable.vue` already supports `defaultHidden: true` on any column
+definition — it starts unchecked in the "Columns" picker (gear icon) but
+the user can turn it on any time from that dropdown, per session. When
+adding a new Sales-list (or any DataTable-backed list) column that most
+users won't need to see by default — extra reference fields, rarely-used
+identifiers, anything that would otherwise widen the table and force more
+horizontal scrolling — flag it `defaultHidden: true` rather than leaving
+it always-visible. No new column-visibility mechanism needs to be built;
+this one already exists and is the right tool for that.
 
 ## Known follow-ups (not done, intentionally)
 
