@@ -102,6 +102,7 @@ class SalesController extends BaseController
 
         // Check If User Has Permission View  All Records
         $Sales = Sale::with('facture.payment_method', 'client', 'warehouse', 'user', 'zone', 'courier')
+            ->withSum('details', 'quantity')
             ->where('deleted_at', '=', null)
             ->where(function ($query) use ($view_records) {
                 if (! $view_records) {
@@ -166,6 +167,7 @@ class SalesController extends BaseController
             $item['zone_name'] = optional($Sale['zone'])->name;
             $item['courier_id'] = $Sale['courier_id'];
             $item['courier_name'] = optional($Sale['courier'])->name;
+            $item['total_qty'] = (float) ($Sale['details_sum_quantity'] ?? 0);
             $item['created_by'] = $Sale['user']->username;
             $item['statut'] = $Sale['statut'];
             $item['shipping_status'] = $Sale['shipping_status'];
@@ -2625,6 +2627,223 @@ class SalesController extends BaseController
      * sale isn't fully paid. Deliberately minimal: no line items, meant to
      * be printed on a small label sheet and stuck on the parcel.
      */
+    /**
+     * Builds one sale's invoice HTML (identical data/logic to Sale_PDF's body)
+     * for reuse by the bulk-invoice endpoint below. Deliberately NOT used by
+     * Sale_PDF/Sale_PDF_Inline themselves — those are proven, high-traffic
+     * methods and are left untouched to avoid any risk of regression; this is
+     * a parallel copy for the new bulk feature only.
+     */
+    private function renderSaleInvoiceHtml($id): string
+    {
+        $details = [];
+        $helpers = new helpers;
+        $sale_data = Sale::with('details.product.unitSale')
+            ->where('deleted_at', '=', null)
+            ->findOrFail($id);
+
+        $sale['client_name'] = $sale_data['client']->name;
+        $sale['client_phone'] = $sale_data['client']->phone;
+        $sale['client_adr'] = $sale_data['client']->adresse;
+        $sale['client_email'] = $sale_data['client']->email;
+        $sale['client_tax'] = $sale_data['client']->tax_number;
+        $sale['TaxNet'] = number_format($sale_data->TaxNet, helpers::price_decimals(), '.', '');
+        $sale['discount'] = number_format($sale_data->discount, helpers::price_decimals(), '.', '');
+        $sale['discount_Method'] = $sale_data->discount_Method ?? '2';
+        $sale['discount_from_points'] = number_format($sale_data->discount_from_points ?? 0, helpers::price_decimals(), '.', '');
+        $sale['shipping'] = number_format($sale_data->shipping, helpers::price_decimals(), '.', '');
+        $sale['statut'] = $sale_data->statut;
+        $sale['Ref'] = $sale_data->Ref;
+        $sale['date'] = $sale_data->date.' '.$sale_data->time;
+        $sale['GrandTotal'] = number_format($sale_data->GrandTotal, helpers::price_decimals(), '.', '');
+        $sale['paid_amount'] = number_format($sale_data->paid_amount, helpers::price_decimals(), '.', '');
+        $sale['due'] = number_format($sale['GrandTotal'] - $sale['paid_amount'], helpers::price_decimals(), '.', '');
+        $sale['payment_status'] = $sale_data->payment_statut;
+        $sale['previous_dues'] = number_format($this->clientPreviousDues($sale_data->client_id, $id), helpers::price_decimals(), '.', '');
+        $sale['notes'] = $sale_data->notes ?? '';
+
+        $payments = PaymentSale::where('sale_id', $id)->whereNotNull('notes')->get();
+        $payment_notes_array = [];
+        foreach ($payments as $payment) {
+            if ($payment->notes) {
+                $payment_notes_array[] = ($payment->Ref ? "({$payment->Ref}): " : '').$payment->notes;
+            }
+        }
+        $sale['payment_note'] = implode("\n", $payment_notes_array);
+
+        $detail_id = 0;
+        foreach ($sale_data['details'] as $detail) {
+            if ($detail->sale_unit_id !== null) {
+                $unit = Unit::where('id', $detail->sale_unit_id)->first();
+            } else {
+                $unit = null;
+            }
+
+            if ($detail->product_variant_id) {
+                $productsVariants = ProductVariant::where('product_id', $detail->product_id)
+                    ->where('id', $detail->product_variant_id)->first();
+                $data['code'] = $productsVariants->code;
+                $data['name'] = '['.$productsVariants->name.']'.$detail['product']['name'];
+            } else {
+                $data['code'] = $detail['product']['code'];
+                $data['name'] = $detail['product']['name'];
+            }
+
+            $data['detail_id'] = $detail_id += 1;
+            $data['quantity'] = number_format($detail->quantity, helpers::price_decimals(), '.', '');
+            $data['box_qty'] = $detail->box_qty !== null ? rtrim(rtrim(number_format($detail->box_qty, 2, '.', ''), '0'), '.') : null;
+            $data['total'] = number_format($detail->total, helpers::price_decimals(), '.', '');
+            $data['unitSale'] = $unit ? $unit->ShortName : '';
+            $data['price'] = number_format($detail->price, helpers::price_decimals(), '.', '');
+
+            if ($detail->discount_method == '2') {
+                $data['DiscountNet'] = number_format($detail->discount, helpers::price_decimals(), '.', '');
+            } else {
+                $data['DiscountNet'] = number_format($detail->price * $detail->discount / 100, helpers::price_decimals(), '.', '');
+            }
+
+            $tax_price = $detail->TaxNet * (($detail->price - $data['DiscountNet']) / 100);
+            $data['Unit_price'] = number_format($detail->price, helpers::price_decimals(), '.', '');
+            $data['discount'] = number_format($detail->discount, helpers::price_decimals(), '.', '');
+
+            if ($detail->tax_method == '1') {
+                $data['Net_price'] = $detail->price - $data['DiscountNet'];
+                $data['taxe'] = number_format($tax_price, helpers::price_decimals(), '.', '');
+            } else {
+                $data['Net_price'] = ($detail->price - $data['DiscountNet'] - $tax_price);
+                $data['taxe'] = number_format($detail->price - $data['Net_price'] - $data['DiscountNet'], helpers::price_decimals(), '.', '');
+            }
+
+            $data['is_imei'] = $detail['product']['is_imei'];
+            $data['imei_number'] = $detail->imei_number;
+            $data['pack_name'] = $detail->pack_name;
+            $data['pack_multiplier'] = $detail->pack_multiplier !== null ? (float) $detail->pack_multiplier : 1;
+
+            $details[] = $data;
+        }
+
+        $settings = Setting::where('deleted_at', '=', null)->first();
+        $symbol = $helpers->Get_Currency_Code();
+        $pos_setting_pdf = PosSetting::where('deleted_at', '=', null)->first();
+        $show_items_tax = $pos_setting_pdf ? (int) ($pos_setting_pdf->show_items_tax ?? 0) : 0;
+
+        $html = view('pdf.sale_pdf', [
+            'symbol' => $symbol,
+            'setting' => $settings,
+            'sale' => $sale,
+            'details' => $details,
+            'show_items_tax' => $show_items_tax,
+        ])->render();
+
+        $arabic = new Arabic;
+        $p = $arabic->arIdentify($html);
+        for ($i = count($p) - 1; $i >= 0; $i -= 2) {
+            $utf8ar = $arabic->utf8Glyphs(substr($html, $p[$i - 1], $p[$i] - $p[$i - 1]));
+            $html = substr_replace($html, $utf8ar, $p[$i - 1], $p[$i] - $p[$i - 1]);
+        }
+
+        return $html;
+    }
+
+    /**
+     * Bulk invoice PDF — one downloaded PDF containing every selected sale's
+     * invoice, each starting on a new page. Used by the "Print Invoices" bulk
+     * action on the Sales list (selected rows -> comma-separated ids).
+     */
+    public function Sale_PDF_Bulk(Request $request)
+    {
+        $ids = array_filter(array_map('trim', explode(',', (string) $request->query('ids', ''))));
+        if (empty($ids)) {
+            abort(422, 'No sales selected.');
+        }
+
+        $pageBreak = '<div style="page-break-after: always;"></div>';
+        $htmlParts = [];
+        foreach ($ids as $id) {
+            $htmlParts[] = $this->renderSaleInvoiceHtml($id);
+        }
+        $combinedHtml = implode($pageBreak, $htmlParts);
+
+        return PDF::loadHTML($combinedHtml, 'UTF-8')->download('sales-invoices.pdf');
+    }
+
+    /**
+     * Bulk shipping labels — same idea as Sale_PDF_Bulk but for the small
+     * label document, one per selected sale.
+     */
+    public function Sale_Shipping_Label_Bulk(Request $request)
+    {
+        $ids = array_filter(array_map('trim', explode(',', (string) $request->query('ids', ''))));
+        if (empty($ids)) {
+            abort(422, 'No sales selected.');
+        }
+
+        $helpers = new helpers;
+        $company = Setting::where('deleted_at', '=', null)->first();
+        $symbol = $helpers->Get_Currency_Code();
+
+        $pageBreak = '<div style="page-break-after: always;"></div>';
+        $htmlParts = [];
+        foreach ($ids as $id) {
+            $sale_data = Sale::where('deleted_at', '=', null)->findOrFail($id);
+            $sale = [
+                'Ref' => $sale_data->Ref,
+                'date' => $sale_data->date.' '.$sale_data->time,
+                'client_name' => $sale_data->client->name,
+                'client_phone' => $sale_data->client->phone,
+                'client_adr' => $sale_data->client->adresse,
+                'GrandTotal' => number_format($sale_data->GrandTotal, helpers::price_decimals(), '.', ''),
+                'payment_status' => $sale_data->payment_statut,
+            ];
+            $htmlParts[] = view('pdf.shipping_label', [
+                'sale' => $sale,
+                'company' => $company,
+                'symbol' => $symbol,
+            ])->render();
+        }
+        $combinedHtml = implode($pageBreak, $htmlParts);
+
+        return PDF::loadHTML($combinedHtml, 'UTF-8')->setPaper([0, 0, 340, 480])->download('shipping-labels.pdf');
+    }
+
+    /**
+     * Bulk update — set Shipping Status and/or Tracking Ref/Zone/Courier on
+     * several sales at once (Sales list "Update selected" bulk action). Only
+     * fields actually present in the request are touched, so partial updates
+     * (e.g. just Zone) don't clobber the others.
+     */
+    public function bulkUpdate(Request $request)
+    {
+        $this->authorizeForUser($request->user('api'), 'update', Sale::class);
+
+        $ids = (array) $request->input('selectedIds', []);
+        if (empty($ids)) {
+            return response()->json(['success' => false, 'message' => 'No rows selected.'], 422);
+        }
+
+        $payload = [];
+        if ($request->filled('shipping_status')) {
+            $payload['shipping_status'] = $request->shipping_status;
+        }
+        if ($request->has('zone_id')) {
+            $payload['zone_id'] = $request->zone_id ?: null;
+        }
+        if ($request->has('courier_id')) {
+            $payload['courier_id'] = $request->courier_id ?: null;
+        }
+        if ($request->has('tracking_ref')) {
+            $payload['tracking_ref'] = $request->tracking_ref !== '' ? $request->tracking_ref : null;
+        }
+
+        if (empty($payload)) {
+            return response()->json(['success' => false, 'message' => 'Nothing to update.'], 422);
+        }
+
+        $updated = Sale::whereIn('id', $ids)->whereNull('deleted_at')->update($payload);
+
+        return response()->json(['success' => true, 'updated' => $updated]);
+    }
+
     public function Sale_Shipping_Label(Request $request, $id)
     {
         $sale_data = Sale::where('deleted_at', '=', null)->findOrFail($id);

@@ -1171,6 +1171,7 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     Route::post('sales_send_email', 'SalesController@Send_Email');
     Route::post('sales_send_sms', 'SalesController@Send_SMS');
     Route::post('sales_delete_by_selection', 'SalesController@delete_by_selection');
+    Route::post('sales_bulk_update', 'SalesController@bulkUpdate');
     Route::get('get_Products_by_sale/{id}', 'SalesController@get_Products_by_sale');
 
     // ------------------------------- Sales Documents --------------------------\\
@@ -1667,6 +1668,8 @@ Route::get('pos/customer-display/last-cart', [CustomerDisplayController::class, 
 Route::get('sale_pdf/{id}', 'SalesController@Sale_PDF');
 Route::get('sale_shipping_label/{id}', 'SalesController@Sale_Shipping_Label');
 Route::get('sale_packing_list/{id}', 'SalesController@Sale_Packing_List');
+Route::get('sale_pdf_bulk', 'SalesController@Sale_PDF_Bulk');
+Route::get('sale_shipping_label_bulk', 'SalesController@Sale_Shipping_Label_Bulk');
 Route::get('sale_print_html/{id}', 'SalesController@Sale_PDF_Inline');
 Route::get('quote_pdf/{id}', 'QuotationsController@Quotation_pdf');
 Route::get('quote_print_html/{id}', 'QuotationsController@Quotation_PDF_Inline');

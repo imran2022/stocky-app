@@ -16,6 +16,10 @@
         $priceFormat = $setting['price_format'] ?? null;
         // Monetary precision: 3 when 3-decimal pricing is enabled, else 2
         $priceDecimals = \App\utils\helpers::price_decimals();
+        // Guarded: the bulk invoice endpoint renders this same view multiple
+        // times in one request (once per selected sale) and concatenates the
+        // HTML, so this must survive being included more than once per request.
+        if (! function_exists('formatPrice')) {
         function formatPrice($number, $decimals = 2, $priceFormat = null) {
             $number = (float) $number;
             $decimals = (int) $decimals;
@@ -34,6 +38,7 @@
                 default:
                     return number_format($number, $decimals, '.', ',');
             }
+        }
         }
     @endphp
     <style>

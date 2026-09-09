@@ -173,7 +173,62 @@
           </a-dropdown>
         </template>
       </template>
+
+      <template #toolbar>
+        <template v-if="crud.selectedIds.value.length">
+          <a-button :loading="bulkPrinting === 'invoices'" @click="bulkPrint('invoices')">
+            <template #icon><FilePdfOutlined /></template>
+            Print Invoices
+          </a-button>
+          <a-button :loading="bulkPrinting === 'labels'" @click="bulkPrint('labels')">
+            <template #icon><TagOutlined /></template>
+            Print Labels
+          </a-button>
+          <a-button v-if="auth.can('Sales_edit')" @click="bulkUpdateOpen = true">
+            <template #icon><EditOutlined /></template>
+            Update Selected ({{ crud.selectedIds.value.length }})
+          </a-button>
+        </template>
+      </template>
     </DataTable>
+
+    <!-- ============ Bulk update modal (Shipping Status / Zone / Courier / Tracking Ref) ============ -->
+    <a-modal
+      v-model:open="bulkUpdateOpen"
+      :title="`Update ${crud.selectedIds.value.length} selected sale(s)`"
+      :confirm-loading="bulkUpdating"
+      @ok="applyBulkUpdate"
+    >
+      <p style="margin-bottom: 16px; color: rgba(0, 0, 0, 0.45); font-size: 13px">
+        Only the fields you set below will be changed — leave a field empty to leave it as-is.
+      </p>
+      <a-form layout="vertical">
+        <a-form-item label="Shipping Status">
+          <a-select v-model:value="bulkForm.shipping_status" allow-clear :options="shippingStatusOptions" placeholder="Leave unchanged" />
+        </a-form-item>
+        <a-form-item label="Zone">
+          <CreatableSelect
+            v-model:value="bulkForm.zone_id"
+            v-model:options="zoneOptions"
+            create-endpoint="sale_zones"
+            response-key="zone"
+            placeholder="Leave unchanged"
+          />
+        </a-form-item>
+        <a-form-item label="Courier">
+          <CreatableSelect
+            v-model:value="bulkForm.courier_id"
+            v-model:options="courierOptions"
+            create-endpoint="sale_couriers"
+            response-key="courier"
+            placeholder="Leave unchanged"
+          />
+        </a-form-item>
+        <a-form-item label="Tracking Ref">
+          <a-input v-model:value="bulkForm.tracking_ref" placeholder="Leave unchanged" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
 
     <!-- ============ Payments list modal ============ -->
     <a-modal v-model:open="paymentsOpen" :title="`${$t('ShowPayment')} — ${activeSale?.Ref || ''}`" :footer="null" width="820px">
@@ -374,7 +429,7 @@
  *   (documents[] + sale_id); GET sales/documents/{id}/download (blob);
  *   DELETE sales/documents/{id}
  */
-import { ref, computed, createVNode } from 'vue';
+import { ref, computed, createVNode, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { message, Modal } from 'ant-design-vue';
 import { useI18n } from 'vue-i18n';
@@ -384,10 +439,12 @@ import {
   MessageOutlined, WalletOutlined, CarOutlined, RollbackOutlined,
   PaperClipOutlined, UploadOutlined, DownloadOutlined, WhatsAppOutlined,
   ExclamationCircleOutlined, ShoppingCartOutlined, DollarOutlined, CheckCircleOutlined,
+  TagOutlined,
 } from '@ant-design/icons-vue';
 import dayjs from 'dayjs';
 import PageHeader from '../../components/PageHeader.vue';
 import DataTable from '../../components/DataTable.vue';
+import CreatableSelect from '../../components/CreatableSelect.vue';
 import { useCrudTable } from '../../composables/useCrudTable';
 import { useFormat } from '../../composables/useFormat';
 import { useAuthStore } from '../../stores/auth';
@@ -455,6 +512,16 @@ const paymentMethodOptions = computed(() =>
 const accountOptions = computed(() =>
   (crud.payload.value?.accounts || []).map(a => ({ value: a.id, label: a.account_name }))
 );
+
+// Zone/Courier — mutable (not computed) so CreatableSelect's "+ add new" can
+// push into the list immediately via v-model:options.
+const zoneOptions = ref([]);
+const courierOptions = ref([]);
+watch(() => crud.payload.value, data => {
+  if (!data) return;
+  zoneOptions.value = (data.zones || []).map(z => ({ value: z.id, label: z.name }));
+  courierOptions.value = (data.couriers || []).map(c => ({ value: c.id, label: c.name }));
+}, { immediate: true });
 const statusOptions = computed(() => SALE_STATUSES.map(s => ({ value: s.value, label: t(s.key) })));
 const paymentStatusOptions = computed(() => PAYMENT_STATUSES.map(s => ({ value: s.value, label: t(s.key) })));
 const shippingStatusOptions = computed(() => SHIPPING_STATUSES.map(s => ({ value: s.value, label: t(s.key) })));
@@ -466,6 +533,7 @@ const columns = computed(() => [
   { title: 'Tracking Ref', dataIndex: 'tracking_ref', key: 'tracking_ref', exportValue: r => r.tracking_ref || '' },
   { title: 'Zone', dataIndex: 'zone_name', key: 'zone_name', exportValue: r => r.zone_name || '' },
   { title: 'Courier', dataIndex: 'courier_name', key: 'courier_name', exportValue: r => r.courier_name || '' },
+  { title: 'Qty', dataIndex: 'total_qty', key: 'total_qty', align: 'right', exportValue: r => r.total_qty ?? 0 },
   { title: t('Created_by'), dataIndex: 'created_by', key: 'created_by' },
   { title: t('Customer'), dataIndex: 'client_name', key: 'client_name', sorter: true },
   { title: t('warehouse'), dataIndex: 'warehouse_name', key: 'warehouse_name', sorter: true },
@@ -499,6 +567,60 @@ async function exportList(kind) {
     message.error(t('InvalidData'));
   } finally {
     exporting.value = null;
+  }
+}
+
+// ---------------- bulk actions (selected rows) ----------------
+
+const bulkPrinting = ref(null);
+
+async function bulkPrint(kind) {
+  const ids = crud.selectedIds.value;
+  if (!ids.length) return;
+  bulkPrinting.value = kind;
+  try {
+    if (kind === 'invoices') {
+      await http.download(`sale_pdf_bulk?ids=${ids.join(',')}`, 'sales-invoices.pdf');
+    } else {
+      await http.download(`sale_shipping_label_bulk?ids=${ids.join(',')}`, 'shipping-labels.pdf');
+    }
+  } catch (e) {
+    message.error(t('InvalidData'));
+  } finally {
+    bulkPrinting.value = null;
+  }
+}
+
+const bulkUpdateOpen = ref(false);
+const bulkUpdating = ref(false);
+const bulkForm = ref({ shipping_status: undefined, zone_id: undefined, courier_id: undefined, tracking_ref: '' });
+
+async function applyBulkUpdate() {
+  const ids = crud.selectedIds.value;
+  if (!ids.length) return;
+
+  const payload = { selectedIds: ids };
+  if (bulkForm.value.shipping_status) payload.shipping_status = bulkForm.value.shipping_status;
+  if (bulkForm.value.zone_id) payload.zone_id = bulkForm.value.zone_id;
+  if (bulkForm.value.courier_id) payload.courier_id = bulkForm.value.courier_id;
+  if (bulkForm.value.tracking_ref) payload.tracking_ref = bulkForm.value.tracking_ref;
+
+  if (Object.keys(payload).length <= 1) {
+    message.warning('Set at least one field to update.');
+    return;
+  }
+
+  bulkUpdating.value = true;
+  try {
+    await http.post('sales_bulk_update', payload);
+    message.success(`Updated ${ids.length} sale(s).`);
+    bulkUpdateOpen.value = false;
+    bulkForm.value = { shipping_status: undefined, zone_id: undefined, courier_id: undefined, tracking_ref: '' };
+    await crud.fetchRows();
+  } catch (e) {
+    message.error(e?.data?.message || t('InvalidData'));
+  } finally {
+    bulkUpdating.value = false;
   }
 }
 

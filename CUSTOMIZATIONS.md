@@ -180,6 +180,67 @@ prices-free list for whoever physically packs the order.
 
 ---
 
+## 6. Sales list — bulk actions + Qty column
+
+**Why:** With many sales selected via the existing bulk-delete checkboxes,
+the business wanted to bulk-print invoices/labels and bulk-set shipping
+status/zone/courier instead of doing it one sale at a time. Also wanted a
+per-row total quantity column.
+
+**Backend** (`app/Http/Controllers/SalesController.php`):
+- `index()` — added `->withSum('details', 'quantity')` to the existing
+  query and exposed it as `total_qty` per row (a single extra `SUM`
+  subquery, no N+1).
+- `renderSaleInvoiceHtml($id)` — new **private** helper. It is the exact
+  data-building + Arabic-glyph-fix logic from `Sale_PDF`, extracted so it
+  can be called once per sale in a loop. **`Sale_PDF` and `Sale_PDF_Inline`
+  themselves were deliberately left untouched** (still have their own copy
+  of this logic) rather than refactored to call the new helper — those are
+  proven, high-traffic methods, and even a careful extract-method carries
+  some risk; duplicating ~110 lines once was judged the safer trade next to
+  touching them. If they're ever revisited, folding all three onto one
+  helper would remove the duplication.
+- `Sale_PDF_Bulk(Request $request)` — `GET sale_pdf_bulk?ids=1,2,3`. Loops
+  `renderSaleInvoiceHtml()` per id, joins the HTML with a
+  `page-break-after` div between each, renders ONE PDF containing every
+  selected invoice back-to-back.
+- `Sale_Shipping_Label_Bulk(Request $request)` — `GET
+  sale_shipping_label_bulk?ids=1,2,3`. Same idea for the label template.
+- `bulkUpdate(Request $request)` — `POST sales_bulk_update` with
+  `{selectedIds, shipping_status?, zone_id?, courier_id?, tracking_ref?}`.
+  Only the keys actually present in the request are written, so e.g.
+  sending just `zone_id` never touches shipping_status on those rows.
+- **Important gotcha found and fixed while building this**:
+  `resources/views/pdf/sale_pdf.blade.php` declares a plain PHP function
+  (`formatPrice`) inline in an `@php` block. That's harmless when the view
+  renders once per request (every existing usage), but
+  `renderSaleInvoiceHtml()` calls `view('pdf.sale_pdf', ...)->render()`
+  once per selected sale **in the same request**, so the second render hit
+  "Cannot redeclare formatPrice()" — a hard fatal, caught by testing this
+  feature against a real database before shipping (see "Testing approach"
+  below), not something that would show up in casual manual testing with
+  only one invoice at a time. Fixed by wrapping the declaration in
+  `if (! function_exists('formatPrice')) { ... }`. Any other blade view
+  that declares a bare function and might ever be rendered more than once
+  per request needs the same guard.
+- Bulk PDF/label routes sit in the same unguarded "Print & PDF" route
+  block as `sale_pdf/{id}` etc. (see section 5 above for why); `bulkUpdate`
+  is a normal authenticated route next to `sales_delete_by_selection`.
+
+**Frontend** (`resources/src/pages/sales/Sales.vue`):
+- New "Qty" column (`total_qty`, plain `dataIndex`, so it's included in
+  export automatically like the others).
+- `zoneOptions`/`courierOptions` are `ref([])`, kept in sync from
+  `crud.payload` via a `watch` (not `computed` — `CreatableSelect`'s
+  "+ add new" needs a mutable list it can push into via
+  `v-model:options`, which a computed ref can't accept).
+- `<DataTable>`'s existing `#toolbar` slot (already used for the built-in
+  bulk-delete button) now also renders "Print Invoices", "Print Labels",
+  and "Update Selected (N)" whenever `crud.selectedIds.value.length > 0`.
+  "Update Selected" opens a modal (Shipping Status select, Zone/Courier
+  `CreatableSelect`, Tracking Ref input) that POSTs only the fields the
+  user actually touched to `sales_bulk_update`.
+
 ## Known follow-ups (not done, intentionally)
 
 - "Zone / Courier Report" menu label (`Zone_Courier_Report`) has no
