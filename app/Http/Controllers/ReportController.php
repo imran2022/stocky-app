@@ -35,9 +35,11 @@ use App\Models\Quotation;
 use App\Models\QuotationDetail;
 use App\Models\Role;
 use App\Models\Sale;
+use App\Models\SaleCourier;
 use App\Models\SaleDetail;
 use App\Models\SaleReturn;
 use App\Models\SaleReturnDetails;
+use App\Models\SaleZone;
 use App\Models\ServiceJobPayment;
 use App\Models\Setting;
 use App\Models\Transfer;
@@ -855,6 +857,8 @@ class ReportController extends BaseController
         3 => 'like',
         4 => '=',
         5 => '=',
+        6 => '=',
+        7 => '=',
     ];
     $columns = [
         0 => 'Ref',
@@ -863,6 +867,8 @@ class ReportController extends BaseController
         3 => 'payment_statut',
         4 => 'warehouse_id',
         5 => 'warehouse_id',
+        6 => 'zone_id',
+        7 => 'courier_id',
     ];
 
     $data = [];
@@ -887,7 +893,7 @@ class ReportController extends BaseController
     }
 
     $Sales = Sale::select('sales.*')
-        ->with('facture.payment_method', 'client', 'warehouse', 'user')
+        ->with('facture.payment_method', 'client', 'warehouse', 'user', 'zone', 'courier')
         ->join('clients', 'sales.client_id', '=', 'clients.id')
         ->whereNull('sales.deleted_at')
         // ✅ warehouse restriction
@@ -991,6 +997,11 @@ class ReportController extends BaseController
         $item['date'] = $Sale['date'];
         $item['time'] = $Sale['time'] ?? null;
         $item['Ref'] = $Sale['Ref'];
+        $item['tracking_ref'] = $Sale['tracking_ref'];
+        $item['zone_id'] = $Sale['zone_id'];
+        $item['zone_name'] = optional($Sale['zone'])->name;
+        $item['courier_id'] = $Sale['courier_id'];
+        $item['courier_name'] = optional($Sale['courier'])->name;
         $item['statut'] = $Sale['statut'];
         $item['discount'] = $Sale['discount'];
         $item['shipping'] = $Sale['shipping'];
@@ -1037,8 +1048,84 @@ class ReportController extends BaseController
         'sellers' => $sellers,
         'customers' => $customers,
         'warehouses' => $warehouses,
+        'zones' => SaleZone::whereNull('deleted_at')->orderBy('name')->get(['id', 'name']),
+        'couriers' => SaleCourier::whereNull('deleted_at')->orderBy('name')->get(['id', 'name']),
     ]);
 }
+
+    /**
+     * Zone / Courier Report: sales totals grouped by delivery Zone and,
+     * separately, by Courier — for a dropshipping/courier-heavy business
+     * to see which zones/couriers carry the most volume and due balance.
+     * Same date-range + warehouse filters as the Sales Report; permission
+     * reuses Reports_sales since this is a variant of it.
+     */
+    public function zoneWiseReport(Request $request)
+    {
+        $this->authorizeForUser($request->user('api'), 'Reports_sales', Sale::class);
+
+        $helpers = new helpers;
+        $user = Auth::user();
+        $is_all_warehouses = $user->is_all_warehouses;
+        $allowedWarehouseIds = [];
+        if (! $is_all_warehouses) {
+            $allowedWarehouseIds = UserWarehouse::where('user_id', $user->id)->pluck('warehouse_id')->toArray();
+        }
+
+        $base = Sale::whereNull('deleted_at')
+            ->when(! $is_all_warehouses, function ($q) use ($allowedWarehouseIds) {
+                $q->whereIn('warehouse_id', $allowedWarehouseIds);
+            })
+            ->when($request->filled('warehouse_id'), function ($q) use ($request) {
+                $q->where('warehouse_id', $request->warehouse_id);
+            });
+        $base = $helpers->Show_Records($base);
+
+        if ($request->filled('from')) {
+            $base->where('date', '>=', $request->from);
+        }
+        if ($request->filled('to')) {
+            $base->where('date', '<=', $request->to);
+        }
+
+        $zoneRows = (clone $base)
+            ->leftJoin('sale_zones', 'sales.zone_id', '=', 'sale_zones.id')
+            ->selectRaw("COALESCE(sale_zones.id, 0) as zone_id, COALESCE(sale_zones.name, 'Unassigned') as zone_name, COUNT(*) as orders, ROUND(SUM(sales.GrandTotal), 2) as total, ROUND(SUM(sales.paid_amount), 2) as paid")
+            ->groupBy('sale_zones.id', 'sale_zones.name')
+            ->orderByDesc('total')
+            ->get()
+            ->map(function ($r) {
+                $r->due = round($r->total - $r->paid, 2);
+
+                return $r;
+            });
+
+        $courierRows = (clone $base)
+            ->leftJoin('sale_couriers', 'sales.courier_id', '=', 'sale_couriers.id')
+            ->selectRaw("COALESCE(sale_couriers.id, 0) as courier_id, COALESCE(sale_couriers.name, 'Unassigned') as courier_name, COUNT(*) as orders, ROUND(SUM(sales.GrandTotal), 2) as total, ROUND(SUM(sales.paid_amount), 2) as paid")
+            ->groupBy('sale_couriers.id', 'sale_couriers.name')
+            ->orderByDesc('total')
+            ->get()
+            ->map(function ($r) {
+                $r->due = round($r->total - $r->paid, 2);
+
+                return $r;
+            });
+
+        $user_auth = auth()->user();
+        if ($user_auth->is_all_warehouses) {
+            $warehouses = Warehouse::whereNull('deleted_at')->get(['id', 'name']);
+        } else {
+            $warehouses_id = UserWarehouse::where('user_id', $user_auth->id)->pluck('warehouse_id')->toArray();
+            $warehouses = Warehouse::whereNull('deleted_at')->whereIn('id', $warehouses_id)->get(['id', 'name']);
+        }
+
+        return response()->json([
+            'zones' => $zoneRows,
+            'couriers' => $courierRows,
+            'warehouses' => $warehouses,
+        ]);
+    }
 
 
     /**

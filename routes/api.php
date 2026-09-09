@@ -298,6 +298,7 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     Route::get('report/provider_payments', 'ReportController@Payments_Provider');
     Route::get('report/provider_returns', 'ReportController@Returns_Provider');
     Route::get('report/sales', 'ReportController@Report_Sales');
+    Route::get('report/zone_wise', 'ReportController@zoneWiseReport');
     Route::get('report/purchases', 'ReportController@Report_Purchases');
     Route::get('report/get_last_sales', 'ReportController@Get_last_Sales');
     Route::get('report/stock_alert', 'ReportController@Products_Alert');
@@ -1157,6 +1158,10 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     // ------------------------------------------------------------------\\
 
     Route::resource('sales', 'SalesController');
+    // Custom addition: Tracking Ref / Zone / Courier lookups + bulk import
+    Route::get('sale_meta', 'SaleMetaController@index');
+    Route::post('sale_zones', 'SaleMetaController@storeZone');
+    Route::post('sale_couriers', 'SaleMetaController@storeCourier');
     Route::get('get_import_sales', 'SalesController@get_import_sales');
     Route::post('store_import_sales', 'SalesController@store_import_sales');
     Route::post('preview_import_sales', 'SalesController@preview_import_sales');
@@ -1660,6 +1665,8 @@ Route::get('pos/customer-display/last-cart', [CustomerDisplayController::class, 
 // ------------------------------------------------------------------\\
 
 Route::get('sale_pdf/{id}', 'SalesController@Sale_PDF');
+Route::get('sale_shipping_label/{id}', 'SalesController@Sale_Shipping_Label');
+Route::get('sale_packing_list/{id}', 'SalesController@Sale_Packing_List');
 Route::get('sale_print_html/{id}', 'SalesController@Sale_PDF_Inline');
 Route::get('quote_pdf/{id}', 'QuotationsController@Quotation_pdf');
 Route::get('quote_print_html/{id}', 'QuotationsController@Quotation_PDF_Inline');

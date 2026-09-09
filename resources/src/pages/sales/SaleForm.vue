@@ -107,6 +107,15 @@
               </div>
             </template>
             <template v-else-if="column.key === 'net_price'">{{ money(record.Net_price) }}</template>
+            <template v-else-if="column.key === 'box_qty'">
+              <a-input-number
+                :value="record.box_qty"
+                :min="0"
+                placeholder="Box"
+                style="width: 80px"
+                @update:value="v => (record.box_qty = v)"
+              />
+            </template>
             <template v-else-if="column.key === 'stock'">
               {{ record.stock }} {{ record.unitSale }}
             </template>
@@ -195,6 +204,35 @@
                   <a-select
                     v-model:value="sale.sales_agent_id" allow-clear show-search
                     option-filter-prop="label" :options="agentOptions"
+                  />
+                </a-form-item>
+              </a-col>
+              <a-col :xs="24" :md="8">
+                <a-form-item label="Tracking Ref">
+                  <a-input v-model:value="sale.tracking_ref" placeholder="Tracking Ref" />
+                </a-form-item>
+              </a-col>
+              <a-col :xs="24" :md="8">
+                <a-form-item label="Zone">
+                  <CreatableSelect
+                    v-model:value="sale.zone_id"
+                    v-model:options="zoneOptions"
+                    create-endpoint="sale_zones"
+                    response-key="zone"
+                    placeholder="Choose Zone"
+                    add-placeholder="Type a new zone and press Enter"
+                  />
+                </a-form-item>
+              </a-col>
+              <a-col :xs="24" :md="8">
+                <a-form-item label="Courier">
+                  <CreatableSelect
+                    v-model:value="sale.courier_id"
+                    v-model:options="courierOptions"
+                    create-endpoint="sale_couriers"
+                    response-key="courier"
+                    placeholder="Choose Courier"
+                    add-placeholder="Type a new courier and press Enter"
                   />
                 </a-form-item>
               </a-col>
@@ -445,6 +483,7 @@ import { EditOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons-vu
 import dayjs from 'dayjs';
 import PageHeader from '../../components/PageHeader.vue';
 import QuickAddParty from '../../components/QuickAddParty.vue';
+import CreatableSelect from '../../components/CreatableSelect.vue';
 import SerialPicker from '../../components/SerialPicker.vue';
 import BatchAllocator from '../../components/BatchAllocator.vue';
 import ProductScanModal from '../../components/ProductScanModal.vue';
@@ -520,7 +559,14 @@ const sale = ref({
   discount: 0,
   discount_Method: '2',
   shipping: 0,
+  tracking_ref: '',
+  zone_id: undefined,
+  courier_id: undefined,
 });
+
+// Zone / Courier — small user-managed lookup lists (see CreatableSelect).
+const zoneOptions = ref([]);
+const courierOptions = ref([]);
 
 // Preserved verbatim on edit — zeroing them would strip an existing
 // loyalty-points discount from the sale.
@@ -716,6 +762,7 @@ watch([totals, () => payment.value.status], () => {
 const lineColumns = computed(() => [
   { title: t('ProductName'), key: 'product' },
   { title: t('Net_Unit_Price'), key: 'net_price', align: 'right' },
+  { title: 'Box', key: 'box_qty', align: 'center' },
   { title: t('Stock'), key: 'stock', align: 'right' },
   { title: t('Quantity'), key: 'quantity', align: 'center' },
   { title: t('Discount'), key: 'discount', align: 'right' },
@@ -787,6 +834,7 @@ async function onProductPicked(idx) {
       name: d.name,
       stock: d.product_type !== 'is_service' ? d.qte_sale : '---',
       quantity: d.qte_sale !== undefined && d.qte_sale < 1 ? d.qte_sale : 1,
+      box_qty: null,
       Unit_price: d.Unit_price,
       Net_price: d.Net_price,
       discount: d.discount,
@@ -1161,6 +1209,7 @@ function detailsPayload() {
     code: l.code,
     name: l.name,
     quantity: l.quantity,
+    box_qty: l.box_qty ?? null,
     sale_unit_id: l.sale_unit_id,
     Unit_price: l.Unit_price,
     Net_price: l.Net_price,
@@ -1211,6 +1260,9 @@ async function submit() {
     details: detailsPayload(),
     discount_from_points: pointsState.value.discount_from_points,
     used_points: pointsState.value.used_points,
+    tracking_ref: sale.value.tracking_ref || '',
+    zone_id: sale.value.zone_id || null,
+    courier_id: sale.value.courier_id || null,
   };
 
   try {
@@ -1287,6 +1339,8 @@ onMounted(async () => {
       accounts.value = create.accounts || [];
       paymentMethods.value = create.payment_methods || [];
       point_to_amount_rate.value = Number(create.point_to_amount_rate) || 0;
+      zoneOptions.value = (create.zones || []).map(z => ({ value: z.id, label: z.name }));
+      courierOptions.value = (create.couriers || []).map(c => ({ value: c.id, label: c.name }));
 
       const q = conv.sale || {};
       sale.value = {
@@ -1301,6 +1355,9 @@ onMounted(async () => {
         discount: Number(q.discount) || 0,
         discount_Method: '2',
         shipping: Number(q.shipping) || 0,
+        tracking_ref: '',
+        zone_id: undefined,
+        courier_id: undefined,
       };
       lines.value = (conv.details || []).map(d => {
         const line = {
@@ -1330,6 +1387,8 @@ onMounted(async () => {
       clients.value = data.clients || [];
       warehouses.value = data.warehouses || [];
       agents.value = data.sales_agents || [];
+      zoneOptions.value = (data.zones || []).map(z => ({ value: z.id, label: z.name }));
+      courierOptions.value = (data.couriers || []).map(c => ({ value: c.id, label: c.name }));
       const s = data.sale || {};
       const dm = String(s.discount_Method ?? '2').toLowerCase().trim();
       sale.value = {
@@ -1343,6 +1402,9 @@ onMounted(async () => {
         discount: Number(s.discount) || 0,
         discount_Method: dm === '1' || dm === 'percent' || dm === 'percentage' ? '1' : '2',
         shipping: Number(s.shipping) || 0,
+        tracking_ref: s.tracking_ref || '',
+        zone_id: s.zone_id || undefined,
+        courier_id: s.courier_id || undefined,
       };
       pointsState.value = {
         discount_from_points: Number(s.discount_from_points) || 0,
@@ -1382,6 +1444,8 @@ onMounted(async () => {
       accounts.value = data.accounts || [];
       paymentMethods.value = data.payment_methods || [];
       point_to_amount_rate.value = Number(data.point_to_amount_rate) || 0;
+      zoneOptions.value = (data.zones || []).map(z => ({ value: z.id, label: z.name }));
+      courierOptions.value = (data.couriers || []).map(c => ({ value: c.id, label: c.name }));
       // Status defaults to pending (unpaid): no payment line until the user
       // switches to paid/partial, which prefills via onPaymentStatusChange.
     }

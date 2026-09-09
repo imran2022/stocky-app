@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 class SaleDetail extends Model
 {
     protected $fillable = [
-        'id', 'date', 'sale_id', 'sale_unit_id', 'quantity', 'product_id', 'total', 'product_variant_id',
+        'id', 'date', 'sale_id', 'sale_unit_id', 'quantity', 'box_qty', 'product_id', 'total', 'product_variant_id',
         'price', 'TaxNet', 'discount', 'discount_method', 'tax_method', 'price_type',
         'warranty_date', 'guarantee_date',
         'product_pack_id', 'pack_multiplier', 'pack_name',
@@ -18,6 +18,7 @@ class SaleDetail extends Model
         'id' => 'integer',
         'total' => 'double',
         'quantity' => 'double',
+        'box_qty' => 'double',
         'sale_id' => 'integer',
         'sale_unit_id' => 'integer',
         'product_id' => 'integer',

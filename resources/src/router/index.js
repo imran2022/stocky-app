@@ -68,6 +68,7 @@ const TopCustomersReport = lazy('TopCustomersReport', () => import('../pages/rep
 const ExpensesReport = lazy('ExpensesReport', () => import('../pages/reports/ExpensesReport.vue'));
 const DepositsReport = lazy('DepositsReport', () => import('../pages/reports/DepositsReport.vue'));
 const SalesReport = lazy('SalesReport', () => import('../pages/reports/SalesReport.vue'));
+const ZoneWiseReport = lazy('ZoneWiseReport', () => import('../pages/reports/ZoneWiseReport.vue'));
 const PurchasesReport = lazy('PurchasesReport', () => import('../pages/reports/PurchasesReport.vue'));
 const QuantityAlertsReport = lazy('QuantityAlertsReport', () => import('../pages/reports/QuantityAlertsReport.vue'));
 const StockReport = lazy('StockReport', () => import('../pages/reports/StockReport.vue'));
@@ -424,6 +425,7 @@ const routes = [
             { path: 'reports/expenses', name: 'expenses-report', component: ExpensesReport, meta: { title: 'Expenses Report', permission: 'expenses_report' } },
             { path: 'reports/deposits', name: 'deposits-report', component: DepositsReport, meta: { title: 'Deposits Report', permission: 'deposits_report' } },
             { path: 'reports/sales', name: 'sales-report', component: SalesReport, meta: { title: 'Sales Report', permission: 'Reports_sales' } },
+            { path: 'reports/zone-wise', name: 'zone-wise-report', component: ZoneWiseReport, meta: { title: 'Zone / Courier Report', permission: 'Reports_sales' } },
             { path: 'reports/purchases', name: 'purchases-report', component: PurchasesReport, meta: { title: 'Purchases Report', permission: 'Reports_purchase' } },
             { path: 'reports/quantity-alerts', name: 'quantity-alerts-report', component: QuantityAlertsReport, meta: { title: 'Quantity Alerts', permission: 'Reports_quantity_alerts' } },
             { path: 'reports/stock', name: 'stock-report', component: StockReport, meta: { title: 'Stock Report', permission: 'stock_report' } },

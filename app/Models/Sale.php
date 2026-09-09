@@ -12,6 +12,8 @@ class Sale extends Model
         'date', 'Ref', 'is_pos', 'client_id', 'GrandTotal', 'qte_retturn', 'TaxNet', 'tax_rate', 'notes',
         'total_retturn', 'warehouse_id', 'user_id', 'statut', 'discount', 'discount_Method', 'shipping', 'time', 'used_points', 'earned_points', 'discount_from_points',
         'paid_amount', 'payment_statut', 'created_at', 'updated_at', 'deleted_at', 'shipping_status', 'subscription_id', 'sales_agent_id',
+        // Courier / delivery tracking
+        'tracking_ref', 'zone_id', 'courier_id',
         // Idempotency key for POS sales; nullable for legacy rows and non-POS flows
         'sale_uuid',
         'woocommerce_order_id',
@@ -33,6 +35,8 @@ class Sale extends Model
         'warehouse_id' => 'integer',
         'sales_agent_id' => 'integer',
         'subscription_id' => 'integer',
+        'zone_id' => 'integer',
+        'courier_id' => 'integer',
         'discount' => 'double',
         'shipping' => 'double',
         'TaxNet' => 'double',
@@ -88,6 +92,16 @@ class Sale extends Model
     public function documents()
     {
         return $this->hasMany('App\Models\SaleDocument', 'sale_id');
+    }
+
+    public function zone()
+    {
+        return $this->belongsTo('App\Models\SaleZone', 'zone_id');
+    }
+
+    public function courier()
+    {
+        return $this->belongsTo('App\Models\SaleCourier', 'courier_id');
     }
 
     protected static function booted()

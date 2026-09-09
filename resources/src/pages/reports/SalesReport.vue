@@ -69,6 +69,12 @@
         v-model:value="warehouseId" style="width: 180px" allow-clear show-search option-filter-prop="label"
         :placeholder="$t('warehouse')" :options="opts('warehouses')" @change="crud.reload()" />
       <a-select
+        v-model:value="zoneId" style="width: 160px" allow-clear show-search option-filter-prop="label"
+        placeholder="Zone" :options="opts('zones')" @change="crud.reload()" />
+      <a-select
+        v-model:value="courierId" style="width: 160px" allow-clear show-search option-filter-prop="label"
+        placeholder="Courier" :options="opts('couriers')" @change="crud.reload()" />
+      <a-select
         v-model:value="clientId" style="width: 180px" allow-clear show-search option-filter-prop="label"
         :placeholder="$t('Customer')" :options="opts('customers')" @change="crud.reload()" />
       <a-select
@@ -117,6 +123,8 @@ const ui = useUiStore();
 const MONEY_KEYS = ['GrandTotal', 'paid_amount', 'due'];
 
 const warehouseId = ref(undefined);
+const zoneId = ref(undefined);
+const courierId = ref(undefined);
 const clientId = ref(undefined);
 const sellerId = ref(undefined);
 const statut = ref(undefined);
@@ -129,6 +137,8 @@ const range = ref(null);
 const filterParams = () => ({
   Ref: refFilter.value || '',
   warehouse_id: warehouseId.value || '',
+  zone_id: zoneId.value || '',
+  courier_id: courierId.value || '',
   client_id: clientId.value || '',
   user_id: sellerId.value || '',
   statut: statut.value || '',
@@ -214,6 +224,9 @@ const paymentOptions = computed(() => [
 const columns = computed(() => [
   { title: t('date'), key: 'date', dataIndex: 'date', sorter: true, exportValue: r => date(r.date) },
   { title: t('Reference'), dataIndex: 'Ref', key: 'Ref', sorter: true },
+  { title: 'Tracking Ref', dataIndex: 'tracking_ref', key: 'tracking_ref', exportValue: r => r.tracking_ref || '' },
+  { title: 'Zone', dataIndex: 'zone_name', key: 'zone_name', exportValue: r => r.zone_name || '' },
+  { title: 'Courier', dataIndex: 'courier_name', key: 'courier_name', exportValue: r => r.courier_name || '' },
   { title: t('Customer'), dataIndex: 'client_name', key: 'client_name' },
   { title: t('warehouse'), dataIndex: 'warehouse_name', key: 'warehouse_name' },
   { title: t('Status'), key: 'statut', dataIndex: 'statut', exportValue: r => r.statut },

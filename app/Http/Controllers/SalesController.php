@@ -20,8 +20,10 @@ use App\Models\Quotation;
 use App\Models\Role;
 use App\Models\Sale;
 use App\Models\SalesAgent;
+use App\Models\SaleCourier;
 use App\Models\SaleDetail;
 use App\Models\SaleReturn;
+use App\Models\SaleZone;
 use App\Models\Setting;
 use App\Models\Shipment;
 use App\Models\sms_gateway;
@@ -99,7 +101,7 @@ class SalesController extends BaseController
         $data = [];
 
         // Check If User Has Permission View  All Records
-        $Sales = Sale::with('facture.payment_method', 'client', 'warehouse', 'user')
+        $Sales = Sale::with('facture.payment_method', 'client', 'warehouse', 'user', 'zone', 'courier')
             ->where('deleted_at', '=', null)
             ->where(function ($query) use ($view_records) {
                 if (! $view_records) {
@@ -159,6 +161,11 @@ class SalesController extends BaseController
             $item['id'] = $Sale['id'];
             $item['date'] = $Sale['date'].' '.$Sale['time'];
             $item['Ref'] = $Sale['Ref'];
+            $item['tracking_ref'] = $Sale['tracking_ref'];
+            $item['zone_id'] = $Sale['zone_id'];
+            $item['zone_name'] = optional($Sale['zone'])->name;
+            $item['courier_id'] = $Sale['courier_id'];
+            $item['courier_name'] = optional($Sale['courier'])->name;
             $item['created_by'] = $Sale['user']->username;
             $item['statut'] = $Sale['statut'];
             $item['shipping_status'] = $Sale['shipping_status'];
@@ -223,6 +230,8 @@ class SalesController extends BaseController
             'warehouses' => $warehouses,
             'accounts' => $accounts,
             'payment_methods' => $payment_methods,
+            'zones' => SaleZone::whereNull('deleted_at')->orderBy('name')->get(['id', 'name']),
+            'couriers' => SaleCourier::whereNull('deleted_at')->orderBy('name')->get(['id', 'name']),
         ]);
     }
 
@@ -265,6 +274,9 @@ class SalesController extends BaseController
             $order->notes = $request->notes;
             $order->user_id = Auth::user()->id;
             $order->sales_agent_id = $request->sales_agent_id ?? null;
+            $order->tracking_ref = $request->filled('tracking_ref') ? $request->tracking_ref : null;
+            $order->zone_id = $request->filled('zone_id') ? $request->zone_id : null;
+            $order->courier_id = $request->filled('courier_id') ? $request->courier_id : null;
             $order->save();
 
             // Sale created from a quotation: remember the link so the
@@ -303,6 +315,7 @@ class SalesController extends BaseController
                     'sale_id' => $order->id,
                     'sale_unit_id' => $value['sale_unit_id'] ? $value['sale_unit_id'] : null,
                     'quantity' => $value['quantity'],
+                    'box_qty' => isset($value['box_qty']) && $value['box_qty'] !== '' && $value['box_qty'] !== null ? $value['box_qty'] : null,
                     'price' => $value['Unit_price'],
                     'TaxNet' => $value['tax_percent'],
                     'tax_method' => $value['tax_method'],
@@ -786,6 +799,7 @@ class SalesController extends BaseController
                         $orderDetails['discount'] = $prod_detail['discount'];
                         $orderDetails['discount_method'] = $prod_detail['discount_Method'];
                         $orderDetails['quantity'] = $prod_detail['quantity'];
+                        $orderDetails['box_qty'] = isset($prod_detail['box_qty']) && $prod_detail['box_qty'] !== '' && $prod_detail['box_qty'] !== null ? $prod_detail['box_qty'] : null;
                         $orderDetails['product_id'] = $prod_detail['product_id'];
                         $orderDetails['product_variant_id'] = $prod_detail['product_variant_id'];
                         $orderDetails['total'] = $prod_detail['subtotal'];
@@ -968,6 +982,9 @@ class SalesController extends BaseController
                     'used_points' => $new_used,
                     'earned_points' => $new_earned,
                     'discount_from_points' => $request['discount_from_points'],
+                    'tracking_ref' => $request->filled('tracking_ref') ? $request->tracking_ref : null,
+                    'zone_id' => $request->filled('zone_id') ? $request->zone_id : null,
+                    'courier_id' => $request->filled('courier_id') ? $request->courier_id : null,
                 ]);
             }
 
@@ -1423,6 +1440,9 @@ class SalesController extends BaseController
         // so the payload has to identify the record it describes.
         $sale_details['id'] = $sale_data->id;
         $sale_details['Ref'] = $sale_data->Ref;
+        $sale_details['tracking_ref'] = $sale_data->tracking_ref;
+        $sale_details['zone_name'] = optional($sale_data->zone)->name;
+        $sale_details['courier_name'] = optional($sale_data->courier)->name;
         $sale_details['date'] = $sale_data->date.' '.$sale_data->time;
         $sale_details['note'] = $sale_data->notes;
         $sale_details['statut'] = $sale_data->statut;
@@ -1490,6 +1510,7 @@ class SalesController extends BaseController
             }
 
             $data['quantity'] = $detail->quantity;
+            $data['box_qty'] = $detail->box_qty;
             $data['total'] = $detail->total;
             $data['price'] = $detail->price;
             $data['unit_sale'] = $unit ? $unit->ShortName : '';
@@ -2539,6 +2560,7 @@ class SalesController extends BaseController
 
             $data['detail_id'] = $detail_id += 1;
             $data['quantity'] = number_format($detail->quantity, helpers::price_decimals(), '.', '');
+            $data['box_qty'] = $detail->box_qty !== null ? rtrim(rtrim(number_format($detail->box_qty, 2, '.', ''), '0'), '.') : null;
             $data['total'] = number_format($detail->total, helpers::price_decimals(), '.', '');
             $data['unitSale'] = $unit ? $unit->ShortName : '';
             $data['price'] = number_format($detail->price, helpers::price_decimals(), '.', '');
@@ -2596,6 +2618,95 @@ class SalesController extends BaseController
 
         return $pdf->download('sale.pdf');
 
+    }
+
+    /**
+     * Shipping Label — sender/receiver address block + COD amount when the
+     * sale isn't fully paid. Deliberately minimal: no line items, meant to
+     * be printed on a small label sheet and stuck on the parcel.
+     */
+    public function Sale_Shipping_Label(Request $request, $id)
+    {
+        $sale_data = Sale::where('deleted_at', '=', null)->findOrFail($id);
+        $helpers = new helpers;
+
+        $sale = [
+            'Ref' => $sale_data->Ref,
+            'date' => $sale_data->date.' '.$sale_data->time,
+            'client_name' => $sale_data->client->name,
+            'client_phone' => $sale_data->client->phone,
+            'client_adr' => $sale_data->client->adresse,
+            'GrandTotal' => number_format($sale_data->GrandTotal, helpers::price_decimals(), '.', ''),
+            'payment_status' => $sale_data->payment_statut,
+        ];
+
+        $company = Setting::where('deleted_at', '=', null)->first();
+        $symbol = $helpers->Get_Currency_Code();
+
+        $html = view('pdf.shipping_label', [
+            'sale' => $sale,
+            'company' => $company,
+            'symbol' => $symbol,
+        ])->render();
+
+        return PDF::loadHTML($html, 'UTF-8')->setPaper([0, 0, 340, 480])->download("shipping-label-{$sale_data->Ref}.pdf");
+    }
+
+    /**
+     * Packing List — product name/code + quantity + our custom Box column,
+     * for the warehouse staff to pack the order against. No prices.
+     */
+    public function Sale_Packing_List(Request $request, $id)
+    {
+        $sale_data = Sale::with('details.product')->where('deleted_at', '=', null)->findOrFail($id);
+
+        $sale = [
+            'Ref' => $sale_data->Ref,
+            'date' => $sale_data->date.' '.$sale_data->time,
+            'client_name' => $sale_data->client->name,
+        ];
+
+        $details = [];
+        $totalQty = 0;
+        $totalBoxes = null;
+        foreach ($sale_data->details as $detail) {
+            if ($detail->product_variant_id) {
+                $variant = ProductVariant::where('product_id', $detail->product_id)->where('id', $detail->product_variant_id)->first();
+                $code = $variant->code ?? '';
+                $name = $variant ? '['.$variant->name.']'.$detail->product->name : $detail->product->name;
+            } else {
+                $code = $detail->product->code;
+                $name = $detail->product->name;
+            }
+
+            $unit = $detail->sale_unit_id ? Unit::find($detail->sale_unit_id) : null;
+
+            $details[] = [
+                'name' => $name,
+                'code' => $code,
+                'quantity' => rtrim(rtrim(number_format($detail->quantity, 2, '.', ''), '0'), '.'),
+                'unitSale' => $unit ? $unit->ShortName : '',
+                'box_qty' => $detail->box_qty !== null ? rtrim(rtrim(number_format($detail->box_qty, 2, '.', ''), '0'), '.') : null,
+            ];
+
+            $totalQty += (float) $detail->quantity;
+            if ($detail->box_qty !== null) {
+                $totalBoxes = ($totalBoxes ?? 0) + (float) $detail->box_qty;
+            }
+        }
+        $totalQty = rtrim(rtrim(number_format($totalQty, 2, '.', ''), '0'), '.');
+        if ($totalBoxes !== null) {
+            $totalBoxes = rtrim(rtrim(number_format($totalBoxes, 2, '.', ''), '0'), '.');
+        }
+
+        $html = view('pdf.packing_list', [
+            'sale' => $sale,
+            'details' => $details,
+            'totalQty' => $totalQty,
+            'totalBoxes' => $totalBoxes,
+        ])->render();
+
+        return PDF::loadHTML($html, 'UTF-8')->download("packing-list-{$sale_data->Ref}.pdf");
     }
 
     /**
@@ -2673,6 +2784,7 @@ class SalesController extends BaseController
 
             $data['detail_id'] = $detail_id += 1;
             $data['quantity'] = number_format($detail->quantity, helpers::price_decimals(), '.', '');
+            $data['box_qty'] = $detail->box_qty !== null ? rtrim(rtrim(number_format($detail->box_qty, 2, '.', ''), '0'), '.') : null;
             $data['total'] = number_format($detail->total, helpers::price_decimals(), '.', '');
             $data['unitSale'] = $unit ? $unit->ShortName : '';
             $data['price'] = number_format($detail->price, helpers::price_decimals(), '.', '');
@@ -2778,6 +2890,8 @@ class SalesController extends BaseController
             'accounts' => $accounts,
             'payment_methods' => $payment_methods,
             'point_to_amount_rate' => $settings->point_to_amount_rate,
+            'zones' => SaleZone::whereNull('deleted_at')->orderBy('name')->get(['id', 'name']),
+            'couriers' => SaleCourier::whereNull('deleted_at')->orderBy('name')->get(['id', 'name']),
         ]);
 
     }
@@ -2862,6 +2976,9 @@ class SalesController extends BaseController
             $sale['shipping'] = $Sale_data->shipping;
             $sale['statut'] = $Sale_data->statut;
             $sale['notes'] = $Sale_data->notes;
+            $sale['tracking_ref'] = $Sale_data->tracking_ref;
+            $sale['zone_id'] = $Sale_data->zone_id;
+            $sale['courier_id'] = $Sale_data->courier_id;
 
             // Preload existing batch pivots for this sale's details so the edit UI can
             // render the same selector the create-sale page uses (optional override).
@@ -2966,6 +3083,7 @@ class SalesController extends BaseController
                 $data['batches'] = $saleBatchesByDetail[(int) $detail->id] ?? [];
                 $data['total'] = $detail->total;
                 $data['quantity'] = $detail->quantity;
+                $data['box_qty'] = $detail->box_qty;
                 $data['qte_copy'] = $detail->quantity;
                 $data['etat'] = 'current';
                 $data['unitSale'] = $unit ? $unit->ShortName : '';
@@ -3028,6 +3146,8 @@ class SalesController extends BaseController
                 'sales_agents' => $sales_agents,
                 'discount_from_points' => $Sale_data->discount_from_points,
                 'point_to_amount_rate' => $settings->point_to_amount_rate,
+                'zones' => SaleZone::whereNull('deleted_at')->orderBy('name')->get(['id', 'name']),
+                'couriers' => SaleCourier::whereNull('deleted_at')->orderBy('name')->get(['id', 'name']),
             ]);
         }
 

@@ -26,6 +26,14 @@
             <template #icon><FilePdfOutlined /></template>
             PDF
           </a-button>
+          <a-button :loading="downloadingLabel" @click="downloadShippingLabel">
+            <template #icon><TagOutlined /></template>
+            Shipping Label
+          </a-button>
+          <a-button :loading="downloadingPackingList" @click="downloadPackingList">
+            <template #icon><UnorderedListOutlined /></template>
+            Packing List
+          </a-button>
           <a-button @click="printInvoice">
             <template #icon><PrinterOutlined /></template>
             {{ $t('print') }}
@@ -61,25 +69,29 @@
         </div>
         <div class="inv-ref">
           <div class="inv-ref-badge">{{ sale.Ref }}</div>
-          <table class="inv-meta">
-            <tr><td>{{ $t('date') }}</td><td>{{ dateTime(sale.date) }}</td></tr>
-            <tr>
-              <td>{{ $t('Status') }}</td>
-              <td>
+          <div class="inv-meta">
+            <div class="inv-meta-row"><span class="im-label">{{ $t('date') }}</span><span class="im-value">{{ dateTime(sale.date) }}</span></div>
+            <div class="inv-meta-row">
+              <span class="im-label">{{ $t('Status') }}</span>
+              <span class="im-value">
                 <a-tag :color="docStatusColor(sale.statut)">
                   {{ statusKey(SALE_STATUSES, sale.statut) ? $t(statusKey(SALE_STATUSES, sale.statut)) : sale.statut }}
                 </a-tag>
-              </td>
-            </tr>
-            <tr>
-              <td>{{ $t('PaymentStatus') }}</td>
-              <td>
+              </span>
+            </div>
+            <div class="inv-meta-row">
+              <span class="im-label">{{ $t('PaymentStatus') }}</span>
+              <span class="im-value">
                 <a-tag :color="payStatusColor(sale.payment_status)">
                   {{ statusKey(PAYMENT_STATUSES, sale.payment_status) ? $t(statusKey(PAYMENT_STATUSES, sale.payment_status)) : sale.payment_status }}
                 </a-tag>
-              </td>
-            </tr>
-          </table>
+              </span>
+            </div>
+            <div v-if="sale.warehouse" class="inv-meta-row"><span class="im-label">{{ $t('warehouse') }}</span><span class="im-value">{{ sale.warehouse }}</span></div>
+            <div v-if="sale.tracking_ref" class="inv-meta-row"><span class="im-label">Tracking Ref</span><span class="im-value">{{ sale.tracking_ref }}</span></div>
+            <div v-if="sale.zone_name" class="inv-meta-row"><span class="im-label">Zone</span><span class="im-value">{{ sale.zone_name }}</span></div>
+            <div v-if="sale.courier_name" class="inv-meta-row"><span class="im-label">Courier</span><span class="im-value">{{ sale.courier_name }}</span></div>
+          </div>
         </div>
       </div>
 
@@ -125,6 +137,7 @@
             </div>
           </template>
           <template v-else-if="column.key === 'price'">{{ money(record.price) }}</template>
+          <template v-else-if="column.key === 'box_qty'">{{ record.box_qty !== null && record.box_qty !== undefined ? num(record.box_qty) : '—' }}</template>
           <template v-else-if="column.key === 'quantity'">
             {{ num(record.quantity) }} {{ record.pack_name || record.unit_sale }}
             <div v-if="record.pack_name && Number(record.pack_multiplier) > 1" class="muted">
@@ -192,6 +205,7 @@ import { useI18n } from 'vue-i18n';
 import {
   ArrowLeftOutlined, PrinterOutlined, EditOutlined, DeleteOutlined,
   ExclamationCircleOutlined, MailOutlined, MessageOutlined, FilePdfOutlined,
+  TagOutlined, UnorderedListOutlined,
 } from '@ant-design/icons-vue';
 import PageHeader from '../../components/PageHeader.vue';
 import { useFormat } from '../../composables/useFormat';
@@ -213,6 +227,8 @@ const company = ref({});
 const sendingEmail = ref(false);
 const sendingSms = ref(false);
 const downloadingPdf = ref(false);
+const downloadingLabel = ref(false);
+const downloadingPackingList = ref(false);
 
 const num = v => {
   const n = Number(v);
@@ -234,6 +250,7 @@ const discountAmount = computed(() => {
 const itemColumns = computed(() => [
   { title: t('ProductName'), key: 'product' },
   { title: t('Price'), key: 'price', align: 'right' },
+  { title: 'Box', key: 'box_qty', align: 'right' },
   { title: t('Quantity'), key: 'quantity', align: 'right' },
   { title: t('Discount'), key: 'discount', align: 'right' },
   { title: t('Tax'), key: 'tax', align: 'right' },
@@ -277,6 +294,28 @@ async function downloadPdf() {
     message.error(t('InvalidData'));
   } finally {
     downloadingPdf.value = false;
+  }
+}
+
+async function downloadShippingLabel() {
+  downloadingLabel.value = true;
+  try {
+    await http.download(`sale_shipping_label/${sale.value.id}`, `Shipping_Label_${sale.value.Ref}.pdf`);
+  } catch (e) {
+    message.error(t('InvalidData'));
+  } finally {
+    downloadingLabel.value = false;
+  }
+}
+
+async function downloadPackingList() {
+  downloadingPackingList.value = true;
+  try {
+    await http.download(`sale_packing_list/${sale.value.id}`, `Packing_List_${sale.value.Ref}.pdf`);
+  } catch (e) {
+    message.error(t('InvalidData'));
+  } finally {
+    downloadingPackingList.value = false;
   }
 }
 
@@ -339,6 +378,32 @@ onMounted(async () => {
 }
 .inv-meta td:first-child {
   font-weight: 500;
+}
+.inv-meta {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  column-gap: 28px;
+  row-gap: 2px;
+}
+.inv-meta-row {
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.65);
+  align-items: center;
+  white-space: nowrap;
+}
+.inv-meta-row .im-label {
+  font-weight: 500;
+  min-width: 100px;
+}
+@media (max-width: 640px) {
+  .inv-meta {
+    grid-template-columns: 1fr;
+  }
+  .inv-meta-row {
+    white-space: normal;
+  }
 }
 .inv-box {
   border: 1px solid rgba(5, 5, 5, 0.08);
