@@ -45,10 +45,11 @@
     <!-- Edit shipment -->
     <a-modal
       v-model:open="modalOpen"
-      :title="$t('Edit')"
+      title="Edit Shipment"
       :confirm-loading="submitting"
       :ok-text="$t('submit')"
       :cancel-text="$t('Delete_cancelButtonText')"
+      width="640px"
       @ok="submit"
     >
       <a-form ref="formRef" :model="form" :rules="rules" layout="vertical" style="margin-top: 8px">
@@ -65,14 +66,49 @@
             ]"
           />
         </a-form-item>
-        <a-form-item :label="$t('delivered_to')">
-          <a-input v-model:value="form.delivered_to" :placeholder="$t('delivered_to')" />
-        </a-form-item>
-        <a-form-item :label="$t('Adress')">
-          <a-textarea v-model:value="form.shipping_address" :rows="4" :placeholder="$t('Enter_Address')" />
+        <a-row :gutter="12">
+          <a-col :xs="24" :md="12">
+            <a-form-item :label="$t('delivered_to')">
+              <a-input v-model:value="form.delivered_to" :placeholder="$t('delivered_to')" />
+            </a-form-item>
+          </a-col>
+          <a-col :xs="24" :md="12">
+            <a-form-item label="Phone Number">
+              <a-input v-model:value="form.phone_number" placeholder="Phone Number" />
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-row :gutter="12">
+          <a-col :xs="24" :md="12">
+            <a-form-item label="Courier Partner">
+              <CreatableSelect
+                v-model:value="form.courier_id"
+                v-model:options="courierOptions"
+                create-endpoint="sale_couriers"
+                response-key="courier"
+                placeholder="Choose Courier"
+              />
+            </a-form-item>
+          </a-col>
+          <a-col :xs="24" :md="12">
+            <a-form-item label="Tracking ID">
+              <a-input v-model:value="form.tracking_ref" placeholder="Tracking ID" />
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-form-item>
+          <template #label>
+            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%">
+              <span>{{ $t('Adress') }} *</span>
+              <a-checkbox v-model:checked="sameAsInvoiceAddress" :disabled="!invoiceAddress" @change="onSameAsInvoiceChange">
+                Same as invoice address
+              </a-checkbox>
+            </div>
+          </template>
+          <a-textarea v-model:value="form.shipping_address" :rows="3" :placeholder="$t('Enter_Address')" :disabled="sameAsInvoiceAddress" />
         </a-form-item>
         <a-form-item :label="$t('Please_provide_any_details')">
-          <a-textarea v-model:value="form.shipping_details" :rows="4" :placeholder="$t('Please_provide_any_details')" />
+          <a-textarea v-model:value="form.shipping_details" :rows="3" :placeholder="$t('Please_provide_any_details')" />
         </a-form-item>
       </a-form>
     </a-modal>
@@ -96,6 +132,7 @@ import {
 } from '@ant-design/icons-vue';
 import PageHeader from '../../components/PageHeader.vue';
 import DataTable from '../../components/DataTable.vue';
+import CreatableSelect from '../../components/CreatableSelect.vue';
 import { useCrudTable } from '../../composables/useCrudTable';
 import { useFormat } from '../../composables/useFormat';
 import { useAuthStore } from '../../stores/auth';
@@ -128,6 +165,9 @@ const columns = computed(() => [
   { title: t('date'), dataIndex: 'date', key: 'date', sorter: true, exportValue: r => date(r.date) },
   { title: t('shipment_ref'), dataIndex: 'shipment_ref', key: 'shipment_ref', sorter: true },
   { title: t('Reference'), dataIndex: 'sale_ref', key: 'sale_ref', sorter: true },
+  { title: 'Courier', dataIndex: 'courier_name', key: 'courier_name', exportValue: r => r.courier_name || '' },
+  { title: 'Consignment ID', dataIndex: 'consignment_id', key: 'consignment_id', exportValue: r => r.consignment_id || '' },
+  { title: 'Tracking Ref', dataIndex: 'tracking_ref', key: 'tracking_ref', exportValue: r => r.tracking_ref || '' },
   { title: t('Customer'), dataIndex: 'customer_name', key: 'customer_name', sorter: true },
   { title: t('warehouse'), dataIndex: 'warehouse_name', key: 'warehouse_name', sorter: true },
   { title: t('Status'), key: 'status', dataIndex: 'status', sorter: true, exportValue: r => r.status },
@@ -148,21 +188,52 @@ const modalOpen = ref(false);
 const submitting = ref(false);
 const formRef = ref();
 const form = ref({});
+const courierOptions = ref([]);
+const invoiceAddress = ref('');
+const sameAsInvoiceAddress = ref(false);
 
 const rules = computed(() => ({
   status: [{ required: true, message: t('Field_is_required') }],
 }));
 
-function openEdit(record) {
+function onSameAsInvoiceChange() {
+  if (sameAsInvoiceAddress.value) {
+    form.value.shipping_address = invoiceAddress.value;
+  }
+}
+
+async function openEdit(record) {
   form.value = {
     id: record.id,
     sale_id: record.sale_id,
     status: record.status,
     delivered_to: record.delivered_to || '',
+    phone_number: '',
     shipping_address: record.shipping_address || '',
     shipping_details: record.shipping_details || '',
+    courier_id: undefined,
+    tracking_ref: '',
   };
+  sameAsInvoiceAddress.value = false;
+  invoiceAddress.value = '';
   modalOpen.value = true;
+
+  // Courier/tracking ref/phone/invoice-address aren't in the list payload
+  // (kept lean) — fetched fresh when the modal opens.
+  try {
+    const data = await http.get(`shipments/${record.sale_id}`);
+    const s = data.shipment || {};
+    form.value.phone_number = s.phone_number || '';
+    form.value.courier_id = s.courier_id || undefined;
+    form.value.tracking_ref = s.tracking_ref || '';
+    courierOptions.value = (data.couriers || []).map(c => ({ value: c.id, label: c.name }));
+    invoiceAddress.value = s.invoice_address || '';
+    if (invoiceAddress.value && form.value.shipping_address === invoiceAddress.value) {
+      sameAsInvoiceAddress.value = true;
+    }
+  } catch (e) {
+    // Non-fatal — the modal still works with what the list row already gave us.
+  }
 }
 
 async function submit() {
@@ -177,8 +248,11 @@ async function submit() {
       sale_id: form.value.sale_id,
       shipping_address: form.value.shipping_address,
       delivered_to: form.value.delivered_to,
+      phone_number: form.value.phone_number,
       shipping_details: form.value.shipping_details,
       status: form.value.status,
+      courier_id: form.value.courier_id || '',
+      tracking_ref: form.value.tracking_ref || '',
     });
     message.success(t('Updated_in_successfully'));
     modalOpen.value = false;

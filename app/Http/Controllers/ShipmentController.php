@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\Sale;
+use App\Models\SaleCourier;
+use App\Models\SaleZone;
 use App\Models\Shipment;
 use App\utils\helpers;
 use DB;
@@ -27,7 +29,7 @@ class ShipmentController extends BaseController
         $helpers = new helpers;
         $data = [];
 
-        $shipments = Shipment::with('sale', 'sale.client', 'sale.warehouse')
+        $shipments = Shipment::with('sale', 'sale.client', 'sale.warehouse', 'sale.courier')
 
         // Search With Multiple Param
             ->where(function ($query) use ($request) {
@@ -73,6 +75,9 @@ class ShipmentController extends BaseController
             $item['shipping_details'] = $shipment['shipping_details'];
             $item['sale_ref'] = $shipment['sale']['Ref'];
             $item['sale_id'] = $shipment['sale']['id'];
+            $item['courier_name'] = optional($shipment['sale']['courier'])->name;
+            $item['consignment_id'] = $shipment['sale']['consignment_id'];
+            $item['tracking_ref'] = $shipment['sale']['tracking_ref'];
             $item['warehouse_name'] = $shipment['sale']['warehouse']->name;
             $item['customer_name'] = $shipment['sale']['client']->name;
 
@@ -128,12 +133,14 @@ class ShipmentController extends BaseController
     {
 
         $get_shipment = Shipment::where('sale_id', $id)->first();
+        $sale = Sale::with('client')->find($id);
 
         if ($get_shipment) {
 
             $shipment_data['Ref'] = $get_shipment->Ref;
             $shipment_data['sale_id'] = $get_shipment->sale_id;
             $shipment_data['delivered_to'] = $get_shipment->delivered_to;
+            $shipment_data['phone_number'] = $get_shipment->phone_number;
             $shipment_data['shipping_address'] = $get_shipment->shipping_address;
             $shipment_data['status'] = $get_shipment->status;
             $shipment_data['shipping_details'] = $get_shipment->shipping_details;
@@ -143,13 +150,24 @@ class ShipmentController extends BaseController
             $shipment_data['Ref'] = $this->getNumberOrder();
             $shipment_data['sale_id'] = $id;
             $shipment_data['delivered_to'] = '';
+            $shipment_data['phone_number'] = '';
             $shipment_data['shipping_address'] = '';
             $shipment_data['status'] = '';
             $shipment_data['shipping_details'] = '';
         }
 
+        // Courier/Tracking live on the Sale (same fields used across the
+        // rest of the app — see Sales list/Create Sale), not duplicated
+        // onto shipments, so editing them here edits the Sale directly.
+        $shipment_data['courier_id'] = optional($sale)->courier_id;
+        $shipment_data['tracking_ref'] = optional($sale)->tracking_ref;
+        $shipment_data['consignment_id'] = optional($sale)->consignment_id;
+        $shipment_data['invoice_address'] = optional(optional($sale)->client)->adresse;
+
         return response()->json([
             'shipment' => $shipment_data,
+            'zones' => SaleZone::whereNull('deleted_at')->orderBy('name')->get(['id', 'name']),
+            'couriers' => SaleCourier::whereNull('deleted_at')->orderBy('name')->get(['id', 'name']),
         ]);
 
     }
@@ -166,12 +184,19 @@ class ShipmentController extends BaseController
 
         \DB::transaction(function () use ($request, $id) {
 
-            Shipment::whereId($id)->update($request->all());
+            Shipment::whereId($id)->update($request->only([
+                'sale_id', 'delivered_to', 'phone_number', 'shipping_address', 'status', 'shipping_details',
+            ]));
 
             $sale = Sale::findOrFail($request['sale_id']);
-            $sale->update([
-                'shipping_status' => $request['status'],
-            ]);
+            $salePayload = ['shipping_status' => $request['status']];
+            if ($request->has('courier_id')) {
+                $salePayload['courier_id'] = $request['courier_id'] ?: null;
+            }
+            if ($request->has('tracking_ref')) {
+                $salePayload['tracking_ref'] = $request['tracking_ref'] !== '' ? $request['tracking_ref'] : null;
+            }
+            $sale->update($salePayload);
 
         }, 10);
 

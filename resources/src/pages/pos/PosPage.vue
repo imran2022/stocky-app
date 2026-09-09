@@ -1159,17 +1159,17 @@
       No recent invoices.
     </div>
     <div v-else style="border: 1px solid #e6e6ec; border-radius: 8px; overflow: hidden;">
-      <div style="display: grid; grid-template-columns: 1.2fr 1fr 1.4fr 1fr 1.4fr; padding: 8px 14px; background: #ede9fe; color: #6d28d9; font-weight: 600; font-size: 12.5px;">
+      <div style="display: grid; grid-template-columns: 130px 100px 1.3fr 130px 1.9fr; gap: 12px; padding: 10px 16px; background: #ede9fe; color: #6d28d9; font-weight: 600; font-size: 12.5px;">
         <span>Date</span><span>Reference</span><span>Customer</span><span style="text-align: right;">Amount</span><span style="text-align: right;">Actions</span>
       </div>
       <div
         v-for="s in recentInvoices" :key="s.id"
-        style="display: grid; grid-template-columns: 1.2fr 1fr 1.4fr 1fr 1.4fr; align-items: center; padding: 10px 14px; border-top: 1px solid #f0f0f0; font-size: 13px;"
+        style="display: grid; grid-template-columns: 130px 100px 1.3fr 130px 1.9fr; gap: 12px; align-items: center; padding: 12px 16px; border-top: 1px solid #f0f0f0; font-size: 13px;"
       >
-        <span style="color: #6b7280;">{{ s.date }}</span>
-        <span style="font-weight: 600;">{{ s.Ref }}</span>
-        <span>{{ s.client_name || '—' }}</span>
-        <span style="text-align: right; font-family: 'JetBrains Mono', monospace;">{{ formatPriceWithCurrentCurrency(s.GrandTotal, 2) }}</span>
+        <span style="color: #6b7280; white-space: nowrap;">{{ s.date }}</span>
+        <span style="font-weight: 600; white-space: nowrap;">{{ s.Ref }}</span>
+        <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ s.client_name || '—' }}</span>
+        <span style="text-align: right; font-family: 'JetBrains Mono', monospace; white-space: nowrap;">{{ formatPriceWithCurrentCurrency(s.GrandTotal, 2) }}</span>
         <span style="text-align: right; display: flex; gap: 6px; justify-content: flex-end;">
           <b-button
             size="sm" variant="outline-secondary"
@@ -1185,8 +1185,14 @@
           >
             <b-spinner v-if="recentInvoiceDownloading === s.id + ':label'" small /><span v-else>Label</span>
           </b-button>
+          <b-button size="sm" variant="outline-primary" @click="editRecentInvoice(s)">
+            Edit
+          </b-button>
         </span>
       </div>
+    </div>
+    <div v-if="recentInvoices.length > 0" style="text-align: center; color: #9ca3af; font-size: 12px; margin-top: 10px;">
+      Showing the {{ recentInvoices.length }} most recent invoices.
     </div>
 
     <div class="text-center mt-3">
@@ -4558,13 +4564,25 @@ export default {
       this.$bvModal.show('RecentInvoicesModal');
       this.recentInvoicesLoading = true;
       try {
-        const { data } = await axios.get('pos/recent_sales', { params: { limit: 20 } });
+        const { data } = await axios.get('pos/recent_sales', { params: { limit: 10 } });
         this.recentInvoices = data.sales || [];
       } catch (e) {
         this.recentInvoicesError = this.$t('InvalidData') || 'Could not load recent invoices';
       } finally {
         this.recentInvoicesLoading = false;
       }
+    },
+    editRecentInvoice(sale) {
+      if (this.details.length > 0) {
+        this.$swal(
+          'Current sale is not empty',
+          'Please Hold or complete this sale before editing another invoice.',
+          'warning'
+        );
+        return;
+      }
+      this.$bvModal.hide('RecentInvoicesModal');
+      this.$router.push(`/sales/${sale.id}/edit`);
     },
     async downloadRecentInvoiceFile(sale, kind) {
       const key = `${sale.id}:${kind}`;

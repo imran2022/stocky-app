@@ -276,6 +276,7 @@ export const MIGRATED_ROUTES = {
     '/app/reports/analytics_report': '/reports/analytics',
     '/app/sales/store': '/sales/create',
     '/app/sales/list': '/sales',
+    '/app/sales/pos_sales': '/sales/pos',
     '/app/pos': '/pos',
     '/app/purchases/store': '/purchases/create',
     '/app/purchases/list': '/purchases',
@@ -408,6 +409,7 @@ export const MENU = [
         permissions: ['Sales_view', 'Sales_add', 'Pos_view', 'customer_display_screen_setup', 'shipment', 'real_time_sales_counter'],
         children: [
             { label: 'ListSales', to: '/app/sales/list', permissions: ['Sales_view'] },
+            { label: 'POS Sales', raw: true, to: '/app/sales/pos_sales', permissions: ['Sales_view'] },
             { label: 'AddSale', to: '/app/sales/store', permissions: ['Sales_add'] },
             { label: 'Import_Sales', to: '/app/sales/import_sales', permissions: ['Sales_add'] },
             { label: 'POS', to: '/app/pos', permissions: ['Pos_view'] },

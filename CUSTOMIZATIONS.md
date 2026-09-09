@@ -525,6 +525,103 @@ branches:**
   different sale mid-register-session is a bigger interaction question
   than a quick reprint, worth deciding deliberately rather than bolting on.
 
+## 11. POS Sales view, Shipments enhanced with courier/tracking, Recent Invoices polish
+
+**Why:** Three separate asks: a Sales-list view scoped to only POS-created
+sales; the vendor's existing (pre-our-work) Shipments feature needed the
+same courier/tracking fields we'd already added to Sales, plus a nicer
+Edit modal; and the Recent Invoices modal (section 10) needed better
+spacing, a row cap, and an Edit action with a safety check.
+
+### POS Sales
+- `SalesController@index` — added `is_pos` to the existing generic
+  `$columns`/`$param` filter arrays (the same mechanism every other
+  index() filter already uses), so `?is_pos=1` now filters correctly. No
+  other index() code changed.
+- **`resources/src/pages/sales/PosSales.vue` is a deliberate full copy of
+  `Sales.vue`**, not a shared/parameterized component. Given how heavily
+  customized and tested `Sales.vue` already is (sections 1, 6, 7, 8 all
+  touch it), refactoring it to accept a "fixed filter" prop carried a real
+  risk of subtly breaking the main Sales page for a comparatively small
+  feature. The copy hardcodes `is_pos: 1` in `filterParams()`, changes the
+  page title, and removes the "Add Sale" button (creating a sale from
+  here would make a normal, non-POS sale that then wouldn't even show up
+  in this filtered list — confusing). **If this page and Sales.vue drift
+  out of sync over time, that's the known cost of this approach** — pull
+  fresh from Sales.vue and reapply the same 3 edits if that happens.
+- New route `/sales/pos` (`Sales_view` permission — not a new permission)
+  and a "POS Sales" entry in the Sales submenu, using `raw: true` in
+  `menu.js` so it displays as plain text instead of going through the
+  (currently un-seeded) translation table.
+
+### Shipments (pre-existing vendor feature — see `app/Models/Shipment.php`
+/ `ShipmentController.php`, present in the vendor baseline commit, not
+something built in this conversation)
+- New migration: `shipments.phone_number` (nullable) — a delivery contact
+  number, which can differ from the customer's account phone.
+- **Courier / Consignment ID / Tracking Ref are NOT duplicated onto the
+  `shipments` table** — they already live on `sales` (sections 1/7).
+  `ShipmentController@index` now eager-loads `sale.courier` and exposes
+  `courier_name`/`consignment_id`/`tracking_ref` read from the Sale;
+  `@show`/`@update` read/write `courier_id`/`tracking_ref` on the
+  **Sale**, not the Shipment, keeping one source of truth. `@show` also
+  now returns `invoice_address` (the sale's client's address, for the
+  Edit modal's "Same as invoice address" checkbox) and the same
+  `zones`/`couriers` lookup lists used everywhere else.
+- **A real bug avoided, not just fixed**: the original `@update` did
+  `Shipment::whereId($id)->update($request->all())` — mass-updating with
+  *every* request field. Sending the new `courier_id`/`tracking_ref`
+  fields (which don't exist as `shipments` columns) through that
+  unfiltered `update()` would have thrown a SQL error. Changed to
+  `$request->only([...])` with the shipment's actual fillable fields;
+  `courier_id`/`tracking_ref` are routed to the `Sale::update()` call
+  instead, inside the same transaction.
+- `resources/src/pages/sales/Shipments.vue` — 3 new columns (Courier,
+  Consignment ID, Tracking Ref) placed right after Reference. Edit modal
+  reworked: Delivered To + Phone Number side by side, Courier Partner
+  (`CreatableSelect`, same "+ add new" component as everywhere else) +
+  Tracking ID side by side, and a "Same as invoice address" checkbox next
+  to the Address label that copies the sale's client address into the
+  field and disables manual editing while checked. Opening the modal now
+  makes one extra `GET shipments/{sale_id}` call to fetch the
+  courier/tracking/phone/invoice-address data the list payload doesn't
+  carry (kept the list query lean).
+
+### Recent Invoices polish (section 10)
+- Capped to 10 rows (`limit: 10` instead of 20) with a "Showing the N most
+  recent invoices" footer note.
+- Grid columns given fixed/generous widths (`130px 100px 1.3fr 130px
+  1.9fr` instead of loose `fr` fractions) with `white-space: nowrap` on
+  Date/Reference/Amount — the original layout wrapped Date and the
+  currency symbol onto their own lines at typical modal width.
+- New **Edit** button per row (`editRecentInvoice`): if the current POS
+  cart (`this.details`) is empty, navigates to `/sales/{id}/edit`
+  (`this.$router.push`, confirmed this file already shares the app's
+  router — see `goToMobileTab`'s existing `this.$router.push('/')`). If
+  the cart has items, shows a `this.$swal(...)` warning (the same
+  SweetAlert2 pattern already used elsewhere in this file, e.g.
+  `Remove_Draft_Sale`) telling the user to hold or complete the current
+  sale first, and does not navigate — editing a different invoice with an
+  unsaved cart open would silently abandon that cart's state.
+
+### Testing note for whoever touches ShipmentController/SalesController next
+`ShipmentController@update` (and `store`) call the **global** `request()`
+helper for validation instead of the injected `$request` parameter — a
+pre-existing vendor inconsistency, not something introduced here. This is
+harmless in real HTTP requests (Laravel binds the container's `request()`
+to the actual current request either way) but means a tinker/test harness
+that manually constructs a `Request` object and rebinds it via
+`app()->instance('request', $req)` to make that global-helper validation
+work will, as a side effect, break `$request->user('api')` resolution for
+the `authorizeForUser` call earlier in the same method (the 'api' guard
+re-resolves from the newly-bound request's — empty — auth headers instead
+of the manually-set test user). Encountered exactly this while testing
+`ShipmentController@update` here: the fix for testing purposes was to
+verify the authorization check and the transaction's data-writing logic
+as two separate steps rather than one full `app()->instance()`-bound
+call — both were confirmed correct independently. This is a testing
+technique, not a production bug.
+
 ## Known follow-ups (not done, intentionally)
 
 - "Zone / Courier Report" menu label (`Zone_Courier_Report`) has no

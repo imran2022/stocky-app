@@ -124,6 +124,7 @@ class SalesController extends BaseController
             4 => '=',
             5 => '=',
             6 => 'like',
+            7 => '=',
         ];
         $columns = [
             0 => 'Ref',
@@ -133,6 +134,7 @@ class SalesController extends BaseController
             4 => 'warehouse_id',
             5 => 'date',
             6 => 'shipping_status',
+            7 => 'is_pos',
         ];
         $data = [];
 

@@ -91,6 +91,7 @@ const ProfitAndLossReport = lazy('ProfitAndLossReport', () => import('../pages/r
 const ProfitReport = lazy('ProfitReport', () => import('../pages/reports/profit/ProfitReport.vue'));
 const AnalyticsReport = lazy('AnalyticsReport', () => import('../pages/reports/AnalyticsReport.vue'));
 const Sales = lazy('Sales', () => import('../pages/sales/Sales.vue'));
+const PosSales = lazy('PosSales', () => import('../pages/sales/PosSales.vue'));
 const SaleDetails = lazy('SaleDetails', () => import('../pages/sales/SaleDetails.vue'));
 const SaleForm = lazy('SaleForm', () => import('../pages/sales/SaleForm.vue'));
 const Purchases = lazy('Purchases', () => import('../pages/purchases/Purchases.vue'));
@@ -694,6 +695,7 @@ const routes = [
             { path: 'marketing/reports', name: 'marketing-reports', component: MarketingReports, meta: { title: 'Marketing Reports', permission: 'marketing_reports' } },
             { path: 'marketing/settings', name: 'marketing-settings', component: MarketingSettings, meta: { title: 'Marketing Settings', permission: 'marketing_settings' } },
             { path: 'sales', name: 'sales', component: Sales, meta: { title: 'Sales', permission: 'Sales_view' } },
+            { path: 'sales/pos', name: 'pos-sales', component: PosSales, meta: { title: 'POS Sales', permission: 'Sales_view' } },
             { path: 'sales/create', name: 'sale-create', component: SaleForm, meta: { title: 'Add Sale', permission: 'Sales_add' } },
             { path: 'sales/import', name: 'sales-import', component: ImportSales, meta: { title: 'Import Sales', permission: 'Sales_add' } },
             { path: 'sales/:id(\\d+)/edit', name: 'sale-edit', component: SaleForm, meta: { title: 'Edit Sale', permission: 'Sales_edit' } },

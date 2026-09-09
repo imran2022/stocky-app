@@ -9,7 +9,7 @@ class Shipment extends Model
     protected $dates = ['deleted_at'];
 
     protected $fillable = [
-        'user_id', 'date', 'Ref', 'sale_id', 'delivered_to', 'shipping_address', 'status', 'shipping_details',
+        'user_id', 'date', 'Ref', 'sale_id', 'delivered_to', 'phone_number', 'shipping_address', 'status', 'shipping_details',
 
     ];
 
