@@ -2,25 +2,29 @@
   <div class="page">
     <PageHeader title="Stock Lookup" :breadcrumb="['Products', 'Stock Lookup']" />
 
-    <a-card size="small" style="margin-bottom: 16px">
-      <div style="color: rgba(0, 0, 0, 0.45); font-size: 13px; margin-bottom: 8px">
-        Search by SKU, barcode, or product name
+    <div class="lookup-hero">
+      <div class="lookup-hero-icon"><InboxOutlined /></div>
+      <div style="flex: 1">
+        <div class="lookup-hero-title">Where is it?</div>
+        <div class="lookup-hero-sub">Search by SKU, barcode, or product name to see stock across every warehouse.</div>
       </div>
-      <a-input-search
-        v-model:value="query"
-        placeholder="e.g. BB10 or Bag"
-        size="large"
-        :loading="searching"
-        enter-button="Search"
-        allow-clear
-        @search="runSearch"
-      />
-    </a-card>
+    </div>
+
+    <a-input-search
+      v-model:value="query"
+      placeholder="e.g. BB10 or Bag"
+      size="large"
+      :loading="searching"
+      enter-button="Search"
+      allow-clear
+      style="margin-bottom: 20px"
+      @search="runSearch"
+    />
 
     <a-alert v-if="error" type="error" :message="error" show-icon style="margin-bottom: 16px" />
 
     <!-- Multiple matches: pick one -->
-    <a-card v-if="!detail && results.length > 1" size="small" title="Matching products">
+    <a-card v-if="!detail && results.length > 1" size="small" title="Matching products" :bordered="false" class="lookup-card">
       <div
         v-for="r in results" :key="r.id"
         class="lookup-row"
@@ -41,30 +45,37 @@
     />
 
     <!-- Selected product: per-warehouse breakdown -->
-    <a-card v-if="loadingDetail" size="small" :loading="true" style="min-height: 160px" />
-    <a-card v-else-if="detail" size="small">
-      <div style="display: flex; gap: 16px; align-items: center; margin-bottom: 20px">
+    <a-card v-if="loadingDetail" :bordered="false" class="lookup-card" style="min-height: 160px" :loading="true" />
+    <a-card v-else-if="detail" :bordered="false" class="lookup-card">
+      <div class="lookup-product-head">
         <img
           v-if="detail.product.image"
           :src="'/images/' + detail.product.image"
-          style="width: 64px; height: 64px; object-fit: cover; border-radius: 8px; border: 1px solid rgba(5,5,5,0.08)"
+          class="lookup-product-img"
         />
+        <div v-else class="lookup-product-img lookup-product-img-placeholder"><PictureOutlined /></div>
         <div>
-          <div style="font-weight: 700; font-size: 18px">{{ detail.product.name }}</div>
-          <a-space style="margin-top: 6px">
+          <div style="font-weight: 700; font-size: 19px">{{ detail.product.name }}</div>
+          <a-space style="margin-top: 8px">
             <a-tag>SKU: {{ detail.product.code }}</a-tag>
-            <a-tag color="purple">Price: {{ money(detail.product.price) }}</a-tag>
+            <a-tag color="purple">{{ money(detail.product.price) }}</a-tag>
+            <a-tag v-if="detail.product.is_variant" color="blue">{{ detail.warehouses[0]?.variants?.length || 0 }} variants</a-tag>
           </a-space>
+        </div>
+        <div class="lookup-total-badge">
+          <div class="lookup-total-badge-num">{{ detail.total_qty }}</div>
+          <div class="lookup-total-badge-label">Total Pcs</div>
         </div>
       </div>
 
-      <div style="font-weight: 600; margin-bottom: 8px">Stock by Warehouse</div>
+      <div style="font-weight: 600; margin: 20px 0 10px">Stock by Warehouse</div>
       <a-table
         :columns="warehouseColumns"
         :data-source="detail.warehouses"
         :pagination="false"
         row-key="id"
         size="small"
+        :expandable="detail.product.is_variant ? { rowExpandable: () => true } : undefined"
       >
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'location'">
@@ -74,6 +85,22 @@
           <template v-else-if="column.key === 'qty'">
             <a-tag :color="record.qty > 0 ? 'green' : 'red'">{{ record.qty }} Pcs</a-tag>
           </template>
+        </template>
+        <template v-if="detail.product.is_variant" #expandedRowRender="{ record }">
+          <a-table
+            :columns="variantColumns"
+            :data-source="record.variants"
+            :pagination="false"
+            row-key="id"
+            size="small"
+          >
+            <template #bodyCell="{ column, record: v }">
+              <template v-if="column.key === 'price'">{{ money(v.price) }}</template>
+              <template v-else-if="column.key === 'qty'">
+                <a-tag :color="v.qty > 0 ? 'green' : 'red'">{{ v.qty }} Pcs</a-tag>
+              </template>
+            </template>
+          </a-table>
         </template>
         <template #summary>
           <a-table-summary-row>
@@ -97,10 +124,18 @@
  * stock at every warehouse in one view. For a multi-warehouse business this
  * answers "where is it" without opening the product record and hunting for
  * the warehouse-stock table there.
+ *
+ * Variant products: the backend returns each warehouse row's OWN total qty
+ * (summed across that product's variants at that warehouse) plus a
+ * `variants` array for that row — rendered here as an a-table expandable
+ * row, so the base view stays one-row-per-warehouse and the variant detail
+ * is opt-in per warehouse rather than a huge warehouse×variant grid.
+ *
  * Backend: GET stock_lookup/search?search=... -> {results}, then
  * GET stock_lookup/{id} -> {product, warehouses, total_qty}.
  */
 import { ref } from 'vue';
+import { InboxOutlined, PictureOutlined } from '@ant-design/icons-vue';
 import PageHeader from '../../components/PageHeader.vue';
 import { useFormat } from '../../composables/useFormat';
 import http from '../../lib/http';
@@ -119,6 +154,12 @@ const loadingDetail = ref(false);
 const warehouseColumns = [
   { title: 'Warehouse / Location', key: 'location' },
   { title: 'Available Stock', key: 'qty', align: 'right' },
+];
+const variantColumns = [
+  { title: 'Variant', dataIndex: 'name', key: 'name' },
+  { title: 'Code', dataIndex: 'code', key: 'code' },
+  { title: 'Price', key: 'price', align: 'right' },
+  { title: 'Stock', key: 'qty', align: 'right' },
 ];
 
 async function runSearch() {
@@ -159,6 +200,40 @@ async function selectProduct(id) {
 </script>
 
 <style scoped>
+.lookup-hero {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: linear-gradient(135deg, #6d28d9 0%, #8b5cf6 100%);
+  border-radius: 12px;
+  padding: 20px 24px;
+  margin-bottom: 20px;
+  color: #fff;
+}
+.lookup-hero-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  flex-shrink: 0;
+}
+.lookup-hero-title {
+  font-size: 18px;
+  font-weight: 700;
+}
+.lookup-hero-sub {
+  font-size: 13px;
+  opacity: 0.9;
+  margin-top: 2px;
+}
+.lookup-card {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 1px 6px rgba(0, 0, 0, 0.04);
+  border-radius: 12px;
+}
 .lookup-row {
   display: flex;
   justify-content: space-between;
@@ -168,10 +243,49 @@ async function selectProduct(id) {
   border-radius: 8px;
   margin-bottom: 8px;
   cursor: pointer;
+  transition: all 120ms ease;
 }
 .lookup-row:hover {
   border-color: #6d28d9;
   background: rgba(109, 40, 217, 0.03);
+}
+.lookup-product-head {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+.lookup-product-img {
+  width: 68px;
+  height: 68px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid rgba(5, 5, 5, 0.08);
+}
+.lookup-product-img-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  color: rgba(0, 0, 0, 0.25);
+  background: #fafafa;
+}
+.lookup-total-badge {
+  margin-left: auto;
+  text-align: center;
+  background: #ede9fe;
+  border-radius: 10px;
+  padding: 8px 18px;
+}
+.lookup-total-badge-num {
+  font-size: 20px;
+  font-weight: 700;
+  color: #6d28d9;
+  line-height: 1.1;
+}
+.lookup-total-badge-label {
+  font-size: 11px;
+  color: #6d28d9;
+  opacity: 0.8;
 }
 .muted {
   color: rgba(0, 0, 0, 0.45);

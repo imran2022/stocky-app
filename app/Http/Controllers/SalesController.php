@@ -56,6 +56,42 @@ class SalesController extends BaseController
 {
     // ------------- GET ALL SALES -----------\\
 
+    /**
+     * POS "Recent Invoices" — a lightweight, POS-scoped recent-sales list
+     * (not the full Sales-list index() below, which needs Sales_view and
+     * carries far more columns/filters than a quick in-POS lookup needs).
+     * Warehouse-scoped the same way the rest of the app restricts stock/
+     * sales visibility for non is_all_warehouses users.
+     */
+    public function posRecentSales(Request $request)
+    {
+        $limit = min((int) $request->get('limit', 15), 50);
+
+        $user_auth = auth()->user();
+        $query = Sale::with('client')->whereNull('deleted_at');
+
+        if (! $user_auth->is_all_warehouses) {
+            $allowedWarehouseIds = UserWarehouse::where('user_id', $user_auth->id)->pluck('warehouse_id')->toArray();
+            $query->whereIn('warehouse_id', $allowedWarehouseIds);
+        }
+
+        $sales = $query->orderByDesc('id')->limit($limit)->get();
+
+        $data = $sales->map(function ($sale) {
+            return [
+                'id' => $sale->id,
+                'Ref' => $sale->Ref,
+                'date' => $sale->date.' '.$sale->time,
+                'client_name' => optional($sale->client)->name,
+                'GrandTotal' => number_format($sale->GrandTotal, helpers::price_decimals(), '.', ''),
+                'paid_amount' => number_format($sale->paid_amount, helpers::price_decimals(), '.', ''),
+                'payment_status' => $sale->payment_statut,
+            ];
+        });
+
+        return response()->json(['sales' => $data]);
+    }
+
     public function index(request $request)
     {
         $this->authorizeForUser($request->user('api'), 'view', Sale::class);

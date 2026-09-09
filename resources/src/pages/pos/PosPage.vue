@@ -892,6 +892,13 @@
         <span>{{ DraftProcessing ? $t('pos.Saving') : $t('pos.Hold') }}</span>
       </button>
 
+      <button v-if="isOnline" @click="openRecentInvoices" title="Recent Invoices" class="pos-shell-action-btn" style="height: 36px; padding: 0 14px; background: transparent; color: #1f1f2c; border: 1px solid #e6e6ec; border-radius: 8px; font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; transition: all 120ms ease;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 16px; height: 16px;">
+          <path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="9"/>
+        </svg>
+        <span>Recent Invoices</span>
+      </button>
+
       <div style="flex: 1;"></div>
 
       <!-- Total payable -->
@@ -1100,19 +1107,34 @@
           <span>Warehouse / Location</span>
           <span>Available Stock</span>
         </div>
-        <div
-          v-for="w in stockLookupDetail.warehouses" :key="w.id"
-          style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-top: 1px solid #f0f0f0;"
-        >
-          <div>
-            <div style="font-weight: 600; font-size: 13.5px;">{{ w.name }}</div>
-            <div v-if="w.location" style="font-size: 12px; color: #6b7280;">{{ w.location }}</div>
+        <template v-for="w in stockLookupDetail.warehouses" :key="w.id">
+          <div
+            @click="w.variants ? toggleStockLookupWarehouse(w.id) : null"
+            style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-top: 1px solid #f0f0f0;"
+            :style="{ cursor: w.variants ? 'pointer' : 'default' }"
+          >
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span v-if="w.variants" style="font-size: 10px; color: #6b7280; transition: transform 120ms ease;" :style="{ transform: stockLookupExpandedWarehouse === w.id ? 'rotate(90deg)' : 'rotate(0deg)' }">▶</span>
+              <div>
+                <div style="font-weight: 600; font-size: 13.5px;">{{ w.name }}</div>
+                <div v-if="w.location" style="font-size: 12px; color: #6b7280;">{{ w.location }}</div>
+              </div>
+            </div>
+            <span
+              style="padding: 2px 10px; border-radius: 6px; font-size: 12.5px; font-weight: 600;"
+              :style="{ background: w.qty > 0 ? '#eaf7ef' : '#fdecec', color: w.qty > 0 ? '#1e7a44' : '#a83232' }"
+            >{{ w.qty }} Pcs</span>
           </div>
-          <span
-            style="padding: 2px 10px; border-radius: 6px; font-size: 12.5px; font-weight: 600;"
-            :style="{ background: w.qty > 0 ? '#eaf7ef' : '#fdecec', color: w.qty > 0 ? '#1e7a44' : '#a83232' }"
-          >{{ w.qty }} Pcs</span>
-        </div>
+          <div v-if="w.variants && stockLookupExpandedWarehouse === w.id" style="background: #fafafa; padding: 6px 14px 10px 30px; border-top: 1px solid #f0f0f0;">
+            <div v-for="v in w.variants" :key="v.id" style="display: flex; justify-content: space-between; padding: 4px 0; font-size: 12.5px;">
+              <span>{{ v.name }} <span style="color: #9ca3af;">({{ v.code }})</span></span>
+              <span style="display: flex; gap: 12px;">
+                <span style="color: #6b7280;">{{ formatPriceWithCurrentCurrency(v.price, 2) }}</span>
+                <span :style="{ color: v.qty > 0 ? '#1e7a44' : '#a83232', fontWeight: 600 }">{{ v.qty }} Pcs</span>
+              </span>
+            </div>
+          </div>
+        </template>
         <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: #f9fafb; border-top: 1px solid #e6e6ec;">
           <div>
             <div style="font-weight: 700; font-size: 13.5px;">Total Stock</div>
@@ -1125,6 +1147,50 @@
 
     <div class="text-center mt-3">
       <b-button variant="secondary" @click="$bvModal.hide('StockLookupModal')">{{ $t('Close') }}</b-button>
+    </div>
+  </b-modal>
+
+  <!-- Recent Invoices: quick reprint/relabel for a recently completed sale
+       without leaving the register. -->
+  <b-modal id="RecentInvoicesModal" hide-footer title="Recent Invoices" size="xl">
+    <div v-if="recentInvoicesError" class="text-danger" style="margin-bottom: 12px;">{{ recentInvoicesError }}</div>
+    <div v-if="recentInvoicesLoading" style="text-align: center; padding: 32px 0;"><b-spinner /></div>
+    <div v-else-if="recentInvoices.length === 0" style="text-align: center; color: #6b7280; padding: 32px 0;">
+      No recent invoices.
+    </div>
+    <div v-else style="border: 1px solid #e6e6ec; border-radius: 8px; overflow: hidden;">
+      <div style="display: grid; grid-template-columns: 1.2fr 1fr 1.4fr 1fr 1.4fr; padding: 8px 14px; background: #ede9fe; color: #6d28d9; font-weight: 600; font-size: 12.5px;">
+        <span>Date</span><span>Reference</span><span>Customer</span><span style="text-align: right;">Amount</span><span style="text-align: right;">Actions</span>
+      </div>
+      <div
+        v-for="s in recentInvoices" :key="s.id"
+        style="display: grid; grid-template-columns: 1.2fr 1fr 1.4fr 1fr 1.4fr; align-items: center; padding: 10px 14px; border-top: 1px solid #f0f0f0; font-size: 13px;"
+      >
+        <span style="color: #6b7280;">{{ s.date }}</span>
+        <span style="font-weight: 600;">{{ s.Ref }}</span>
+        <span>{{ s.client_name || '—' }}</span>
+        <span style="text-align: right; font-family: 'JetBrains Mono', monospace;">{{ formatPriceWithCurrentCurrency(s.GrandTotal, 2) }}</span>
+        <span style="text-align: right; display: flex; gap: 6px; justify-content: flex-end;">
+          <b-button
+            size="sm" variant="outline-secondary"
+            :disabled="recentInvoiceDownloading === s.id + ':pdf'"
+            @click="downloadRecentInvoiceFile(s, 'pdf')"
+          >
+            <b-spinner v-if="recentInvoiceDownloading === s.id + ':pdf'" small /><span v-else>PDF</span>
+          </b-button>
+          <b-button
+            size="sm" variant="outline-secondary"
+            :disabled="recentInvoiceDownloading === s.id + ':label'"
+            @click="downloadRecentInvoiceFile(s, 'label')"
+          >
+            <b-spinner v-if="recentInvoiceDownloading === s.id + ':label'" small /><span v-else>Label</span>
+          </b-button>
+        </span>
+      </div>
+    </div>
+
+    <div class="text-center mt-3">
+      <b-button variant="secondary" @click="$bvModal.hide('RecentInvoicesModal')">{{ $t('Close') }}</b-button>
     </div>
   </b-modal>
 
@@ -3591,6 +3657,13 @@ export default {
       stockLookupDetail: null,
       stockLookupLoadingDetail: false,
       stockLookupError: '',
+      stockLookupExpandedWarehouse: null, // id of the warehouse row currently expanded (variant products)
+
+      // ===== Recent Invoices modal state =====
+      recentInvoices: [],
+      recentInvoicesLoading: false,
+      recentInvoicesError: '',
+      recentInvoiceDownloading: null, // `${saleId}:${kind}` while a PDF/label download is in flight
 
       // Calculator widget state
       calc: {
@@ -4436,7 +4509,11 @@ export default {
       this.stockLookupResults = [];
       this.stockLookupDetail = null;
       this.stockLookupError = '';
+      this.stockLookupExpandedWarehouse = null;
       this.$bvModal.show('StockLookupModal');
+    },
+    toggleStockLookupWarehouse(warehouseId) {
+      this.stockLookupExpandedWarehouse = this.stockLookupExpandedWarehouse === warehouseId ? null : warehouseId;
     },
     async runStockLookupSearch() {
       const q = (this.stockLookupQuery || '').trim();
@@ -4472,6 +4549,41 @@ export default {
         this.stockLookupError = this.$t('InvalidData') || 'Could not load stock detail';
       } finally {
         this.stockLookupLoadingDetail = false;
+      }
+    },
+
+    // ===== Recent Invoices modal =====
+    async openRecentInvoices() {
+      this.recentInvoicesError = '';
+      this.$bvModal.show('RecentInvoicesModal');
+      this.recentInvoicesLoading = true;
+      try {
+        const { data } = await axios.get('pos/recent_sales', { params: { limit: 20 } });
+        this.recentInvoices = data.sales || [];
+      } catch (e) {
+        this.recentInvoicesError = this.$t('InvalidData') || 'Could not load recent invoices';
+      } finally {
+        this.recentInvoicesLoading = false;
+      }
+    },
+    async downloadRecentInvoiceFile(sale, kind) {
+      const key = `${sale.id}:${kind}`;
+      this.recentInvoiceDownloading = key;
+      try {
+        const url = kind === 'pdf' ? `sale_pdf/${sale.id}` : `sale_shipping_label/${sale.id}`;
+        const res = await axios.get(url, { responseType: 'blob' });
+        const href = window.URL.createObjectURL(new Blob([res.data]));
+        const link = document.createElement('a');
+        link.href = href;
+        link.setAttribute('download', kind === 'pdf' ? `Sale_${sale.Ref}.pdf` : `Shipping_Label_${sale.Ref}.pdf`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(href);
+      } catch (e) {
+        this.recentInvoicesError = this.$t('InvalidData') || 'Download failed';
+      } finally {
+        this.recentInvoiceDownloading = null;
       }
     },
     goToMobileTab(tab) {

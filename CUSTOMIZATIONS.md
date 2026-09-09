@@ -464,6 +464,67 @@ their one assigned warehouse and its stock, not the other warehouse's):
   in POS) — a bug from an early draft that referenced a non-existent
   `symbol` variable in the POS modal was caught and fixed before shipping.
 
+## 10. Stock Lookup: variant support + polish; POS Recent Invoices
+
+**Why:** Section 9's Stock Lookup only handled simple (non-variant)
+products — a variant product (e.g. a shirt in Black/Red, each stocked at
+several warehouses) needs a different shape of answer, since a single
+per-warehouse qty would either hide the variant breakdown or need one row
+per warehouse×variant pair. Also requested: a visual refresh of the
+Products-menu page (not the POS modal), and a new "Recent Invoices" POS
+tool to quickly reprint/relabel a just-completed sale.
+
+**Backend — `ProductsController@stockLookupDetail` rewritten in two
+branches:**
+- Non-variant products: unchanged behavior from section 9.
+- Variant products (`product.is_variant` + has variants): each warehouse
+  row now carries its OWN `qty` (summed across that product's variants at
+  that warehouse) **and** a `variants` array — `[{id, name, code, price,
+  qty}]` — the per-variant stock at that specific warehouse. The frontend
+  renders the warehouse row as the primary line and the variant array as
+  an expand/collapse detail, per the request's own suggested design.
+  Verified with 2 variants × 2 warehouses: each warehouse's qty is the
+  correct sum of its variants, and the grand `total_qty` is the sum of
+  everything (10+15+20+25=70 in the test).
+- `stockLookupSearch` now also matches `product_variants.code`/`gtin` (via
+  `orWhereHas`) — searching a variant's own SKU (which can differ from the
+  parent product's code) returns the parent product, matching what the
+  detail endpoint expects.
+- New `SalesController@posRecentSales` (`GET pos/recent_sales?limit=`) —
+  lightweight recent-sales list for the POS-only "Recent Invoices" tool
+  below. Deliberately **not** the same as the full Sales-list `index()`
+  (different permission needs, far fewer columns) — warehouse-scoped the
+  same `is_all_warehouses`/`UserWarehouse` way as everything else, no
+  extra policy check beyond that (matching the rest of the POS-realm
+  endpoints, none of which do a separate `Sales_view` check).
+
+**Frontend:**
+- `resources/src/pages/products/StockLookup.vue` — visually reworked
+  (gradient header banner, card-based layout, a total-stock badge) and
+  gained variant handling via Ant Design's native `a-table` `expandable` /
+  `#expandedRowRender` — each warehouse row expands to a nested table of
+  that warehouse's variants. This is the SPA page only; **no changes to
+  the POS modal's underlying data flow**, since it's already talking to
+  the same (now variant-aware) backend endpoint.
+- `resources/src/pages/pos/PosPage.vue` (legacy Vue2/BootstrapVue — see
+  section 9's architecture note, still applies) — `StockLookupModal`
+  gained a manual expand/collapse per warehouse row (a
+  `stockLookupExpandedWarehouse` id in `data()`, toggled on click) since
+  BootstrapVue has no built-in expandable-table feature to reach for here.
+  A caught-before-shipping bug: a `<template v-for>` with the `:key`
+  placed on a child element instead of the `<template>` tag itself failed
+  the Vue 3 compiler outright (`vite build` caught it) — fixed by moving
+  `:key="w.id"` onto the `<template>`.
+- New **Recent Invoices** button next to Hold in the POS footer bar, and
+  a new `RecentInvoicesModal` (BootstrapVue, matching the rest of the
+  file): lists the last N sales (Date, Reference, Customer, Amount) with
+  per-row **PDF** and **Label** download buttons reusing the existing
+  `sale_pdf/{id}` / `sale_shipping_label/{id}` endpoints from sections 5/6
+  — no new PDF-generation code, just wiring. An "Edit" action (present in
+  the reference screenshot) was deliberately left out for now — editing a
+  different sale mid-register-session is a bigger interaction question
+  than a quick reprint, worth deciding deliberately rather than bolting on.
+
 ## Known follow-ups (not done, intentionally)
 
 - "Zone / Courier Report" menu label (`Zone_Courier_Report`) has no

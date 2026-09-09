@@ -617,6 +617,7 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     Route::post('cash-registers/open', 'CashRegisterController@openRegister');
     Route::post('cash-registers/close', 'CashRegisterController@closeRegister');
     Route::get('cash-registers/current/{user_id}', 'CashRegisterController@getCurrentRegister');
+    Route::get('pos/recent_sales', 'SalesController@posRecentSales');
     Route::post('cash-registers/cash-move', 'CashRegisterController@cashInOut');
     Route::get('report/cash_registers', 'CashRegisterController@report');
     Route::get('report/warranty_guarantee', 'ReportController@warrantyGuaranteeReport');

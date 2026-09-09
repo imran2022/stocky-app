@@ -2141,7 +2141,11 @@ class ProductsController extends BaseController
             ->where(function ($q) use ($search) {
                 $q->where('code', 'like', "%{$search}%")
                     ->orWhere('gtin', 'like', "%{$search}%")
-                    ->orWhere('name', 'like', "%{$search}%");
+                    ->orWhere('name', 'like', "%{$search}%")
+                    ->orWhereHas('variants', function ($vq) use ($search) {
+                        $vq->where('code', 'like', "%{$search}%")
+                            ->orWhere('gtin', 'like', "%{$search}%");
+                    });
             })
             ->orderByRaw('code = ? desc, gtin = ? desc', [$search, $search])
             ->limit(15)
@@ -2167,11 +2171,28 @@ class ProductsController extends BaseController
      * is_all_warehouses/UserWarehouse pattern as the rest of this
      * controller), for the modal shown after picking a search result.
      */
+    /**
+     * Stock Lookup — detail step. Per-warehouse stock breakdown + total for
+     * one product, scoped to the user's assigned warehouses (same
+     * is_all_warehouses/UserWarehouse pattern as the rest of this
+     * controller), for the modal shown after picking a search result.
+     *
+     * Variant products (is_variant=1): stock is tracked per
+     * product_variant_id, not just product_id, so a flat "warehouse -> one
+     * qty" list would either show a meaningless combined number or need one
+     * row per warehouse-per-variant (unreadable once there are more than a
+     * couple of variants and warehouses). Instead each warehouse row here
+     * carries its OWN qty (the row-level total across all variants at that
+     * warehouse) plus a `variants` array for that warehouse — the frontend
+     * renders that as an expandable row, matching the request's own
+     * "expand to see variant breakdown" idea.
+     */
     public function stockLookupDetail(Request $request, $id)
     {
         $this->authorizeForUser($request->user('api'), 'view', Product::class);
 
-        $product = Product::whereNull('deleted_at')->findOrFail($id);
+        $product = Product::with('variants')->whereNull('deleted_at')->findOrFail($id);
+        $isVariant = ! empty($product->is_variant) && $product->variants->count() > 0;
 
         $user_auth = auth()->user();
         if ($user_auth->is_all_warehouses) {
@@ -2181,20 +2202,71 @@ class ProductsController extends BaseController
             $warehouses = Warehouse::whereNull('deleted_at')->whereIn('id', $allowedWarehouseIds)->orderBy('name')->get(['id', 'name', 'city', 'country']);
         }
 
-        $qtyByWarehouse = DB::table('product_warehouse')
+        if (! $isVariant) {
+            $qtyByWarehouse = DB::table('product_warehouse')
+                ->where('product_id', $id)
+                ->whereNull('deleted_at')
+                ->whereIn('warehouse_id', $warehouses->pluck('id'))
+                ->selectRaw('warehouse_id, COALESCE(SUM(qte), 0) as qty')
+                ->groupBy('warehouse_id')
+                ->pluck('qty', 'warehouse_id');
+
+            $byWarehouse = $warehouses->map(function ($w) use ($qtyByWarehouse) {
+                return [
+                    'id' => $w->id,
+                    'name' => $w->name,
+                    'location' => trim(collect([$w->city, $w->country])->filter()->implode(', ')),
+                    'qty' => (float) ($qtyByWarehouse[$w->id] ?? 0),
+                    'variants' => null,
+                ];
+            });
+
+            return response()->json([
+                'product' => [
+                    'id' => $product->id,
+                    'name' => $product->name,
+                    'code' => $product->code,
+                    'gtin' => $product->gtin,
+                    'price' => number_format($product->price, helpers::price_decimals(), '.', ''),
+                    'image' => $product->primaryProductImageFilename(),
+                    'is_variant' => false,
+                ],
+                'warehouses' => $byWarehouse,
+                'total_qty' => (float) $byWarehouse->sum('qty'),
+                'updated_at' => optional($product->updated_at)->toIso8601String(),
+            ]);
+        }
+
+        // Variant product: one qty per (warehouse, variant) pair.
+        $rows = DB::table('product_warehouse')
             ->where('product_id', $id)
             ->whereNull('deleted_at')
+            ->whereNotNull('product_variant_id')
             ->whereIn('warehouse_id', $warehouses->pluck('id'))
-            ->selectRaw('warehouse_id, COALESCE(SUM(qte), 0) as qty')
-            ->groupBy('warehouse_id')
-            ->pluck('qty', 'warehouse_id');
+            ->selectRaw('warehouse_id, product_variant_id, COALESCE(SUM(qte), 0) as qty')
+            ->groupBy('warehouse_id', 'product_variant_id')
+            ->get()
+            ->groupBy('warehouse_id');
 
-        $byWarehouse = $warehouses->map(function ($w) use ($qtyByWarehouse) {
+        $byWarehouse = $warehouses->map(function ($w) use ($rows, $product) {
+            $warehouseRows = $rows->get($w->id, collect())->keyBy('product_variant_id');
+
+            $variants = $product->variants->map(function ($v) use ($warehouseRows) {
+                return [
+                    'id' => $v->id,
+                    'name' => $v->name,
+                    'code' => $v->code,
+                    'price' => number_format($v->price, helpers::price_decimals(), '.', ''),
+                    'qty' => (float) optional($warehouseRows->get($v->id))->qty,
+                ];
+            });
+
             return [
                 'id' => $w->id,
                 'name' => $w->name,
                 'location' => trim(collect([$w->city, $w->country])->filter()->implode(', ')),
-                'qty' => (float) ($qtyByWarehouse[$w->id] ?? 0),
+                'qty' => (float) $variants->sum('qty'),
+                'variants' => $variants,
             ];
         });
 
@@ -2206,6 +2278,7 @@ class ProductsController extends BaseController
                 'gtin' => $product->gtin,
                 'price' => number_format($product->price, helpers::price_decimals(), '.', ''),
                 'image' => $product->primaryProductImageFilename(),
+                'is_variant' => true,
             ],
             'warehouses' => $byWarehouse,
             'total_qty' => (float) $byWarehouse->sum('qty'),
