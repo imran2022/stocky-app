@@ -213,6 +213,11 @@
                 </a-form-item>
               </a-col>
               <a-col :xs="24" :md="8">
+                <a-form-item label="Consignment ID">
+                  <a-input v-model:value="sale.consignment_id" placeholder="Consignment ID" />
+                </a-form-item>
+              </a-col>
+              <a-col :xs="24" :md="8">
                 <a-form-item label="Zone">
                   <CreatableSelect
                     v-model:value="sale.zone_id"
@@ -560,6 +565,7 @@ const sale = ref({
   discount_Method: '2',
   shipping: 0,
   tracking_ref: '',
+  consignment_id: '',
   zone_id: undefined,
   courier_id: undefined,
 });
@@ -577,6 +583,7 @@ const pointsState = ref({ discount_from_points: 0, used_points: 0 });
 // (display only — the backend deducts them on save), and `initialClientPoints`
 // is what an "Unconverted" click restores.
 const point_to_amount_rate = ref(0);
+const enableBoxQty = ref(true);
 const selectedClientPoints = ref(0);
 const initialClientPoints = ref(0);
 const points_to_convert = ref(0);
@@ -762,7 +769,7 @@ watch([totals, () => payment.value.status], () => {
 const lineColumns = computed(() => [
   { title: t('ProductName'), key: 'product' },
   { title: t('Net_Unit_Price'), key: 'net_price', align: 'right' },
-  { title: 'Box', key: 'box_qty', align: 'center' },
+  ...(enableBoxQty.value ? [{ title: 'Box', key: 'box_qty', align: 'center' }] : []),
   { title: t('Stock'), key: 'stock', align: 'right' },
   { title: t('Quantity'), key: 'quantity', align: 'center' },
   { title: t('Discount'), key: 'discount', align: 'right' },
@@ -1261,6 +1268,7 @@ async function submit() {
     discount_from_points: pointsState.value.discount_from_points,
     used_points: pointsState.value.used_points,
     tracking_ref: sale.value.tracking_ref || '',
+    consignment_id: sale.value.consignment_id || '',
     zone_id: sale.value.zone_id || null,
     courier_id: sale.value.courier_id || null,
   };
@@ -1339,6 +1347,7 @@ onMounted(async () => {
       accounts.value = create.accounts || [];
       paymentMethods.value = create.payment_methods || [];
       point_to_amount_rate.value = Number(create.point_to_amount_rate) || 0;
+      enableBoxQty.value = create.enable_box_qty !== undefined ? !!create.enable_box_qty : true;
       zoneOptions.value = (create.zones || []).map(z => ({ value: z.id, label: z.name }));
       courierOptions.value = (create.couriers || []).map(c => ({ value: c.id, label: c.name }));
 
@@ -1356,6 +1365,7 @@ onMounted(async () => {
         discount_Method: '2',
         shipping: Number(q.shipping) || 0,
         tracking_ref: '',
+        consignment_id: '',
         zone_id: undefined,
         courier_id: undefined,
       };
@@ -1403,6 +1413,7 @@ onMounted(async () => {
         discount_Method: dm === '1' || dm === 'percent' || dm === 'percentage' ? '1' : '2',
         shipping: Number(s.shipping) || 0,
         tracking_ref: s.tracking_ref || '',
+        consignment_id: s.consignment_id || '',
         zone_id: s.zone_id || undefined,
         courier_id: s.courier_id || undefined,
       };
@@ -1444,6 +1455,7 @@ onMounted(async () => {
       accounts.value = data.accounts || [];
       paymentMethods.value = data.payment_methods || [];
       point_to_amount_rate.value = Number(data.point_to_amount_rate) || 0;
+      enableBoxQty.value = data.enable_box_qty !== undefined ? !!data.enable_box_qty : true;
       zoneOptions.value = (data.zones || []).map(z => ({ value: z.id, label: z.name }));
       courierOptions.value = (data.couriers || []).map(c => ({ value: c.id, label: c.name }));
       // Status defaults to pending (unpaid): no payment line until the user

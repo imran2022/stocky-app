@@ -31,6 +31,7 @@ class Setting extends Model
         'enable_multi_pack_selling', 'allow_overselling', 'sidebar_menu_order',
         'vehicle_fitment_enabled', 'module_flags', 'barcode_label_settings', 'export_settings',
         'auto_journal_enabled', 'product_image_resize', 'product_image_max_size',
+        'enable_box_qty',
     ];
 
     protected $casts = [
@@ -64,6 +65,7 @@ class Setting extends Model
         'allow_overselling' => 'boolean',
         'vehicle_fitment_enabled' => 'boolean',
         'product_image_resize' => 'boolean',
+        'enable_box_qty' => 'boolean',
         'product_image_max_size' => 'integer',
         'google_calendar_client_secret' => 'encrypted',
         'google_calendar_refresh_token' => 'encrypted',

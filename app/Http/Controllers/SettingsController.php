@@ -252,6 +252,11 @@ class SettingsController extends Controller
             'enable_multi_pack_selling' => $request->has('enable_multi_pack_selling')
                 ? (($request['enable_multi_pack_selling'] == '1' || $request['enable_multi_pack_selling'] == 'true' || $request['enable_multi_pack_selling'] === 1 || $request['enable_multi_pack_selling'] === true) ? 1 : 0)
                 : (int) ($setting->enable_multi_pack_selling ?? 0),
+            // "Box" quantity field on Create/Edit Sale, Sale Detail, and the
+            // invoice PDF — business-specific, default ON (already shipped).
+            'enable_box_qty' => $request->has('enable_box_qty')
+                ? (($request['enable_box_qty'] == '1' || $request['enable_box_qty'] == 'true' || $request['enable_box_qty'] === 1 || $request['enable_box_qty'] === true) ? 1 : 0)
+                : (int) ($setting->enable_box_qty ?? 1),
             // Allow Overselling: global switch — every stock check (POS, sales,
             // quotations, transfers, adjustments, damages, imports) is bypassed
             // and stock may go negative (default off)
@@ -836,6 +841,7 @@ class SettingsController extends Controller
             $item['show_serial_tracking'] = (bool) ($settings->show_serial_tracking ?? false);
             // Multi-pack selling toggle (default false)
             $item['enable_multi_pack_selling'] = (bool) ($settings->enable_multi_pack_selling ?? false);
+            $item['enable_box_qty'] = (bool) ($settings->enable_box_qty ?? true);
             $item['allow_overselling'] = (bool) ($settings->allow_overselling ?? false);
             // Vehicle Fitment master switch (default false) — must be returned
             // here or the System Settings form loads it as undefined and every
@@ -1291,6 +1297,7 @@ class SettingsController extends Controller
             $item['show_serial_tracking'] = (bool) ($settings->show_serial_tracking ?? false);
             // Multi-pack selling toggle (default false)
             $item['enable_multi_pack_selling'] = (bool) ($settings->enable_multi_pack_selling ?? false);
+            $item['enable_box_qty'] = (bool) ($settings->enable_box_qty ?? true);
             $item['allow_overselling'] = (bool) ($settings->allow_overselling ?? false);
             // Vehicle Fitment master switch (default false) — must be returned
             // here or the System Settings form loads it as undefined and every

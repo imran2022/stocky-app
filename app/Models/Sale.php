@@ -13,7 +13,7 @@ class Sale extends Model
         'total_retturn', 'warehouse_id', 'user_id', 'statut', 'discount', 'discount_Method', 'shipping', 'time', 'used_points', 'earned_points', 'discount_from_points',
         'paid_amount', 'payment_statut', 'created_at', 'updated_at', 'deleted_at', 'shipping_status', 'subscription_id', 'sales_agent_id',
         // Courier / delivery tracking
-        'tracking_ref', 'zone_id', 'courier_id',
+        'tracking_ref', 'zone_id', 'courier_id', 'consignment_id',
         // Idempotency key for POS sales; nullable for legacy rows and non-POS flows
         'sale_uuid',
         'woocommerce_order_id',

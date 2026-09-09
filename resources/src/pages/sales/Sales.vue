@@ -104,6 +104,10 @@
         <template v-else-if="column.key === 'due'">
           <span :style="{ color: Number(record.due) > 0 ? '#ff4d4f' : undefined }">{{ money(record.due) }}</span>
         </template>
+        <template v-else-if="column.key === 'return_amount'">
+          <span :style="{ color: Number(record.return_amount) > 0 ? '#faad14' : undefined }">{{ money(record.return_amount) }}</span>
+        </template>
+        <template v-else-if="column.key === 'shipping'">{{ money(record.shipping) }}</template>
         <template v-else-if="column.key === 'payment_status'">
           <a-tag :color="payStatusColor(record.payment_status)">
             {{ statusKey(PAYMENT_STATUSES, record.payment_status) ? $t(statusKey(PAYMENT_STATUSES, record.payment_status)) : record.payment_status }}
@@ -541,8 +545,12 @@ const columns = computed(() => [
   { title: t('Total'), dataIndex: 'GrandTotal', key: 'GrandTotal', sorter: true, align: 'right', exportValue: r => money(r.GrandTotal) },
   { title: t('Paid'), dataIndex: 'paid_amount', key: 'paid_amount', sorter: true, align: 'right', exportValue: r => money(r.paid_amount) },
   { title: t('Due'), dataIndex: 'due', key: 'due', align: 'right', exportValue: r => money(r.due) },
+  { title: 'Return', dataIndex: 'return_amount', key: 'return_amount', align: 'right', exportValue: r => money(r.return_amount) },
   { title: t('PaymentStatus'), dataIndex: 'payment_status', key: 'payment_status', exportValue: r => r.payment_status },
   { title: t('Shipping_status'), dataIndex: 'shipping_status', key: 'shipping_status', exportValue: r => r.shipping_status || '' },
+  { title: 'Shipping Charge', dataIndex: 'shipping', key: 'shipping', align: 'right', defaultHidden: true, exportValue: r => money(r.shipping || 0) },
+  { title: 'Consignment ID', dataIndex: 'consignment_id', key: 'consignment_id', defaultHidden: true, exportValue: r => r.consignment_id || '' },
+  { title: 'Sales Agent', dataIndex: 'sales_agent_name', key: 'sales_agent_name', defaultHidden: true, exportValue: r => r.sales_agent_name || '' },
 ]);
 
 // ---------------- list exports (PDF / Excel) ----------------

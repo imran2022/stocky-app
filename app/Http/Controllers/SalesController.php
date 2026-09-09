@@ -101,7 +101,7 @@ class SalesController extends BaseController
         $data = [];
 
         // Check If User Has Permission View  All Records
-        $Sales = Sale::with('facture.payment_method', 'client', 'warehouse', 'user', 'zone', 'courier')
+        $Sales = Sale::with('facture.payment_method', 'client', 'warehouse', 'user', 'zone', 'courier', 'salesAgent')
             ->withSum('details', 'quantity')
             ->where('deleted_at', '=', null)
             ->where(function ($query) use ($view_records) {
@@ -122,6 +122,8 @@ class SalesController extends BaseController
                         ->orWhere('GrandTotal', $request->search)
                         ->orWhere('payment_statut', 'like', "%{$request->search}%")
                         ->orWhere('shipping_status', 'like', "%{$request->search}%")
+                        ->orWhere('tracking_ref', 'like', "%{$request->search}%")
+                        ->orWhere('consignment_id', 'like', "%{$request->search}%")
                         ->orWhere(function ($query) use ($request) {
                             return $query->whereHas('client', function ($q) use ($request) {
                                 $q->where('name', 'LIKE', "%{$request->search}%");
@@ -129,6 +131,21 @@ class SalesController extends BaseController
                         })
                         ->orWhere(function ($query) use ($request) {
                             return $query->whereHas('warehouse', function ($q) use ($request) {
+                                $q->where('name', 'LIKE', "%{$request->search}%");
+                            });
+                        })
+                        ->orWhere(function ($query) use ($request) {
+                            return $query->whereHas('zone', function ($q) use ($request) {
+                                $q->where('name', 'LIKE', "%{$request->search}%");
+                            });
+                        })
+                        ->orWhere(function ($query) use ($request) {
+                            return $query->whereHas('courier', function ($q) use ($request) {
+                                $q->where('name', 'LIKE', "%{$request->search}%");
+                            });
+                        })
+                        ->orWhere(function ($query) use ($request) {
+                            return $query->whereHas('salesAgent', function ($q) use ($request) {
                                 $q->where('name', 'LIKE', "%{$request->search}%");
                             });
                         });
@@ -163,10 +180,12 @@ class SalesController extends BaseController
             $item['date'] = $Sale['date'].' '.$Sale['time'];
             $item['Ref'] = $Sale['Ref'];
             $item['tracking_ref'] = $Sale['tracking_ref'];
+            $item['consignment_id'] = $Sale['consignment_id'];
             $item['zone_id'] = $Sale['zone_id'];
             $item['zone_name'] = optional($Sale['zone'])->name;
             $item['courier_id'] = $Sale['courier_id'];
             $item['courier_name'] = optional($Sale['courier'])->name;
+            $item['sales_agent_name'] = optional($Sale['salesAgent'])->name;
             $item['total_qty'] = (float) ($Sale['details_sum_quantity'] ?? 0);
             $item['created_by'] = $Sale['user']->username;
             $item['statut'] = $Sale['statut'];
@@ -196,8 +215,13 @@ class SalesController extends BaseController
                 $sellReturn = SaleReturn::where('sale_id', $Sale['id'])->where('deleted_at', '=', null)->first();
                 $item['salereturn_id'] = $sellReturn->id;
                 $item['sale_has_return'] = 'yes';
+                $item['return_amount'] = number_format(
+                    SaleReturn::where('sale_id', $Sale['id'])->where('deleted_at', '=', null)->sum('GrandTotal'),
+                    helpers::price_decimals(), '.', ''
+                );
             } else {
                 $item['sale_has_return'] = 'no';
+                $item['return_amount'] = number_format(0, helpers::price_decimals(), '.', '');
             }
 
             // Get documents count
@@ -277,6 +301,7 @@ class SalesController extends BaseController
             $order->user_id = Auth::user()->id;
             $order->sales_agent_id = $request->sales_agent_id ?? null;
             $order->tracking_ref = $request->filled('tracking_ref') ? $request->tracking_ref : null;
+            $order->consignment_id = $request->filled('consignment_id') ? $request->consignment_id : null;
             $order->zone_id = $request->filled('zone_id') ? $request->zone_id : null;
             $order->courier_id = $request->filled('courier_id') ? $request->courier_id : null;
             $order->save();
@@ -985,6 +1010,7 @@ class SalesController extends BaseController
                     'earned_points' => $new_earned,
                     'discount_from_points' => $request['discount_from_points'],
                     'tracking_ref' => $request->filled('tracking_ref') ? $request->tracking_ref : null,
+                    'consignment_id' => $request->filled('consignment_id') ? $request->consignment_id : null,
                     'zone_id' => $request->filled('zone_id') ? $request->zone_id : null,
                     'courier_id' => $request->filled('courier_id') ? $request->courier_id : null,
                 ]);
@@ -1443,6 +1469,7 @@ class SalesController extends BaseController
         $sale_details['id'] = $sale_data->id;
         $sale_details['Ref'] = $sale_data->Ref;
         $sale_details['tracking_ref'] = $sale_data->tracking_ref;
+        $sale_details['consignment_id'] = $sale_data->consignment_id;
         $sale_details['zone_name'] = optional($sale_data->zone)->name;
         $sale_details['courier_name'] = optional($sale_data->courier)->name;
         $sale_details['date'] = $sale_data->date.' '.$sale_data->time;
@@ -1553,6 +1580,7 @@ class SalesController extends BaseController
             'details' => $details,
             'sale' => $sale_details,
             'company' => $company,
+            'enable_box_qty' => (bool) ($company->enable_box_qty ?? true),
         ]);
 
     }
@@ -2829,6 +2857,9 @@ class SalesController extends BaseController
         if ($request->has('tracking_ref')) {
             $payload['tracking_ref'] = $request->tracking_ref !== '' ? $request->tracking_ref : null;
         }
+        if ($request->has('consignment_id')) {
+            $payload['consignment_id'] = $request->consignment_id !== '' ? $request->consignment_id : null;
+        }
 
         if (empty($payload)) {
             return response()->json(['success' => false, 'message' => 'Nothing to update.'], 422);
@@ -3162,6 +3193,7 @@ class SalesController extends BaseController
             'accounts' => $accounts,
             'payment_methods' => $payment_methods,
             'point_to_amount_rate' => $settings->point_to_amount_rate,
+            'enable_box_qty' => (bool) ($settings->enable_box_qty ?? true),
             'zones' => SaleZone::whereNull('deleted_at')->orderBy('name')->get(['id', 'name']),
             'couriers' => SaleCourier::whereNull('deleted_at')->orderBy('name')->get(['id', 'name']),
         ]);
@@ -3249,6 +3281,7 @@ class SalesController extends BaseController
             $sale['statut'] = $Sale_data->statut;
             $sale['notes'] = $Sale_data->notes;
             $sale['tracking_ref'] = $Sale_data->tracking_ref;
+            $sale['consignment_id'] = $Sale_data->consignment_id;
             $sale['zone_id'] = $Sale_data->zone_id;
             $sale['courier_id'] = $Sale_data->courier_id;
 
@@ -3418,6 +3451,7 @@ class SalesController extends BaseController
                 'sales_agents' => $sales_agents,
                 'discount_from_points' => $Sale_data->discount_from_points,
                 'point_to_amount_rate' => $settings->point_to_amount_rate,
+                'enable_box_qty' => (bool) ($settings->enable_box_qty ?? true),
                 'zones' => SaleZone::whereNull('deleted_at')->orderBy('name')->get(['id', 'name']),
                 'couriers' => SaleCourier::whereNull('deleted_at')->orderBy('name')->get(['id', 'name']),
             ]);

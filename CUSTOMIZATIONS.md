@@ -270,6 +270,83 @@ horizontal scrolling — flag it `defaultHidden: true` rather than leaving
 it always-visible. No new column-visibility mechanism needs to be built;
 this one already exists and is the right tool for that.
 
+## 7. Consignment ID, Return column, Shipping/Agent columns, Box qty toggle
+
+**Why:** More Sales-list reporting needs (which zone/courier/agent handled
+what, whether a sale was returned) plus making the "Box" feature (section
+3) optional — it's specific to this business, not every Stocky install
+needs it.
+
+**Schema** — migration
+`database/migrations/2026_09_09_000001_add_consignment_id_and_box_qty_toggle.php`:
+- `sales.consignment_id` (string, nullable, indexed) — the courier's own
+  shipment/consignment number, distinct from `tracking_ref` (which the
+  user types in themselves; consignment_id is whatever the courier's
+  system assigns).
+- `settings.enable_box_qty` (boolean, **default true**) — so existing
+  behavior (Box already shipped and in use) doesn't change for anyone
+  until they explicitly flip it off in System Settings → Sales → Features.
+
+**Backend:**
+- `consignment_id` is threaded through every place `tracking_ref` already
+  was: `Sale` model fillable, `SalesController@store/update/edit/show/
+  bulkUpdate`, exactly mirroring that field's pattern.
+- `SalesController@index` — added `consignment_id`, `shipping` (already
+  existed on the model, just wasn't in the list payload), `sales_agent_name`
+  (new `salesAgent` eager-load), and `return_amount` (sum of
+  `SaleReturn.GrandTotal` for the sale — added as one extra query
+  alongside the pre-existing has-a-return check, not a replacement of it,
+  to avoid changing that existing query's behavior).
+- Global search (`index`'s `search` param) extended to also match
+  `tracking_ref`, `consignment_id` (plain indexed columns — cheap), and
+  Zone/Courier/Sales-Agent **names** via `whereHas` (same pattern already
+  used for Customer/Warehouse name search) — no meaningful performance
+  concern at normal business scale; the FK columns behind those relations
+  are already indexed.
+- `Setting` model — `enable_box_qty` added to `$fillable`/`$casts`.
+  `SettingsController`'s save handler and both of its "current settings"
+  response blocks updated with the same has()-checked boolean pattern
+  every other feature toggle already uses.
+- `enable_box_qty` is returned by `SalesController@create`, `@edit`, and
+  `@show` (wherever `$settings`/`$company` was already loaded) so the
+  frontend knows whether to show the Box field/column without a separate
+  API call.
+- `resources/views/pdf/sale_pdf.blade.php` — the Box `<th>`/`<td>` are now
+  each wrapped in `@if($setting['enable_box_qty'] ?? true)`. Verified by
+  rendering the same sale's invoice with the setting on and off and
+  checking for the `>Box<` header string in each — present when on,
+  absent when off, single-invoice PDF otherwise byte-for-byte unaffected.
+
+**Frontend:**
+- `resources/src/pages/sales/Sales.vue` — "Return" column added right
+  after Due (per request, sums any returns against that sale). "Shipping
+  Charge", "Consignment ID", "Sales Agent" added at the very end of the
+  column list, each flagged `defaultHidden: true` per the convention in
+  section 6 — they show up in the "Columns" picker but don't widen the
+  default view.
+- `resources/src/pages/sales/SaleForm.vue` — Consignment ID text input
+  next to Tracking Ref (same `sale.consignment_id` pattern as
+  `tracking_ref` throughout: default value, submit payload, and all three
+  bootstrap-load branches — create, edit, quotation-conversion). New
+  `enableBoxQty` ref, loaded from whichever bootstrap response ran; the
+  Box entry in `lineColumns` is now conditional
+  (`...(enableBoxQty.value ? [...] : [])`) so the column simply doesn't
+  exist when the feature is off, rather than being hidden CSS-side.
+- `resources/src/pages/sales/SaleDetails.vue` — same `enableBoxQty` +
+  conditional-column treatment for the items table; Consignment ID shown
+  in the top info block next to Tracking Ref, same `v-if` pattern (hidden
+  when empty).
+- `resources/src/pages/settings/SystemSettings.vue` — new toggle in the
+  Sales → Features tab, "Enable 'Box' Quantity on Sales", right above the
+  existing Vehicle Fitment row (plain hardcoded label text, matching that
+  row's style, not a `$t()` key — same reasoning as the Zone/Courier
+  Report menu label in section 2: no translation-table entry exists yet).
+
+**Not changed:** `resources/views/pdf/packing_list.blade.php` still always
+shows its Box column regardless of the setting — packing lists are a
+niche, business-specific document already, and an empty Box column there
+when the feature is off is harmless. Revisit if that ever bothers someone.
+
 ## Known follow-ups (not done, intentionally)
 
 - "Zone / Courier Report" menu label (`Zone_Courier_Report`) has no

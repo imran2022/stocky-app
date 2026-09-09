@@ -89,6 +89,7 @@
             </div>
             <div v-if="sale.warehouse" class="inv-meta-row"><span class="im-label">{{ $t('warehouse') }}</span><span class="im-value">{{ sale.warehouse }}</span></div>
             <div v-if="sale.tracking_ref" class="inv-meta-row"><span class="im-label">Tracking Ref</span><span class="im-value">{{ sale.tracking_ref }}</span></div>
+            <div v-if="sale.consignment_id" class="inv-meta-row"><span class="im-label">Consignment ID</span><span class="im-value">{{ sale.consignment_id }}</span></div>
             <div v-if="sale.zone_name" class="inv-meta-row"><span class="im-label">Zone</span><span class="im-value">{{ sale.zone_name }}</span></div>
             <div v-if="sale.courier_name" class="inv-meta-row"><span class="im-label">Courier</span><span class="im-value">{{ sale.courier_name }}</span></div>
           </div>
@@ -224,6 +225,7 @@ const loading = ref(true);
 const sale = ref({});
 const details = ref([]);
 const company = ref({});
+const enableBoxQty = ref(true);
 const sendingEmail = ref(false);
 const sendingSms = ref(false);
 const downloadingPdf = ref(false);
@@ -250,7 +252,7 @@ const discountAmount = computed(() => {
 const itemColumns = computed(() => [
   { title: t('ProductName'), key: 'product' },
   { title: t('Price'), key: 'price', align: 'right' },
-  { title: 'Box', key: 'box_qty', align: 'right' },
+  ...(enableBoxQty.value ? [{ title: 'Box', key: 'box_qty', align: 'right' }] : []),
   { title: t('Quantity'), key: 'quantity', align: 'right' },
   { title: t('Discount'), key: 'discount', align: 'right' },
   { title: t('Tax'), key: 'tax', align: 'right' },
@@ -345,6 +347,7 @@ onMounted(async () => {
     sale.value = data.sale || {};
     details.value = data.details || [];
     company.value = data.company || {};
+    enableBoxQty.value = data.enable_box_qty !== undefined ? !!data.enable_box_qty : true;
   } catch (e) {
     message.error(t('InvalidData'));
     router.push('/sales');

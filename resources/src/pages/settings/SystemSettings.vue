@@ -297,6 +297,17 @@
             </div>
             <div class="setting-row">
               <div>
+                <div class="setting-label">Enable "Box" Quantity on Sales</div>
+                <div class="setting-help">
+                  Adds a "Box" field per product line on Create/Edit Sale (e.g. quantity 12 = 1 box)
+                  and shows it on the Sale Detail page and invoice PDF. Turn off if your business
+                  doesn't pack by box — the field disappears everywhere it's shown.
+                </div>
+              </div>
+              <a-switch v-model:checked="setting.enable_box_qty" />
+            </div>
+            <div class="setting-row">
+              <div>
                 <div class="setting-label">Vehicle Fitment &amp; My Garage</div>
                 <div class="setting-help">
                   Vehicle selector (Make / Model / Year) with a customer "My Garage" on the
@@ -1215,6 +1226,7 @@ async function save() {
   fd.append('product_image_max_size', s.product_image_max_size || 800);
   fd.append('show_serial_tracking', s.show_serial_tracking ? 1 : 0);
   fd.append('enable_multi_pack_selling', s.enable_multi_pack_selling ? 1 : 0);
+  fd.append('enable_box_qty', s.enable_box_qty ? 1 : 0);
   fd.append('allow_overselling', s.allow_overselling ? 1 : 0);
   fd.append('vehicle_fitment_enabled', s.vehicle_fitment_enabled ? 1 : 0);
   fd.append('auto_journal_enabled', s.auto_journal_enabled ? 1 : 0);
