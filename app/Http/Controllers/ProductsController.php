@@ -24,6 +24,8 @@ use App\Models\UserWarehouse;
 use App\Models\Warehouse;
 use App\Models\WarehouseLocation;
 use App\Models\ProductWarehouseLocation;
+use App\Models\PurchaseDetail;
+use App\Models\SaleDetail;
 use App\Services\ProductGalleryService;
 use App\utils\helpers;
 use Carbon\Carbon;
@@ -308,6 +310,47 @@ class ProductsController extends BaseController
                 $item['wholesale_price'] = number_format((float) $product->wholesale_price, helpers::price_decimals(), '.', '');
                 $item['min_price'] = number_format((float) $product->min_price, helpers::price_decimals(), '.', '');
             }
+
+            // ----- Extra business-insight fields (same for every product type) -----
+            // Last Purchase Date & Cost: the most recent RECEIVED purchase line for
+            // this product, across all its variants if it has any (purchase_details
+            // always carries product_id even for a variant line).
+            $lastPurchase = PurchaseDetail::join('purchases', 'purchases.id', '=', 'purchase_details.purchase_id')
+                ->where('purchase_details.product_id', $product->id)
+                ->where('purchases.statut', 'received')
+                ->orderByDesc('purchases.date')
+                ->orderByDesc('purchase_details.id')
+                ->first(['purchase_details.cost', 'purchases.date']);
+            $item['last_purchase_date'] = optional($lastPurchase)->date;
+            $item['last_purchase_cost'] = $lastPurchase
+                ? number_format((float) $lastPurchase->cost, helpers::price_decimals(), '.', '')
+                : null;
+
+            // Total Sold (last 30 days) and Last Sold Date: completed sales only,
+            // matching the same "statut = completed" convention used everywhere
+            // else profit/COGS is calculated in this app.
+            $item['total_sold_30d'] = (float) SaleDetail::join('sales', 'sales.id', '=', 'sale_details.sale_id')
+                ->where('sale_details.product_id', $product->id)
+                ->where('sales.statut', 'completed')
+                ->where('sale_details.date', '>=', now()->subDays(30)->format('Y-m-d'))
+                ->sum('sale_details.quantity');
+            $item['last_sold_date'] = SaleDetail::join('sales', 'sales.id', '=', 'sale_details.sale_id')
+                ->where('sale_details.product_id', $product->id)
+                ->where('sales.statut', 'completed')
+                ->max('sale_details.date');
+
+            // Warehouse Count: how many of the warehouses this user can see actually
+            // carry stock (qty > 0) of this product right now — same warehouse
+            // scoping (selected warehouse, else the user's allowed set) as Quantity.
+            $warehouseCountQuery = product_warehouse::where('product_id', $product->id)
+                ->whereNull('deleted_at')
+                ->where('qte', '>', 0);
+            if ($warehouseId) {
+                $warehouseCountQuery->where('warehouse_id', $warehouseId);
+            } elseif (! $user_auth->is_all_warehouses) {
+                $warehouseCountQuery->whereIn('warehouse_id', $allowedWarehouseIds);
+            }
+            $item['warehouse_count'] = $warehouseCountQuery->distinct('warehouse_id')->count('warehouse_id');
 
             $data[] = $item;
         }

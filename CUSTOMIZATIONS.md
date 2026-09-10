@@ -667,6 +667,81 @@ unscoped block: BootstrapVue modals render their `.modal-dialog` outside
 this component's own DOM subtree (already documented at the top of that
 block, re: the mobile tab dropdown), so scoped rules can never reach it.
 
+## 14. Products list: business-insight columns (Last Purchase, Sold 30d, Last Sold, Warehouse Count)
+
+**Why:** A planning discussion (not just a build request) about whether
+`products.cost` — a static, manually-set field, never auto-updated on
+receiving a purchase (confirmed by reading the codebase, not assumed) — is
+the right thing to show as "Cost" on the product list, and what would
+make the list a genuinely useful business-insight view. Landed on: leave
+the accurate-inventory-valuation question (a proper FIFO-remaining-stock
+cost calculation, which is a real, larger piece of work — see below) for
+a future round, and ship four independent, purely additive metrics now
+that don't depend on resolving that question at all.
+
+**Backend** (`ProductsController@index`) — one shared block computing 4
+fields per product, added once after the existing per-type branches
+(single/combo/variant/service) so it applies uniformly regardless of
+product type:
+- `last_purchase_date` / `last_purchase_cost` — the single most recent
+  **received** purchase line for that product (`purchase_details` joined
+  to `purchases`, ordered by date desc). For variant products this looks
+  across all of that product's variants (`purchase_details.product_id`
+  is always set even for a variant line) — a deliberate choice: "when did
+  we last restock this product, and at what price" is still a useful
+  answer at the product level even when the specific variant differs.
+- `total_sold_30d` — sum of `sale_details.quantity` for this product over
+  the trailing 30 days, `sales.statut = 'completed'` only (matching the
+  "completed only" convention already used everywhere else profit/COGS is
+  computed in this app, e.g. `CalculatesCogsAndAverageCost`). This is a
+  rolling window from *now*, not a fixed calendar period.
+- `last_sold_date` — most recent completed sale date for the product.
+- `warehouse_count` — how many of the warehouses that are relevant right
+  now (the selected warehouse filter if one's applied, else the user's
+  full allowed set for `is_all_warehouses = 0` users) currently hold
+  `qty > 0` of this product. Verified with a warehouse-restricted test
+  user: they see `1`, not the true `2`, when only one of the two
+  warehouses is assigned to them — same scoping as every other
+  warehouse-aware number on this page (Quantity, the warehouse filter
+  itself).
+- Deliberately followed this file's own existing per-row-query pattern
+  (Quantity is *already* computed with a query per row in this same loop,
+  not a bulk aggregate) rather than introducing a different, more
+  "optimal" bulk-query style just for these 4 fields — consistency with
+  what's already here, and the loop only ever runs over one page of
+  results (≤100 typically), not the whole catalog.
+- All 4 verified against a real database: correct product picked as
+  "last" out of two purchases at different dates/costs; the 30-day sum
+  correctly excludes a 60-day-old sale while `last_sold_date` still finds
+  it if it *were* the most recent (independent windows — 30d sum vs.
+  all-time last-sold); a product with zero purchase/sale/stock history
+  returns clean `null`/`0` rather than erroring.
+
+**Frontend** (`resources/src/pages/products/Products.vue`) — 4 new
+columns after Quantity, all `defaultHidden: true` (this file already
+uses that convention for Wholesale/Min Price). "Last Purchase" is one
+column showing cost above date (mirrors this file's existing
+`stacked-cell` pattern used for variant cost/price lines) rather than two
+separate columns. Also added to the separate, hand-maintained
+`exportColumns` list this file already keeps for Excel/PDF export (it
+deliberately doesn't derive from `columns` — see the comment already
+above that array) — the new fields flow into export automatically.
+
+**Explicitly deferred, not forgotten**: "Inventory Value" and "Potential
+Profit" both need a much more accurate cost figure than
+`products.cost`, or even this app's existing "lifetime average purchase
+cost" (`averageCostBulk` in the FIFO/avg-cost trait — averages over
+*every* unit ever purchased, not what's actually still on the shelf, so
+it silently overstates or understates true remaining value once
+purchases at different prices happen and some are sold off). The
+right calculation is a proper FIFO-remaining-stock valuation (burn all
+historical sales against purchase layers in date order, value whatever's
+left at each layer's own cost — return-aware, i.e. purchase returns
+remove from a layer and sale returns effectively un-consume one), which
+is real, separate work — not implemented yet. Do not backfill Inventory
+Value/Potential Profit with `products.cost` or the lifetime-average as a
+stand-in; that was explicitly discussed and rejected as misleading.
+
 ## Known follow-ups (not done, intentionally)
 
 - "Zone / Courier Report" menu label (`Zone_Courier_Report`) has no

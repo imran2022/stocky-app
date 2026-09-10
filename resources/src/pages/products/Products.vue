@@ -203,6 +203,20 @@
             <div v-for="(v, i) in moneyLines(record[column.key])" :key="i">{{ v }}</div>
           </div>
         </template>
+        <template v-else-if="column.key === 'last_purchase'">
+          <div v-if="record.last_purchase_date" class="stacked-cell stacked-cell--num">
+            <div>{{ money(record.last_purchase_cost) }}</div>
+            <div class="muted">{{ date(record.last_purchase_date) }}</div>
+          </div>
+          <span v-else class="muted">—</span>
+        </template>
+        <template v-else-if="column.key === 'total_sold_30d'">
+          {{ record.total_sold_30d ? record.total_sold_30d : 0 }}
+        </template>
+        <template v-else-if="column.key === 'last_sold_date'">
+          <span v-if="record.last_sold_date">{{ date(record.last_sold_date) }}</span>
+          <span v-else class="muted">—</span>
+        </template>
         <template v-else-if="column.key === 'actions'">
           <a-space>
             <a-tooltip :title="$t('ProductDetails')">
@@ -271,7 +285,7 @@ import http from '../../lib/http';
 import { t as tf } from '../../i18n';
 
 const { t } = useI18n();
-const { money } = useFormat();
+const { money, date } = useFormat();
 const auth = useAuthStore();
 
 const filters = ref({
@@ -318,6 +332,12 @@ const columns = computed(() => [
   { title: t('Brand'), dataIndex: 'brand', key: 'brand' },
   { title: t('Categorie'), dataIndex: 'category', key: 'category' },
   { title: t('Quantity'), dataIndex: 'quantity', key: 'quantity', align: 'right', sorter: true },
+  // Business-insight columns — off by default (see the Wholesale/Min Price
+  // pair above), enable from the table's columns dropdown.
+  { title: 'Last Purchase', key: 'last_purchase', align: 'right', defaultHidden: true },
+  { title: 'Sold (30d)', dataIndex: 'total_sold_30d', key: 'total_sold_30d', align: 'right', sorter: true, defaultHidden: true },
+  { title: 'Last Sold', dataIndex: 'last_sold_date', key: 'last_sold_date', align: 'right', sorter: true, defaultHidden: true },
+  { title: 'Warehouses', dataIndex: 'warehouse_count', key: 'warehouse_count', align: 'right', defaultHidden: true },
   { title: t('Action'), key: 'actions', width: 160, align: 'center' },
 ]);
 
@@ -393,6 +413,17 @@ const exportColumns = computed(() => [
   { title: t('Brand'), dataIndex: 'brand' },
   { title: t('Categorie'), dataIndex: 'category' },
   { title: t('Quantity'), dataIndex: 'quantity' },
+  {
+    title: 'Last Purchase Cost',
+    exportValue: (r) => r.last_purchase_cost ?? '',
+  },
+  {
+    title: 'Last Purchase Date',
+    exportValue: (r) => r.last_purchase_date ?? '',
+  },
+  { title: 'Sold (30d)', dataIndex: 'total_sold_30d' },
+  { title: 'Last Sold', dataIndex: 'last_sold_date' },
+  { title: 'Warehouses', dataIndex: 'warehouse_count' },
 ]);
 
 const exporting = ref(null);
@@ -449,6 +480,10 @@ function duplicate(record) {
 
 <style scoped>
 /* ---------------- view switch ---------------- */
+.muted {
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+}
 .tb-bar {
   display: flex;
   justify-content: flex-end;
