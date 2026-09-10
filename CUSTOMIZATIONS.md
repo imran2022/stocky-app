@@ -622,6 +622,35 @@ as two separate steps rather than one full `app()->instance()`-bound
 call — both were confirmed correct independently. This is a testing
 technique, not a production bug.
 
+## 12. Fix: Recent Invoices modal cropped on the right
+
+**Why:** The Recent Invoices modal (section 10/11) used a hand-rolled CSS
+Grid (`grid-template-columns: 130px 100px 1.3fr 130px 1.9fr`) with three
+text buttons ("PDF", "Label", "Edit") in the last column. The fixed-pixel
+tracks plus three text buttons needed more horizontal space than the
+modal reliably had, and there was no `overflow-x` handling on the
+wrapper — so at most window widths the Actions column (and part of
+Amount) was silently clipped at the modal's edge rather than wrapping or
+scrolling.
+
+**Fix** — replaced the CSS Grid with a real `<table>`
+(`resources/src/pages/pos/PosPage.vue`): table columns size to their own
+content instead of fighting fixed tracks, and the table sits inside a
+`.ri-table-wrap` with `overflow-x: auto` as a fallback for any
+still-too-narrow window rather than clipping. The three actions became
+compact 30×30px icon buttons (`.ri-icon-btn` / `.ri-edit-btn`, inline SVGs,
+native `title` tooltips) instead of text buttons, needing roughly a third
+of the horizontal space the old ones did. All the styling moved out of
+per-row inline `style` attributes into named classes in the file's
+existing `<style scoped lang="scss">` block — the earlier version
+repeated an identical multi-line inline style string in the header row
+and (via `v-for`) implicitly for every data row, which was the "garbage"
+being asked to clean up as much as the visual bug. Hover states
+(`:hover:not(:disabled)`) are real CSS now rather than relying on
+`b-button`'s default styling interacting correctly with inline overrides.
+
+No backend changes; no other page touched.
+
 ## Known follow-ups (not done, intentionally)
 
 - "Zone / Courier Report" menu label (`Zone_Courier_Report`) has no

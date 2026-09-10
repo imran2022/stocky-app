@@ -1158,38 +1158,55 @@
     <div v-else-if="recentInvoices.length === 0" style="text-align: center; color: #6b7280; padding: 32px 0;">
       No recent invoices.
     </div>
-    <div v-else style="border: 1px solid #e6e6ec; border-radius: 8px; overflow: hidden;">
-      <div style="display: grid; grid-template-columns: 130px 100px 1.3fr 130px 1.9fr; gap: 12px; padding: 10px 16px; background: #ede9fe; color: #6d28d9; font-weight: 600; font-size: 12.5px;">
-        <span>Date</span><span>Reference</span><span>Customer</span><span style="text-align: right;">Amount</span><span style="text-align: right;">Actions</span>
-      </div>
-      <div
-        v-for="s in recentInvoices" :key="s.id"
-        style="display: grid; grid-template-columns: 130px 100px 1.3fr 130px 1.9fr; gap: 12px; align-items: center; padding: 12px 16px; border-top: 1px solid #f0f0f0; font-size: 13px;"
-      >
-        <span style="color: #6b7280; white-space: nowrap;">{{ s.date }}</span>
-        <span style="font-weight: 600; white-space: nowrap;">{{ s.Ref }}</span>
-        <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ s.client_name || '—' }}</span>
-        <span style="text-align: right; font-family: 'JetBrains Mono', monospace; white-space: nowrap;">{{ formatPriceWithCurrentCurrency(s.GrandTotal, 2) }}</span>
-        <span style="text-align: right; display: flex; gap: 6px; justify-content: flex-end;">
-          <b-button
-            size="sm" variant="outline-secondary"
-            :disabled="recentInvoiceDownloading === s.id + ':pdf'"
-            @click="downloadRecentInvoiceFile(s, 'pdf')"
-          >
-            <b-spinner v-if="recentInvoiceDownloading === s.id + ':pdf'" small /><span v-else>PDF</span>
-          </b-button>
-          <b-button
-            size="sm" variant="outline-secondary"
-            :disabled="recentInvoiceDownloading === s.id + ':label'"
-            @click="downloadRecentInvoiceFile(s, 'label')"
-          >
-            <b-spinner v-if="recentInvoiceDownloading === s.id + ':label'" small /><span v-else>Label</span>
-          </b-button>
-          <b-button size="sm" variant="outline-primary" @click="editRecentInvoice(s)">
-            Edit
-          </b-button>
-        </span>
-      </div>
+    <div v-else class="ri-table-wrap">
+      <table class="ri-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Reference</th>
+            <th>Customer</th>
+            <th class="ri-right">Amount</th>
+            <th class="ri-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="s in recentInvoices" :key="s.id">
+            <td class="ri-date">{{ s.date }}</td>
+            <td class="ri-ref">{{ s.Ref }}</td>
+            <td class="ri-customer">{{ s.client_name || '—' }}</td>
+            <td class="ri-right ri-amount">{{ formatPriceWithCurrentCurrency(s.GrandTotal, 2) }}</td>
+            <td class="ri-right">
+              <div class="ri-actions">
+                <button
+                  class="ri-icon-btn" title="Download PDF Invoice"
+                  :disabled="recentInvoiceDownloading === s.id + ':pdf'"
+                  @click="downloadRecentInvoiceFile(s, 'pdf')"
+                >
+                  <b-spinner v-if="recentInvoiceDownloading === s.id + ':pdf'" small />
+                  <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="15" height="15">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>
+                  </svg>
+                </button>
+                <button
+                  class="ri-icon-btn" title="Download Shipping Label"
+                  :disabled="recentInvoiceDownloading === s.id + ':label'"
+                  @click="downloadRecentInvoiceFile(s, 'label')"
+                >
+                  <b-spinner v-if="recentInvoiceDownloading === s.id + ':label'" small />
+                  <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="15" height="15">
+                    <path d="M20.59 13.41 11 3.83A2 2 0 0 0 9.59 3.2L3 3v6.59a2 2 0 0 0 .59 1.41l9.58 9.58a2 2 0 0 0 2.82 0l4.6-4.6a2 2 0 0 0 0-2.82z"/><circle cx="7.5" cy="7.5" r="1.5"/>
+                  </svg>
+                </button>
+                <button class="ri-icon-btn ri-edit-btn" title="Edit this sale" @click="editRecentInvoice(s)">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="15" height="15">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4z"/>
+                  </svg>
+                </button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
     <div v-if="recentInvoices.length > 0" style="text-align: center; color: #9ca3af; font-size: 12px; margin-top: 10px;">
       Showing the {{ recentInvoices.length }} most recent invoices.
@@ -10232,6 +10249,91 @@ export default {
 
 <style scoped lang="scss">
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+/* ============================================
+   Recent Invoices modal — table + compact icon
+   actions (was a hand-rolled CSS grid that
+   overflowed/clipped on narrower windows; a real
+   <table> sizes its own columns and the wrapper
+   below scrolls horizontally as a fallback rather
+   than clipping).
+   ============================================ */
+.ri-table-wrap {
+  border: 1px solid #e6e6ec;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+.ri-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+
+  th, td {
+    padding: 10px 14px;
+    white-space: nowrap;
+  }
+
+  thead th {
+    background: #ede9fe;
+    color: #6d28d9;
+    font-weight: 600;
+    font-size: 12.5px;
+    text-align: left;
+  }
+
+  tbody tr:not(:first-child) td {
+    border-top: 1px solid #f0f0f0;
+  }
+}
+.ri-right {
+  text-align: right;
+}
+.ri-date {
+  color: #6b7280;
+}
+.ri-ref {
+  font-weight: 600;
+}
+.ri-customer {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ri-amount {
+  font-family: 'JetBrains Mono', monospace;
+}
+.ri-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+.ri-icon-btn {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #e6e6ec;
+  border-radius: 6px;
+  background: #fff;
+  color: #4b5563;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+
+  &:hover:not(:disabled) {
+    border-color: #6d28d9;
+    color: #6d28d9;
+    background: #f5f3ff;
+  }
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+}
+.ri-edit-btn:hover:not(:disabled) {
+  border-color: #6d28d9;
+  color: #fff;
+  background: #6d28d9;
+}
 
 /* ============================================
    REFINED CLASSIC — DESIGN TOKENS
