@@ -39,6 +39,17 @@
               />
             </a-form-item>
           </a-col>
+          <!-- Multi-Currency: entered/displayed amounts are in this currency;
+               the model (and the payload) stays in the base currency. -->
+          <a-col v-if="mcEnabled" :xs="24" :md="8">
+            <a-form-item :label="$t('Currency')">
+              <a-select
+                v-model:value="docCurrencyId"
+                show-search option-filter-prop="label"
+                :options="currencyOptions"
+              />
+            </a-form-item>
+          </a-col>
         </a-row>
       </a-card>
 
@@ -71,7 +82,7 @@
               <div class="muted">{{ record.code }}</div>
               <a-tag v-if="record.is_batch_tracked" color="warning" style="margin-top: 2px">Batch</a-tag>
             </template>
-            <template v-else-if="column.key === 'net_price'">{{ money(record.Net_price) }}</template>
+            <template v-else-if="column.key === 'net_price'">{{ docMoney(record.Net_price) }}</template>
             <template v-else-if="column.key === 'stock'">
               {{ record.stock ?? '—' }} {{ record.unitSale }}
             </template>
@@ -83,10 +94,10 @@
                 @update:value="v => setQty(record, v)"
               />
             </template>
-            <template v-else-if="column.key === 'discount'">{{ money(record.DiscountNet * record.quantity) }}</template>
-            <template v-else-if="column.key === 'tax'">{{ money(record.taxe * record.quantity) }}</template>
+            <template v-else-if="column.key === 'discount'">{{ docMoney(record.DiscountNet * record.quantity) }}</template>
+            <template v-else-if="column.key === 'tax'">{{ docMoney(record.taxe * record.quantity) }}</template>
             <template v-else-if="column.key === 'subtotal'">
-              <strong>{{ money(record.subtotal) }}</strong>
+              <strong>{{ docMoney(record.subtotal) }}</strong>
             </template>
             <template v-else-if="column.key === 'actions'">
               <a-space>
@@ -120,12 +131,12 @@
               </a-col>
               <a-col :xs="12" :md="8">
                 <a-form-item :label="$t('Discount')">
-                  <a-input-number v-model:value="quote.discount" style="width: 100%" :min="0" />
+                  <a-input-number v-model:value="discountInput" style="width: 100%" :min="0" />
                 </a-form-item>
               </a-col>
               <a-col :xs="12" :md="8">
                 <a-form-item :label="$t('Shipping')">
-                  <a-input-number v-model:value="quote.shipping" style="width: 100%" :min="0" />
+                  <a-input-number v-model:value="shippingInput" style="width: 100%" :min="0" />
                 </a-form-item>
               </a-col>
               <a-col :xs="12" :md="8">
@@ -150,14 +161,18 @@
 
         <a-col :xs="24" :lg="10">
           <a-card size="small">
-            <div class="sum-row"><span>{{ $t('Total') }}</span><span>{{ money(totals.total) }}</span></div>
-            <div class="sum-row"><span>{{ $t('OrderTax') }}</span><span>{{ money(totals.TaxNet) }} ({{ Number(quote.tax_rate) || 0 }}%)</span></div>
+            <div class="sum-row"><span>{{ $t('Total') }}</span><span>{{ docMoney(totals.total) }}</span></div>
+            <div class="sum-row"><span>{{ $t('OrderTax') }}</span><span>{{ docMoney(totals.TaxNet) }} ({{ Number(quote.tax_rate) || 0 }}%)</span></div>
             <div class="sum-row">
               <span>{{ $t('Discount') }}</span>
-              <span style="color: #ff4d4f">- {{ money(quote.discount) }}</span>
+              <span style="color: #ff4d4f">- {{ docMoney(quote.discount) }}</span>
             </div>
-            <div class="sum-row"><span>{{ $t('Shipping') }}</span><span>{{ money(quote.shipping) }}</span></div>
-            <div class="sum-row grand"><span>{{ $t('Total') }}</span><span>{{ money(totals.GrandTotal) }}</span></div>
+            <div class="sum-row"><span>{{ $t('Shipping') }}</span><span>{{ docMoney(quote.shipping) }}</span></div>
+            <div class="sum-row grand"><span>{{ $t('Total') }}</span><span>{{ docMoney(totals.GrandTotal) }}</span></div>
+            <!-- When a foreign currency is active, keep the base total visible -->
+            <div v-if="!dcIsBase" class="sum-row" style="border-bottom: none; font-size: 12px; color: rgba(128,128,128,.85)">
+              <span>{{ $t('Base_Currency_Equivalent') }}</span><span>{{ moneyBase(totals.GrandTotal) }}</span>
+            </div>
           </a-card>
 
           <a-button
@@ -276,6 +291,7 @@ import ProductScanModal from '../../components/ProductScanModal.vue';
 import { resolveScan } from '../../lib/scanMatch';
 import BatchAllocator from '../../components/BatchAllocator.vue';
 import { useFormat } from '../../composables/useFormat';
+import { useDocCurrency } from '../../composables/useDocCurrency';
 import { recomputeLine, computeSimpleTotals } from '../../lib/lineCalc';
 import { hasBatchSelectErrors, firstBatchSelectError } from '../../lib/batchValidation';
 import http from '../../lib/http';
@@ -283,7 +299,23 @@ import http from '../../lib/http';
 const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
-const { money } = useFormat();
+// moneyBase: forms always show base-currency values as base, ignoring the
+// report pages' display-currency selector.
+const { moneyBase } = useFormat();
+
+// Multi-Currency: display/input conversion only — the model stays base.
+const {
+  enabled: mcEnabled,
+  currencyId: docCurrencyId,
+  options: currencyOptions,
+  isBase: dcIsBase,
+  toDoc: toDocAmt,
+  toBase: toBaseAmt,
+  docMoney,
+  loadCurrencies,
+  setFromDocument: setDocCurrency,
+  payloadFields: currencyPayload,
+} = useDocCurrency();
 
 const id = computed(() => route.params.id);
 const isEdit = computed(() => !!id.value);
@@ -311,6 +343,17 @@ const quote = ref({
   tax_rate: 0,
   discount: 0,
   shipping: 0,
+});
+
+// Monetary inputs are typed in the document currency but stored in base.
+// (The quotation-level discount is always a fixed amount.)
+const discountInput = computed({
+  get: () => toDocAmt(quote.value.discount),
+  set: (v) => { quote.value.discount = toBaseAmt(v); },
+});
+const shippingInput = computed({
+  get: () => toDocAmt(quote.value.shipping),
+  set: (v) => { quote.value.shipping = toBaseAmt(v); },
 });
 
 const clientOptions = computed(() => clients.value.map(c => ({ value: c.id, label: c.name })));
@@ -458,11 +501,13 @@ const units = ref([]);
 async function openLineEdit(line) {
   editingLine.value = line;
   lineDraft.value = {
-    Unit_price: line.Unit_price,
+    // The modal is typed in the document currency (fixed amounts only —
+    // percentages pass through); applyLineEdit converts back to base.
+    Unit_price: toDocAmt(line.Unit_price),
     tax_method: String(line.tax_method || '1'),
     tax_percent: line.tax_percent,
     discount_Method: String(line.discount_Method || '2'),
-    discount: line.discount,
+    discount: String(line.discount_Method || '2') === '2' ? toDocAmt(line.discount) : line.discount,
     sale_unit_id: line.sale_unit_id,
     imei_number: line.imei_number,
   };
@@ -482,11 +527,13 @@ async function openLineEdit(line) {
 function applyLineEdit() {
   const line = editingLine.value;
   Object.assign(line, {
-    Unit_price: Number(lineDraft.value.Unit_price) || 0,
+    Unit_price: toBaseAmt(lineDraft.value.Unit_price),
     tax_method: lineDraft.value.tax_method,
     tax_percent: Number(lineDraft.value.tax_percent) || 0,
     discount_Method: lineDraft.value.discount_Method,
-    discount: Number(lineDraft.value.discount) || 0,
+    discount: String(lineDraft.value.discount_Method) === '2'
+      ? toBaseAmt(lineDraft.value.discount)
+      : (Number(lineDraft.value.discount) || 0),
     sale_unit_id: lineDraft.value.sale_unit_id,
     imei_number: lineDraft.value.imei_number,
   });
@@ -558,6 +605,8 @@ async function submit() {
     shipping: Number(quote.value.shipping) || 0,
     GrandTotal: totals.value.GrandTotal,
     details: detailsPayload(),
+    // Multi-Currency snapshot ({} when the module is off)
+    ...currencyPayload(),
   };
   try {
     if (isEdit.value) {
@@ -582,6 +631,7 @@ async function submit() {
 // ---------------- bootstrap ----------------
 
 onMounted(async () => {
+  loadCurrencies();
   try {
     if (isEdit.value) {
       const data = await http.get(`quotations/${id.value}/edit`);
@@ -598,6 +648,8 @@ onMounted(async () => {
         discount: Number(q.discount) || 0,
         shipping: Number(q.shipping) || 0,
       };
+      // Reopen the quotation in its stored currency at its stored rate.
+      setDocCurrency(q.currency_id, q.exchange_rate);
       lines.value = (data.details || []).map(d => {
         const line = {
           ...d,

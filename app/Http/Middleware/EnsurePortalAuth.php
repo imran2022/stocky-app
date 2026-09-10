@@ -38,8 +38,8 @@ class EnsurePortalAuth
 
             if ($isAdmin && ! $isPortalClient) {
                 return $request->expectsJson()
-                    ? response()->json(['message' => 'Portal access is for clients only. Please log in with your portal account.'], 403)
-                    : abort(403, 'Portal access is for clients only.');
+                    ? response()->json(['message' => __('portal.clients_only')], 403)
+                    : abort(403, __('portal.clients_only'));
             }
         }
 
@@ -56,7 +56,7 @@ class EnsurePortalAuth
         // Any other path under api/portal (e.g. invoices/1, profile/password) is protected
         if (preg_match('#^api/portal/([^/]+)#', $path, $m)) {
             $firstSegment = $m[1];
-            if (! in_array($firstSegment, ['login', 'set-password', 'validate-invite'], true)) {
+            if (! in_array($firstSegment, ['login', 'set-password', 'validate-invite', 'translations', 'locale'], true)) {
                 return true;
             }
         }

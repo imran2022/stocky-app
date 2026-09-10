@@ -1,5 +1,5 @@
 <template>
-  <div class="page kitchen">
+  <div ref="pageEl" class="page kitchen" :class="{ 'kitchen-mode': kitchenMode }" :style="kitchenModeStyle">
     <PageHeader :title="$t('KitchenDisplay')" :breadcrumb="[$t('Kitchen'), $t('KitchenDisplay')]">
       <template #actions>
         <a-tag :color="autoRefresh ? 'success' : 'default'">
@@ -15,6 +15,30 @@
         <a-button :loading="refreshing" @click="fetchBoard(true)">
           <template #icon><ReloadOutlined /></template>
           {{ $t('Refresh') }}
+        </a-button>
+        <a-select
+          v-if="stations.length"
+          v-model:value="selectedStation"
+          style="min-width: 170px"
+          :options="stationOptions"
+          @change="onStationChange"
+        />
+        <a-tooltip v-if="canManage" :title="$t('KitchenStations')">
+          <a-button @click="openStations">
+            <template #icon><SettingOutlined /></template>
+          </a-button>
+        </a-tooltip>
+        <a-tooltip :title="$t('OrderReadyScreen')">
+          <a-button :loading="readyScreenBusy" @click="openReadyScreen">
+            <template #icon><DesktopOutlined /></template>
+          </a-button>
+        </a-tooltip>
+        <a-button @click="toggleKitchenMode">
+          <template #icon>
+            <FullscreenExitOutlined v-if="kitchenMode" />
+            <FullscreenOutlined v-else />
+          </template>
+          {{ kitchenMode ? $t('ExitKitchenMode') : $t('KitchenMode') }}
         </a-button>
       </template>
     </PageHeader>
@@ -40,7 +64,7 @@
     </a-row>
 
     <!-- Filters -->
-    <a-card size="small" style="margin-bottom: 16px">
+    <a-card size="small" class="filters-card" style="margin-bottom: 16px">
       <a-space wrap :size="12">
         <a-input-search
           v-model:value="search" :placeholder="$t('Search')"
@@ -60,26 +84,31 @@
         <div class="lane">
           <div class="lane-head" :style="{ background: col.color }">
             <span>{{ $t(col.label) }}</span>
-            <span class="lane-count">{{ (grouped[col.key] || []).length }}</span>
+            <span class="lane-count">{{ (displayGrouped[col.key] || []).length }}</span>
           </div>
 
           <div class="lane-body">
             <a-skeleton v-if="loading && !firstLoadDone" active :paragraph="{ rows: 3 }" />
 
             <a-empty
-              v-else-if="!(grouped[col.key] || []).length"
+              v-else-if="!(displayGrouped[col.key] || []).length"
               :description="$t('NoOrders')" style="padding: 24px 0"
             />
 
             <a-card
-              v-for="order in grouped[col.key] || []" :key="order.id"
-              size="small" class="ticket" :style="{ borderLeftColor: col.color }"
+              v-for="order in displayGrouped[col.key] || []" :key="order.id"
+              size="small" class="ticket"
+              :class="{ 'ticket-late': urgency(order, col.key) === 'late' }"
+              :style="{ borderLeftColor: ticketColor(order, col) }"
             >
               <a-spin :spinning="busyId === order.id">
                 <div class="ticket-top">
-                  <strong>{{ order.ref || `#${order.sale_id}` }}</strong>
+                  <span v-if="order.token_number" class="token">#{{ order.token_number }}</span>
+                  <strong class="ticket-ref">{{ order.ref || `#${order.sale_id}` }}</strong>
                   <a-tooltip :title="order.created_at">
-                    <span class="muted"><ClockCircleOutlined /> {{ elapsed(order) }}</span>
+                    <span class="muted elapsed" :class="urgency(order, col.key)">
+                      <ClockCircleOutlined /> {{ elapsed(order) }}
+                    </span>
                   </a-tooltip>
                 </div>
 
@@ -87,10 +116,29 @@
                   <UserOutlined /> {{ order.customer_name || $t('Walkin_Customer') }}
                 </div>
 
+                <div
+                  v-if="order.voided || order.source === 'online' || urgency(order, col.key) === 'late'
+                    || (col.key !== 'completed' && doneCount(order) > 0)"
+                  class="ticket-badges"
+                >
+                  <a-tag v-if="order.voided" color="error">{{ $t('Voided') }}</a-tag>
+                  <a-tag v-if="order.source === 'online'" color="geekblue">{{ $t('OnlineOrder') }}</a-tag>
+                  <a-tag v-if="!order.voided && urgency(order, col.key) === 'late'" color="error">{{ $t('Overdue') }}</a-tag>
+                  <a-tag v-if="col.key !== 'completed' && doneCount(order) > 0" color="processing">
+                    {{ doneCount(order) }}/{{ visibleItems(order).length }}
+                  </a-tag>
+                </div>
+
                 <ul class="items">
-                  <li v-for="item in order.items" :key="item.id">
+                  <li v-for="item in visibleItems(order)" :key="item.id" :class="{ done: item.done }">
+                    <a-checkbox
+                      v-if="canManage && col.key !== 'completed'"
+                      :checked="!!item.done"
+                      :disabled="busyId === order.id"
+                      @change="e => toggleItem(order, item, e.target.checked)"
+                    />
                     <span class="qty">{{ formatQty(item.quantity) }}<small v-if="item.unit"> {{ item.unit }}</small></span>
-                    <span>{{ item.name }}</span>
+                    <span class="item-name">{{ item.name }}</span>
                   </li>
                 </ul>
 
@@ -147,8 +195,13 @@
                     >{{ $t('Reopen') }}</a-button>
                   </template>
 
+                  <a-tooltip :title="$t('print')">
+                    <a-button size="small" type="text" style="margin-left: auto" @click="printTicket(order)">
+                      <template #icon><PrinterOutlined /></template>
+                    </a-button>
+                  </a-tooltip>
                   <a-tooltip :title="$t('Details')">
-                    <a-button size="small" type="text" style="margin-left: auto" @click="openDetails(order)">
+                    <a-button size="small" type="text" @click="openDetails(order)">
                       <template #icon><EyeOutlined /></template>
                     </a-button>
                   </a-tooltip>
@@ -166,9 +219,15 @@
         <a-descriptions :column="{ xs: 1, md: 2 }" size="small" bordered>
           <a-descriptions-item :label="$t('Order')">
             {{ selected.ref || `#${selected.sale_id}` }}
+            <a-tag v-if="selected.token_number" style="margin-left: 6px">#{{ selected.token_number }}</a-tag>
           </a-descriptions-item>
           <a-descriptions-item :label="$t('Status')">
             <a-tag :color="statusColor(selected.status)">{{ statusLabel(selected.status) }}</a-tag>
+            <a-tag v-if="selected.voided" color="error">{{ $t('Voided') }}</a-tag>
+          </a-descriptions-item>
+          <a-descriptions-item :label="$t('Source')">
+            <a-tag v-if="selected.source === 'online'" color="geekblue">{{ $t('OnlineOrder') }}</a-tag>
+            <template v-else>{{ selected.source === 'manual' ? $t('SendLater') : 'POS' }}</template>
           </a-descriptions-item>
           <a-descriptions-item :label="$t('Customer')">
             {{ selected.customer_name || $t('Walkin_Customer') }}
@@ -186,6 +245,9 @@
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'quantity'">
               {{ formatQty(record.quantity) }}<span v-if="record.unit"> {{ record.unit }}</span>
+            </template>
+            <template v-else-if="column.key === 'done'">
+              <CheckCircleOutlined v-if="record.done" style="color: #22c55e" />
             </template>
           </template>
         </a-table>
@@ -206,6 +268,39 @@
           </a-space>
         </template>
       </template>
+    </a-modal>
+
+    <!-- Stations editor -->
+    <a-modal
+      v-model:open="stationsOpen" :title="$t('KitchenStations')"
+      :confirm-loading="stationsBusy" width="640px" @ok="saveStations"
+    >
+      <p class="muted" style="margin-bottom: 12px">{{ $t('StationCategoriesHint') }}</p>
+      <div v-for="(st, idx) in stationsDraft" :key="st.id || `new-${idx}`" class="station-row">
+        <a-input v-model:value="st.name" :placeholder="$t('StationName')" style="width: 170px" />
+        <a-select
+          v-model:value="st.category_ids" mode="multiple" style="flex: 1"
+          :options="categoryOptions" :placeholder="$t('Categories')"
+          option-filter-prop="label" :max-tag-count="3"
+        />
+        <a-button danger type="text" @click="stationsDraft.splice(idx, 1)">
+          <template #icon><DeleteOutlined /></template>
+        </a-button>
+      </div>
+      <a-button type="dashed" block @click="stationsDraft.push({ id: '', name: '', category_ids: [] })">
+        <template #icon><PlusOutlined /></template>
+        {{ $t('AddStation') }}
+      </a-button>
+    </a-modal>
+
+    <!-- Order Ready screen link -->
+    <a-modal v-model:open="readyScreenOpen" :title="$t('OrderReadyScreen')" :footer="null" width="560px">
+      <p class="muted" style="margin-bottom: 12px">{{ $t('OrderReadyScreenHint') }}</p>
+      <a-input-group compact style="display: flex">
+        <a-input :value="readyScreenUrl" readonly style="flex: 1" />
+        <a-button @click="copyReadyUrl">{{ $t('Copy') }}</a-button>
+        <a-button type="primary" @click="openReadyUrl">{{ $t('Open') }}</a-button>
+      </a-input-group>
     </a-modal>
   </div>
 </template>
@@ -233,19 +328,23 @@
  * Kept as-is: the new-order count is an id delta, so it can overcount when
  * unrelated rows consume ids — matching legacy rather than inventing a count.
  */
-import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue';
-import { message, notification } from 'ant-design-vue';
+import { ref, reactive, computed, onMounted, onBeforeUnmount, h } from 'vue';
+import { message, notification, Button } from 'ant-design-vue';
 import { useI18n } from 'vue-i18n';
 import {
   PauseOutlined, CaretRightOutlined, ReloadOutlined, CloseOutlined,
   ClockCircleOutlined, UserOutlined, EyeOutlined, FireOutlined, CheckCircleOutlined,
+  FullscreenOutlined, FullscreenExitOutlined, PrinterOutlined,
+  SettingOutlined, DeleteOutlined, PlusOutlined, DesktopOutlined,
 } from '@ant-design/icons-vue';
 import PageHeader from '../../components/PageHeader.vue';
 import { useAuthStore } from '../../stores/auth';
+import { useUiStore } from '../../stores/ui';
 import http from '../../lib/http';
 
 const { t } = useI18n();
 const auth = useAuthStore();
+const ui = useUiStore();
 
 const COLUMNS = [
   { key: 'pending', label: 'PendingOrders', color: '#64748b' },
@@ -264,7 +363,7 @@ const TILE_META = {
 
 const statTiles = computed(() => COLUMNS.map(c => ({
   label: t(c.label),
-  value: (grouped.value[c.key] || []).length,
+  value: (displayGrouped.value[c.key] || []).length,
   color: c.color,
   icon: TILE_META[c.key].icon,
   tint: TILE_META[c.key].tint,
@@ -282,11 +381,158 @@ const search = ref('');
 const range = ref([]);
 const autoRefresh = ref(true);
 
+// Prep-time target (minutes) from settings; null disables the overdue escalation.
+const targetMinutes = ref(null);
+
+// ---------------- stations (per-device filter, like POS keyboard shortcuts) ----------------
+
+const STATION_KEY = 'kitchen_display_station';
+
+const stations = ref([]);
+const categories = ref([]);
+const selectedStation = ref((() => {
+  try { return localStorage.getItem(STATION_KEY) || ''; } catch (e) { return ''; }
+})());
+
+const stationOptions = computed(() => [
+  { value: '', label: t('AllStations') },
+  ...stations.value.map(s => ({ value: s.id, label: s.name })),
+]);
+
+const activeStation = computed(() =>
+  stations.value.find(s => s.id === selectedStation.value) || null);
+
+/** Categories claimed by ANY station: items outside these show on every station
+ *  so an unassigned category can never silently drop off all screens. */
+const coveredCategoryIds = computed(() => {
+  const set = new Set();
+  for (const s of stations.value) for (const id of s.category_ids || []) set.add(Number(id));
+  return set;
+});
+
+const activeCategoryIds = computed(() => {
+  const st = activeStation.value;
+  return st ? new Set((st.category_ids || []).map(Number)) : null;
+});
+
+/** The ticket lines this display should show: everything on the expo (All)
+ *  view; on a station, its categories plus any category no station claims. */
+function visibleItems(order) {
+  const items = order.items || [];
+  const mine = activeCategoryIds.value;
+  if (!mine) return items;
+  return items.filter(i => {
+    const cat = i.category_id == null ? null : Number(i.category_id);
+    return (cat != null && mine.has(cat)) || cat == null || !coveredCategoryIds.value.has(cat);
+  });
+}
+
+function onStationChange() {
+  try { localStorage.setItem(STATION_KEY, selectedStation.value || ''); } catch (e) { /* per-device only */ }
+}
+
+// Stations editor (manage permission)
+const stationsOpen = ref(false);
+const stationsBusy = ref(false);
+const stationsDraft = ref([]);
+
+const categoryOptions = computed(() =>
+  categories.value.map(c => ({ value: c.id, label: c.name })));
+
+function openStations() {
+  stationsDraft.value = stations.value.map(s => ({
+    id: s.id, name: s.name, category_ids: (s.category_ids || []).slice(),
+  }));
+  stationsOpen.value = true;
+}
+
+async function saveStations() {
+  const clean = stationsDraft.value
+    .map(s => ({ ...s, name: (s.name || '').trim() }))
+    .filter(s => s.name);
+  stationsBusy.value = true;
+  try {
+    const data = await http.put('kitchen/stations', { stations: clean });
+    stations.value = data?.stations || clean;
+    // A station the display was pinned to may have been deleted.
+    if (selectedStation.value && !stations.value.some(s => s.id === selectedStation.value)) {
+      selectedStation.value = '';
+      onStationChange();
+    }
+    stationsOpen.value = false;
+    message.success(t('Successfully_Updated'));
+  } catch (e) {
+    message.error(e?.data?.error || e?.data?.message || t('Network_error'));
+  } finally {
+    stationsBusy.value = false;
+  }
+}
+
+// ---------------- kitchen mode (fullscreen board for a wall TV) ----------------
+
+const pageEl = ref(null);
+const kitchenMode = ref(false);
+
+// Fullscreen elements get a transparent background over a black backdrop, so the
+// board paints the app's layout color itself (matching light/dark theme).
+const kitchenModeStyle = computed(() => (kitchenMode.value
+  ? { background: ui.dark ? '#141414' : '#fafafa' }
+  : null));
+
+function toggleKitchenMode() {
+  if (kitchenMode.value) {
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    kitchenMode.value = false;
+    return;
+  }
+  kitchenMode.value = true;
+  const el = pageEl.value;
+  if (el && el.requestFullscreen) el.requestFullscreen().catch(() => { /* class-only mode */ });
+}
+
+/** Sync when the user leaves fullscreen via Esc instead of the button. */
+function onFullscreenChange() {
+  if (!document.fullscreenElement) kitchenMode.value = false;
+}
+
+// ---------------- Order Ready screen (public token-guarded TV page) ----------------
+
+const readyScreenOpen = ref(false);
+const readyScreenBusy = ref(false);
+const readyScreenUrl = ref('');
+
+/** Each click mints a fresh 7-day token (invalidating the previous link, same
+ *  as the POS customer display) and shows the URL to open on the TV. */
+async function openReadyScreen() {
+  readyScreenBusy.value = true;
+  try {
+    const data = await http.post('kitchen/ready-screen/generate');
+    readyScreenUrl.value = data?.url || '';
+    readyScreenOpen.value = true;
+  } catch (e) {
+    message.error(e?.data?.error || e?.data?.message || t('Network_error'));
+  } finally {
+    readyScreenBusy.value = false;
+  }
+}
+
+function copyReadyUrl() {
+  try {
+    navigator.clipboard.writeText(readyScreenUrl.value);
+    message.success(t('Copied'));
+  } catch (e) { /* clipboard unavailable — the input is selectable */ }
+}
+
+function openReadyUrl() {
+  window.open(readyScreenUrl.value, '_blank');
+}
+
 const canManage = computed(() => auth.can('kitchen_display_manage'));
 
 const itemColumns = computed(() => [
   { title: t('Product'), dataIndex: 'name', key: 'name' },
   { title: t('Quantity'), key: 'quantity', align: 'right' },
+  { title: '', key: 'done', width: 48, align: 'center' },
 ]);
 
 const staffOptions = computed(() =>
@@ -311,19 +557,67 @@ function formatQty(n) {
 
 const nowTs = ref(Date.now());
 
+/** Minutes since the ticket was sent (or created), or null when unknown. */
+function elapsedMins(order) {
+  const raw = order.sent_at || order.created_at;
+  if (!raw) return null;
+  const dt = new Date(String(raw).replace(' ', 'T'));
+  if (Number.isNaN(dt.getTime())) return null;
+  return Math.max(0, Math.floor((nowTs.value - dt.getTime()) / 60000));
+}
+
 /** Minutes since the ticket was sent (or created): "now", "45m", "2h 15m". */
 function elapsed(order) {
-  const raw = order.sent_at || order.created_at;
-  if (!raw) return '';
-  const dt = new Date(String(raw).replace(' ', 'T'));
-  if (Number.isNaN(dt.getTime())) return '';
-  const mins = Math.max(0, Math.floor((nowTs.value - dt.getTime()) / 60000));
+  const mins = elapsedMins(order);
+  if (mins == null) return '';
   if (mins < 1) return t('Now');
   if (mins < 60) return `${mins}m`;
   const h = Math.floor(mins / 60);
   const m = mins % 60;
   return `${h}h${m ? ` ${m}m` : ''}`;
 }
+
+/**
+ * Overdue escalation against the admin-set prep target: '' below 50% of the
+ * target, 'warn' past 50%, 'late' past 100%. Completed tickets never escalate.
+ */
+function urgency(order, lane) {
+  if (!targetMinutes.value || lane === 'completed') return '';
+  const mins = elapsedMins(order);
+  if (mins == null) return '';
+  if (mins >= targetMinutes.value) return 'late';
+  if (mins >= targetMinutes.value / 2) return 'warn';
+  return '';
+}
+
+/** Lane accent for the ticket's left border, overridden by urgency. */
+function ticketColor(order, col) {
+  const u = urgency(order, col.key);
+  if (u === 'late') return '#ef4444';
+  if (u === 'warn') return '#f59e0b';
+  return col.color;
+}
+
+/** Board lanes: station-filtered, with overdue tickets floated to the top
+ *  (oldest first within each tier). */
+const displayGrouped = computed(() => {
+  const rank = { late: 0, warn: 1, '': 2 };
+  const out = {};
+  for (const col of COLUMNS) {
+    let list = (grouped.value[col.key] || []).slice();
+    if (activeStation.value) {
+      list = list.filter(o => visibleItems(o).length > 0);
+    }
+    if (targetMinutes.value && col.key !== 'completed') {
+      list.sort((a, b) => {
+        const d = rank[urgency(a, col.key)] - rank[urgency(b, col.key)];
+        return d !== 0 ? d : String(a.created_at || '').localeCompare(String(b.created_at || ''));
+      });
+    }
+    out[col.key] = list;
+  }
+  return out;
+});
 
 // ---------------- data ----------------
 
@@ -338,6 +632,8 @@ async function fetchBoard(showSpinner = false) {
     const data = await http.get('kitchen/orders', params());
     if (data?.grouped) grouped.value = data.grouped;
     if (Array.isArray(data?.warehouses) && data.warehouses.length) warehouses.value = data.warehouses;
+    targetMinutes.value = data?.target_minutes ? Number(data.target_minutes) : null;
+    if (Array.isArray(data?.stations)) stations.value = data.stations;
     // Keep the open modal live rather than frozen at open-time state.
     if (selected.value) {
       const all = Object.values(grouped.value).flat();
@@ -368,11 +664,91 @@ async function setStatus(order, status) {
     await http.patch(`kitchen/orders/${order.id}/status`, { status });
     await fetchBoard(false);
     message.success(t('Successfully_Updated'));
+    if (status === 'completed') offerUndo(order);
   } catch (e) {
     message.error(e?.data?.error || e?.data?.message || t('Network_error'));
   } finally {
     busyId.value = null;
   }
+}
+
+/** 10-second escape hatch after a bump, so an accidental tap doesn't need hunting
+ *  through the completed lane and "Reopen". */
+function offerUndo(order) {
+  const key = `kitchen-undo-${order.id}`;
+  notification.open({
+    key,
+    message: t('MarkCompleted'),
+    description: `${order.ref || `#${order.sale_id}`}${order.token_number ? ` — #${order.token_number}` : ''}`,
+    duration: 10,
+    btn: () => h(Button, {
+      size: 'small',
+      type: 'primary',
+      onClick: () => {
+        notification.close(key);
+        setStatus(order, 'preparing');
+      },
+    }, { default: () => t('Undo') }),
+  });
+}
+
+function doneCount(order) {
+  return visibleItems(order).filter(i => i.done).length;
+}
+
+/** Per-item bump. The backend auto-starts the ticket on the first check and
+ *  auto-completes it on the last; auto-complete gets the same Undo window. */
+async function toggleItem(order, item, done) {
+  busyId.value = order.id;
+  try {
+    const data = await http.patch(`kitchen/orders/${order.id}/item`, { item_id: item.id, done: !!done });
+    await fetchBoard(false);
+    if (data?.auto_completed) {
+      message.success(t('Successfully_Updated'));
+      offerUndo(order);
+    }
+  } catch (e) {
+    message.error(e?.data?.error || e?.data?.message || t('Network_error'));
+  } finally {
+    busyId.value = null;
+  }
+}
+
+/** Compact 72mm kitchen chit in a print popup — token big, items, instructions.
+ *  Styles are inline in the popup document, so nothing needs copying in. */
+function printTicket(order) {
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  // Station displays print only their own lines, expo prints the full ticket.
+  const rows = visibleItems(order).map(i =>
+    `<tr><td class="q">${esc(formatQty(i.quantity))}${i.unit ? ` ${esc(i.unit)}` : ''}</td>`
+    + `<td>${esc(i.name)}</td></tr>`).join('');
+  const html = `<!doctype html><html><head><title>${esc(order.ref || `#${order.sale_id}`)}</title><style>
+    body{font-family:'Segoe UI',Arial,sans-serif;width:72mm;margin:0;padding:4mm;color:#000}
+    .tok{font-size:28px;font-weight:800;text-align:center;margin:0}
+    .ref{text-align:center;font-size:12px;margin:2px 0 6px}
+    .meta{font-size:11px;margin:1px 0}
+    table{width:100%;border-collapse:collapse;margin-top:6px;font-size:13px}
+    td{padding:3px 0;border-bottom:1px dashed #999;vertical-align:top}
+    td.q{width:52px;font-weight:700}
+    .notes{margin-top:6px;font-size:12px;border:1px solid #000;padding:4px}
+    hr{border:none;border-top:1px solid #000;margin:6px 0}
+  </style></head><body>
+    ${order.token_number ? `<p class="tok">#${esc(order.token_number)}</p>` : ''}
+    <p class="ref">${esc(order.ref || `#${order.sale_id}`)}</p>
+    <p class="meta">${esc(order.created_at || '')}</p>
+    <p class="meta">${esc(order.customer_name || t('Walkin_Customer'))}${order.source === 'online' ? ` — ${esc(t('OnlineOrder'))}` : ''}</p>
+    ${activeStation.value ? `<p class="meta"><strong>${esc(activeStation.value.name)}</strong></p>` : ''}
+    <hr>
+    <table>${rows}</table>
+    ${order.instructions ? `<div class="notes">${esc(order.instructions)}</div>` : ''}
+  </body></html>`;
+  const w = window.open('', '_blank', 'width=420,height=600');
+  if (!w) return;
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+  setTimeout(() => { w.print(); w.close(); }, 250);
 }
 
 async function dispatch(order, warehouseId) {
@@ -490,6 +866,7 @@ onMounted(async () => {
   startPolling();
   clockTimer = setInterval(() => { nowTs.value = Date.now(); }, 30000);
   document.addEventListener('visibilitychange', onVisibility);
+  document.addEventListener('fullscreenchange', onFullscreenChange);
 
   try {
     const data = await http.get('users_list_for_select');
@@ -499,12 +876,18 @@ onMounted(async () => {
     const data = await http.get('kitchen/warehouses');
     warehouses.value = data?.warehouses || [];
   } catch (e) { /* dispatch select stays empty */ }
+  try {
+    const data = await http.get('kitchen/stations');
+    if (Array.isArray(data?.stations)) stations.value = data.stations;
+    categories.value = data?.categories || [];
+  } catch (e) { /* stations UI just stays hidden */ }
 });
 
 onBeforeUnmount(() => {
   stopPolling();
   if (clockTimer) clearInterval(clockTimer);
   document.removeEventListener('visibilitychange', onVisibility);
+  document.removeEventListener('fullscreenchange', onFullscreenChange);
   if (audioCtx) audioCtx.close().catch(() => {});
 });
 </script>
@@ -617,9 +1000,16 @@ onBeforeUnmount(() => {
 }
 .items li {
   display: flex;
+  align-items: baseline;
   gap: 8px;
   padding: 2px 0;
   font-size: 13px;
+}
+/* Bumped lines read as done without disappearing. */
+.items li.done .qty,
+.items li.done .item-name {
+  text-decoration: line-through;
+  opacity: 0.55;
 }
 .qty {
   min-width: 46px;
@@ -636,5 +1026,81 @@ onBeforeUnmount(() => {
 .muted {
   color: rgba(0, 0, 0, 0.45);
   font-size: 12px;
+}
+
+/* Stations editor rows: name, categories, remove. */
+.station-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+/* Daily call number — the thing a kitchen shouts across the counter. */
+.token {
+  font-weight: 800;
+  font-size: 15px;
+  color: #6d28d9;
+  margin-right: 6px;
+}
+.ticket-top .ticket-ref {
+  margin-right: auto;
+}
+.ticket-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0;
+}
+
+/* Overdue escalation: elapsed time recolors at 50% / 100% of the prep target,
+   and late tickets pulse so they read from across the kitchen. */
+.elapsed.warn {
+  color: #d97706;
+  font-weight: 700;
+}
+.elapsed.late {
+  color: #dc2626;
+  font-weight: 700;
+}
+.ticket-late {
+  animation: late-pulse 1.6s infinite;
+}
+@keyframes late-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.45); }
+  50% { box-shadow: 0 0 0 5px rgba(239, 68, 68, 0); }
+}
+
+/* Kitchen mode: the board fullscreened for a wall TV — filters drop away and
+   type scales up for at-a-distance reading. (Background is set inline so it
+   follows the light/dark theme.) */
+.kitchen-mode {
+  padding: 16px;
+  height: 100%;
+  overflow-y: auto;
+}
+.kitchen-mode .filters-card {
+  display: none;
+}
+.kitchen-mode .lane-body {
+  max-height: calc(100vh - 300px);
+}
+.kitchen-mode .token {
+  font-size: 20px;
+}
+.kitchen-mode .ticket-ref {
+  font-size: 16px;
+}
+.kitchen-mode .items li {
+  font-size: 16px;
+}
+.kitchen-mode .qty {
+  min-width: 54px;
+}
+.kitchen-mode .muted {
+  font-size: 14px;
+}
+.kitchen-mode .lane-head {
+  font-size: 17px;
 }
 </style>

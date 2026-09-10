@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { loadLocale, storedLocale, isRtlLocale } from '../i18n';
+import http from '../lib/http';
 
 const DARK_KEY = 'next_dark_mode';
 const THEME_KEY = 'next_theme_mode';
@@ -117,6 +118,14 @@ export const useUiStore = defineStore('ui', {
         async setLocale(locale) {
             this.locale = locale;
             await loadLocale(locale);
+            // Tell the server too. The language lived only in localStorage, so
+            // anything Blade renders — PDFs, and the logged-out /login page —
+            // had no way to know about it. /api/sync-locale parks the choice in
+            // a 1-year cookie that SetLocale reads. Best effort: a failure here
+            // must not undo the language switch the user just made.
+            try {
+                await http.post('sync-locale', { locale });
+            } catch (e) { /* offline, or signed out — the UI is already switched */ }
         },
     },
 });

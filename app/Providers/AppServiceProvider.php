@@ -20,7 +20,18 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register()
     {
-        //
+        // tdb() / locale_dir(), used by the guest Blade pages (login, password
+        // reset). It is listed in composer.json's autoload.files too, but an
+        // install that receives this file through an app update has not run
+        // `composer dump-autoload` — requiring it here means the helper is
+        // there either way. The file guards every function with
+        // function_exists(), so a double load is a no-op.
+        require_once app_path('Support/translations.php');
+
+        // Wholesale Pricing by Quantity: one instance per request so the
+        // toggle lookup and the tier ladders are queried once, no matter how
+        // many controllers, services and views ask for them.
+        $this->app->singleton(\App\Services\WholesalePricingService::class);
     }
 
     /**
@@ -58,16 +69,16 @@ class AppServiceProvider extends ServiceProvider
             }
 
             // Category data is only needed by the main application views; keep it
-            // off the lighter auth / portal pages.
+            // off the lighter auth / portal pages and the storefront (whose base
+            // path is configurable — is_store_request() follows the setting).
             $categoriesExcluded = [
                 'api',
                 'setup',
                 'update',
                 'password',
-                'online_store',
             ];
 
-            if (! in_array($firstSegment, $categoriesExcluded)) {
+            if (! in_array($firstSegment, $categoriesExcluded) && ! is_store_request(request())) {
                 $categories = Schema::hasTable('subcategories')
                     ? \App\Models\Category::with('subcategories')->orderBy('name')->get()
                     : \App\Models\Category::orderBy('name')->get();

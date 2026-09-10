@@ -142,7 +142,7 @@ class WooCommercePushProducts extends Command
             $publicPath = public_path('images/products/'.$imageName);
             if (is_file($publicPath)) {
                 $payload['images'] = [
-                    ['src' => asset('images/products/'.$imageName)],
+                    ['src' => product_image_url($imageName)],
                 ];
             }
         }

@@ -6,13 +6,16 @@
       :message="`${$t('Payment_Allocation')}: ${$t('Payment_Allocation_description')}`"
     />
     <a-row :gutter="16" style="margin-bottom: 16px">
-      <a-col :span="8">
+      <a-col :span="6">
         <a-statistic :title="$t('Opening_Balance')" :value="money(openingBalance)" />
       </a-col>
-      <a-col :span="8">
+      <a-col :span="6">
         <a-statistic :title="$t('Sales_Due')" :value="money(salesDue)" />
       </a-col>
-      <a-col :span="8">
+      <a-col :span="6">
+        <a-statistic :title="$t('Service_Due')" :value="money(serviceDue)" />
+      </a-col>
+      <a-col :span="6">
         <a-statistic
           :title="$t('Total_Due')" :value="money(totalDue)"
           :value-style="{ color: totalDue > 0 ? '#ff4d4f' : '#52c41a' }"
@@ -72,8 +75,9 @@
 /**
  * Pay-due modal + printable credit note, extracted from CustomerDetails so the
  * customers list shows the identical flow. Owns the whole cycle: form, POST to
- * clients_pay_due (opening balance is allocated first, hence the info alert),
- * then the receipt. Parents call open() and refresh their data on @paid.
+ * clients_pay_due (opening balance is allocated first, then sales, then open
+ * service jobs — hence the info alert), then the receipt. Parents call open()
+ * and refresh their data on @paid.
  */
 import { ref, computed } from 'vue';
 import { message } from 'ant-design-vue';
@@ -87,6 +91,8 @@ const props = defineProps({
   client: { type: Object, default: null },
   openingBalance: { type: Number, default: 0 },
   salesDue: { type: Number, default: 0 },
+  /** Outstanding balance of the customer's accepted / in-progress service jobs. */
+  serviceDue: { type: Number, default: 0 },
   /** [{ id, name }] */
   paymentMethods: { type: Array, default: () => [] },
   /** [{ id, account_name }] */
@@ -117,7 +123,7 @@ const modalTitle = computed(() =>
 
 // Rounded: the raw float sum is the :max of the paying-amount input, and the
 // clamp would otherwise display something like 121.99999999999994.
-const totalDue = computed(() => roundMoney(props.openingBalance + props.salesDue));
+const totalDue = computed(() => roundMoney(props.openingBalance + props.salesDue + props.serviceDue));
 
 const payRules = computed(() => ({
   amount: [

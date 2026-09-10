@@ -98,6 +98,9 @@ class SerialNumberController extends BaseController
             'provider:id,name', 'client:id,name',
         ])->findOrFail($id);
 
+        // A serial belongs to one warehouse; so does its movement log below.
+        $this->abortIfWarehouseDenied($serial->warehouse_id);
+
         $movements = \App\Models\ProductSerialMovement::where('product_serial_id', $serial->id)
             ->orderBy('id', 'asc')
             ->get()
@@ -142,6 +145,8 @@ class SerialNumberController extends BaseController
         $request->validate(['status' => 'required|string']);
 
         $serial = ProductSerial::findOrFail($id);
+        $this->abortIfWarehouseDenied($serial->warehouse_id);
+
         $service->changeStatus($serial, $request->status, $request->notes);
 
         return response()->json(['success' => true]);
@@ -182,6 +187,10 @@ class SerialNumberController extends BaseController
 
         $productId = (int) $request->product_id;
         $warehouseId = (int) $request->warehouse_id;
+        if ($warehouseId) {
+            $this->abortIfWarehouseDenied($warehouseId);
+        }
+
         $variantId = $request->filled('product_variant_id') ? (int) $request->product_variant_id : null;
         $includeSaleId = $request->filled('include_sale_id') ? (int) $request->include_sale_id : null;
 

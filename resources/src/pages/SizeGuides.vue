@@ -81,8 +81,14 @@
               {{ $t('Image') }} (max 2 MB)
             </a-button>
           </a-upload>
-          <a-typography-text v-if="editMode && currentImage" type="secondary" style="font-size: 12px">
-            {{ $t('Current') }}: {{ currentImage }}
+          <div v-if="editMode && currentImage" class="sg-current">
+            <img :src="`/images/size_guides/${currentImage}`" :alt="form.name" class="sg-current-img" />
+            <a-typography-text type="secondary" style="font-size: 12px">
+              {{ $t('Current') }}: {{ currentImage }}
+            </a-typography-text>
+          </div>
+          <a-typography-text type="secondary" style="font-size: 12px; display: block">
+            {{ $t('Size_Guide_Image_Hint') }}
           </a-typography-text>
         </a-form-item>
 
@@ -275,6 +281,20 @@ onMounted(crud.fetchRows);
 </script>
 
 <style scoped>
+.sg-current {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0 4px;
+}
+.sg-current-img {
+  max-width: 96px;
+  max-height: 96px;
+  object-fit: contain;
+  border: 1px solid rgba(5, 5, 5, 0.12);
+  border-radius: 6px;
+  background: #fafafa;
+}
 .matrix-head {
   display: flex;
   align-items: center;

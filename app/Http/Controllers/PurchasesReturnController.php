@@ -153,7 +153,7 @@ class PurchasesReturnController extends BaseController
         $suppliers = Provider::where('deleted_at', '=', null)->get(['id', 'name']);
         $purchases = Purchase::where('deleted_at', '=', null)->get(['id', 'Ref']);
         $accounts = Account::where('deleted_at', '=', null)->orderBy('id', 'desc')->get(['id', 'account_name']);
-        $payment_methods = PaymentMethod::whereNull('deleted_at')->get(['id', 'name']);
+        $payment_methods = PaymentMethod::active()->whereNull('deleted_at')->get(['id', 'name']);
 
         // get warehouses assigned to user
         $user_auth = auth()->user();
@@ -200,6 +200,13 @@ class PurchasesReturnController extends BaseController
             $order->payment_statut = 'unpaid';
             $order->notes = $request->notes;
             $order->user_id = Auth::user()->id;
+            // Multi-Currency: the return inherits the parent purchase's snapshot
+            // so its documents print in the same currency.
+            if ($request->purchase_id) {
+                $parentPurchase = Purchase::find($request->purchase_id);
+                $order->currency_id = $parentPurchase->currency_id ?? null;
+                $order->exchange_rate = $parentPurchase->exchange_rate ?? null;
+            }
 
             $order->save();
 
@@ -320,6 +327,10 @@ class PurchasesReturnController extends BaseController
             }
 
             // Check If User Has Permission view All Records
+            // Warehouse half of the same rule: record_view says whose documents,
+            // the assigned warehouses say which warehouses they may come from.
+            $this->abortIfDocumentWarehouseDenied($current_PurchaseReturn);
+
             if (! $view_records) {
                 // Check If User->id === PurchaseReturn->id
                 $this->authorizeForUser($request->user('api'), 'check_record', $current_PurchaseReturn);
@@ -551,6 +562,10 @@ class PurchasesReturnController extends BaseController
             $old_Return_Details = PurchaseReturnDetails::where('purchase_return_id', $id)->get();
 
             // Check If User Has Permission view All Records
+            // Warehouse half of the same rule: record_view says whose documents,
+            // the assigned warehouses say which warehouses they may come from.
+            $this->abortIfDocumentWarehouseDenied($current_PurchaseReturn);
+
             if (! $view_records) {
                 // Check If User->id === PurchaseReturn->id
                 $this->authorizeForUser($request->user('api'), 'check_record', $current_PurchaseReturn);
@@ -689,6 +704,10 @@ class PurchasesReturnController extends BaseController
                 $old_Return_Details = PurchaseReturnDetails::where('purchase_return_id', $PurchaseReturn_id)->get();
 
                 // Check If User Has Permission view All Records
+                // Warehouse half of the same rule: record_view says whose documents,
+                // the assigned warehouses say which warehouses they may come from.
+                $this->abortIfDocumentWarehouseDenied($current_PurchaseReturn);
+
                 if (! $view_records) {
                     // Check If User->id === current_PurchaseReturn->id
                     $this->authorizeForUser($request->user('api'), 'check_record', $current_PurchaseReturn);
@@ -810,6 +829,10 @@ class PurchasesReturnController extends BaseController
         $details = [];
 
         // Check If User Has Permission view All Records
+        // Warehouse half of the same rule: record_view says whose documents,
+        // the assigned warehouses say which warehouses they may come from.
+        $this->abortIfDocumentWarehouseDenied($Purchase_data);
+
         if (! $view_records) {
             // Check If User->id === Purchase->id
             $this->authorizeForUser($request->user('api'), 'check_record', $Purchase_data);
@@ -967,6 +990,10 @@ class PurchasesReturnController extends BaseController
 
         $details = [];
         // Check If User Has Permission view All Records
+        // Warehouse half of the same rule: record_view says whose documents,
+        // the assigned warehouses say which warehouses they may come from.
+        $this->abortIfDocumentWarehouseDenied($Purchase_Return);
+
         if (! $view_records) {
             // Check If User->id === PurchaseReturn->id
             $this->authorizeForUser($request->user('api'), 'check_record', $Purchase_Return);
@@ -1112,6 +1139,10 @@ class PurchasesReturnController extends BaseController
         $PurchaseReturn = PurchaseReturn::findOrFail($id);
 
         // Check If User Has Permission view All Records
+        // Warehouse half of the same rule: record_view says whose documents,
+        // the assigned warehouses say which warehouses they may come from.
+        $this->abortIfDocumentWarehouseDenied($PurchaseReturn);
+
         if (! $view_records) {
             // Check If User->id === PurchaseReturn->id
             $this->authorizeForUser($request->user('api'), 'check_record', $PurchaseReturn);
@@ -1177,9 +1208,16 @@ class PurchasesReturnController extends BaseController
             ->where('deleted_at', '=', null)
             ->findOrFail($id);
 
+        // Document currency: stored amounts are base currency, display = stored * rate.
+        $docCurrency = helpers::Get_Document_Currency($Purchase_Return);
+
         $details = [];
 
         // Check If User Has Permission view All Records
+        // Warehouse half of the same rule: record_view says whose documents,
+        // the assigned warehouses say which warehouses they may come from.
+        $this->abortIfDocumentWarehouseDenied($Purchase_Return);
+
         if (! $view_records) {
             // Check If User->id === PurchaseReturn->id
             $this->authorizeForUser($request->user('api'), 'check_record', $Purchase_Return);
@@ -1191,21 +1229,27 @@ class PurchasesReturnController extends BaseController
         // has to identify the record it describes.
         $return_details['id'] = $Purchase_Return->id;
         $return_details['Ref'] = $Purchase_Return->Ref;
+        // Multi-Currency: amounts in this payload are converted into the
+        // document currency — the page must render them with THIS symbol.
+        $return_details['currency_symbol'] = $docCurrency['symbol'];
+        $return_details['currency_code'] = $docCurrency['code'];
+        $return_details['currency_id'] = $docCurrency['id'];
+        $return_details['currency_rate'] = $docCurrency['rate'];
         $return_details['date'] = $Purchase_Return->date.' '.$Purchase_Return->time;
         $return_details['statut'] = $Purchase_Return->statut;
         $return_details['note'] = $Purchase_Return->notes;
-        $return_details['discount'] = $Purchase_Return->discount;
-        $return_details['shipping'] = $Purchase_Return->shipping;
+        $return_details['discount'] = $Purchase_Return->discount * $docCurrency['rate'];
+        $return_details['shipping'] = $Purchase_Return->shipping * $docCurrency['rate'];
         $return_details['tax_rate'] = $Purchase_Return->tax_rate;
-        $return_details['TaxNet'] = $Purchase_Return->TaxNet;
+        $return_details['TaxNet'] = $Purchase_Return->TaxNet * $docCurrency['rate'];
         $return_details['supplier_name'] = $Purchase_Return['provider']->name;
         $return_details['supplier_email'] = $Purchase_Return['provider']->email;
         $return_details['supplier_phone'] = $Purchase_Return['provider']->phone;
         $return_details['supplier_adr'] = $Purchase_Return['provider']->adresse;
         $return_details['supplier_tax'] = $Purchase_Return['provider']->tax_number;
         $return_details['warehouse'] = $Purchase_Return['warehouse']->name;
-        $return_details['GrandTotal'] = number_format($Purchase_Return->GrandTotal, helpers::price_decimals(), '.', '');
-        $return_details['paid_amount'] = number_format($Purchase_Return->paid_amount, helpers::price_decimals(), '.', '');
+        $return_details['GrandTotal'] = number_format($Purchase_Return->GrandTotal * $docCurrency['rate'], helpers::price_decimals(), '.', '');
+        $return_details['paid_amount'] = number_format($Purchase_Return->paid_amount * $docCurrency['rate'], helpers::price_decimals(), '.', '');
         $return_details['due'] = number_format($return_details['GrandTotal'] - $return_details['paid_amount'], helpers::price_decimals(), '.', '');
         $return_details['payment_status'] = $Purchase_Return->payment_statut;
 
@@ -1241,31 +1285,41 @@ class PurchasesReturnController extends BaseController
                 $data['name'] = $detail['product']['name'];
             }
 
+            // unit cost in document currency; the whole line stays consistent from here on
+            $cost = $detail->cost * $docCurrency['rate'];
+
             $data['quantity'] = $detail->quantity;
-            $data['total'] = $detail->total;
-            $data['cost'] = $detail->cost;
+            $data['total'] = $detail->total * $docCurrency['rate'];
+            $data['cost'] = $cost;
             $data['unit_purchase'] = $unit->ShortName;
 
             if ($detail->discount_method == '2') {
-                $data['DiscountNet'] = $detail->discount;
+                $data['DiscountNet'] = $detail->discount * $docCurrency['rate'];
             } else {
-                $data['DiscountNet'] = $detail->cost * $detail->discount / 100;
+                $data['DiscountNet'] = $cost * $detail->discount / 100;
             }
-            $tax_cost = $detail->TaxNet * (($detail->cost - $data['DiscountNet']) / 100);
-            $data['Unit_cost'] = $detail->cost;
-            $data['discount'] = $detail->discount;
+            $tax_cost = $detail->TaxNet * (($cost - $data['DiscountNet']) / 100);
+            $data['Unit_cost'] = $cost;
+            // fixed discounts are amounts (convert); percentage discounts stay as-is
+            $data['discount'] = $detail->discount_method == '2' ? $detail->discount * $docCurrency['rate'] : $detail->discount;
             if ($detail->tax_method == '1') {
-                $data['Net_cost'] = $detail->cost - $data['DiscountNet'];
+                $data['Net_cost'] = $cost - $data['DiscountNet'];
                 $data['taxe'] = $tax_cost;
             } else {
-                $data['Net_cost'] = ($detail->cost - $data['DiscountNet'] - $tax_cost);
-                $data['taxe'] = $detail->cost - $data['Net_cost'] - $data['DiscountNet'];
+                $data['Net_cost'] = ($cost - $data['DiscountNet'] - $tax_cost);
+                $data['taxe'] = $cost - $data['Net_cost'] - $data['DiscountNet'];
             }
 
             $data['is_imei'] = $detail['product']['is_imei'];
             $data['imei_number'] = $detail->imei_number;
             $data['is_batch_tracked'] = (bool) ($detail['product']['is_batch_tracked'] ?? false);
-            $data['batches'] = $batchesByDetail[(int) $detail->id] ?? [];
+            $data['batches'] = array_map(function ($b) use ($docCurrency) {
+                if (isset($b['unit_cost'])) {
+                    $b['unit_cost'] *= $docCurrency['rate'];
+                }
+
+                return $b;
+            }, $batchesByDetail[(int) $detail->id] ?? []);
 
             $details[] = $data;
         }
@@ -1286,10 +1340,12 @@ class PurchasesReturnController extends BaseController
     {
 
         $details = [];
-        $helpers = new helpers;
         $PurchaseReturn = PurchaseReturn::with('purchase', 'details.product.unitPurchase')
             ->where('deleted_at', '=', null)
             ->findOrFail($id);
+
+        // Document currency: stored amounts are base currency, display = stored * rate.
+        $docCurrency = helpers::Get_Document_Currency($PurchaseReturn);
 
         $batchesByDetail = app(BatchService::class)->batchesForPurchaseReturnDetails($PurchaseReturn['details']);
 
@@ -1299,14 +1355,14 @@ class PurchasesReturnController extends BaseController
         $return_details['supplier_adr'] = $PurchaseReturn['provider']->adresse;
         $return_details['supplier_email'] = $PurchaseReturn['provider']->email;
         $return_details['supplier_tax'] = $PurchaseReturn['provider']->tax_number;
-        $return_details['TaxNet'] = number_format($PurchaseReturn->TaxNet, helpers::price_decimals(), '.', '');
-        $return_details['discount'] = number_format($PurchaseReturn->discount, helpers::price_decimals(), '.', '');
-        $return_details['shipping'] = number_format($PurchaseReturn->shipping, helpers::price_decimals(), '.', '');
+        $return_details['TaxNet'] = number_format($PurchaseReturn->TaxNet * $docCurrency['rate'], helpers::price_decimals(), '.', '');
+        $return_details['discount'] = number_format($PurchaseReturn->discount * $docCurrency['rate'], helpers::price_decimals(), '.', '');
+        $return_details['shipping'] = number_format($PurchaseReturn->shipping * $docCurrency['rate'], helpers::price_decimals(), '.', '');
         $return_details['statut'] = $PurchaseReturn->statut;
         $return_details['Ref'] = $PurchaseReturn->Ref;
         $return_details['date'] = $PurchaseReturn->date.' '.$PurchaseReturn->time;
-        $return_details['GrandTotal'] = number_format($PurchaseReturn->GrandTotal, helpers::price_decimals(), '.', '');
-        $return_details['paid_amount'] = number_format($PurchaseReturn->paid_amount, helpers::price_decimals(), '.', '');
+        $return_details['GrandTotal'] = number_format($PurchaseReturn->GrandTotal * $docCurrency['rate'], helpers::price_decimals(), '.', '');
+        $return_details['paid_amount'] = number_format($PurchaseReturn->paid_amount * $docCurrency['rate'], helpers::price_decimals(), '.', '');
         $return_details['due'] = number_format($return_details['GrandTotal'] - $return_details['paid_amount'], helpers::price_decimals(), '.', '');
         $return_details['payment_status'] = $PurchaseReturn->payment_statut;
 
@@ -1343,39 +1399,48 @@ class PurchasesReturnController extends BaseController
 
             $data['detail_id'] = $detail_id += 1;
             $data['quantity'] = number_format($detail->quantity, helpers::price_decimals(), '.', '');
-            $data['total'] = number_format($detail->total, helpers::price_decimals(), '.', '');
-            $data['cost'] = number_format($detail->cost, helpers::price_decimals(), '.', '');
+            $data['total'] = number_format($detail->total * $docCurrency['rate'], helpers::price_decimals(), '.', '');
+            // unit cost in document currency; the whole line stays consistent from here on
+            $cost = $detail->cost * $docCurrency['rate'];
+            $data['cost'] = number_format($cost, helpers::price_decimals(), '.', '');
             $data['unit_purchase'] = $unit->ShortName;
 
             if ($detail->discount_method == '2') {
-                $data['DiscountNet'] = number_format($detail->discount, helpers::price_decimals(), '.', '');
+                $data['DiscountNet'] = number_format($detail->discount * $docCurrency['rate'], helpers::price_decimals(), '.', '');
             } else {
-                $data['DiscountNet'] = number_format($detail->cost * $detail->discount / 100, helpers::price_decimals(), '.', '');
+                $data['DiscountNet'] = number_format($cost * $detail->discount / 100, helpers::price_decimals(), '.', '');
             }
 
-            $tax_cost = $detail->TaxNet * (($detail->cost - $data['DiscountNet']) / 100);
-            $data['Unit_cost'] = number_format($detail->cost, helpers::price_decimals(), '.', '');
-            $data['discount'] = number_format($detail->discount, helpers::price_decimals(), '.', '');
+            $tax_cost = $detail->TaxNet * (($cost - $data['DiscountNet']) / 100);
+            $data['Unit_cost'] = number_format($cost, helpers::price_decimals(), '.', '');
+            // fixed discounts are amounts (convert); percentage discounts stay as-is
+            $data['discount'] = number_format($detail->discount_method == '2' ? $detail->discount * $docCurrency['rate'] : $detail->discount, helpers::price_decimals(), '.', '');
 
             if ($detail->tax_method == '1') {
 
-                $data['Net_cost'] = $detail->cost - $data['DiscountNet'];
+                $data['Net_cost'] = $cost - $data['DiscountNet'];
                 $data['taxe'] = number_format($tax_cost, helpers::price_decimals(), '.', '');
             } else {
-                $data['Net_cost'] = ($detail->cost - $data['DiscountNet'] - $tax_cost);
-                $data['taxe'] = number_format($detail->cost - $data['Net_cost'] - $data['DiscountNet'], helpers::price_decimals(), '.', '');
+                $data['Net_cost'] = ($cost - $data['DiscountNet'] - $tax_cost);
+                $data['taxe'] = number_format($cost - $data['Net_cost'] - $data['DiscountNet'], helpers::price_decimals(), '.', '');
             }
 
             $data['is_imei'] = $detail['product']['is_imei'];
             $data['imei_number'] = $detail->imei_number;
             $data['is_batch_tracked'] = (bool) ($detail['product']['is_batch_tracked'] ?? false);
-            $data['batches'] = $batchesByDetail[(int) $detail->id] ?? [];
+            $data['batches'] = array_map(function ($b) use ($docCurrency) {
+                if (isset($b['unit_cost'])) {
+                    $b['unit_cost'] *= $docCurrency['rate'];
+                }
+
+                return $b;
+            }, $batchesByDetail[(int) $detail->id] ?? []);
 
             $details[] = $data;
         }
 
         $settings = Setting::where('deleted_at', '=', null)->first();
-        $symbol = $helpers->Get_Currency_Code();
+        $symbol = $docCurrency['code'];
 
         $Html = view('pdf.Purchase_Return_pdf', [
             'symbol' => $symbol,

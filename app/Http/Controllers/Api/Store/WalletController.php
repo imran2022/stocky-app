@@ -66,6 +66,10 @@ class WalletController extends Controller
 
         return response()->json([
             'currency' => (string) (StoreSetting::query()->value('currency_code') ?: ''),
+            // POS spends wallets through the payment method named "Wallet";
+            // the admin pages warn when it is missing (e.g. renamed after an
+            // id-8 collision).
+            'wallet_payment_method_exists' => $this->wallets->paymentMethodId() !== null,
             'stats' => [
                 'total_wallets' => $totalWallets,
                 'active_wallets' => $activeWallets,
@@ -215,6 +219,7 @@ class WalletController extends Controller
             'wallet_refund_destination' => (string) ($s->wallet_refund_destination ?? 'wallet'),
             'wallet_withdrawal_enabled' => (bool) ($s->wallet_withdrawal_enabled ?? false),
             'wallet_min_withdrawal' => (float) ($s->wallet_min_withdrawal ?? 10),
+            'wallet_payment_method_exists' => $this->wallets->paymentMethodId() !== null,
         ]);
     }
 

@@ -65,6 +65,13 @@ class CurrencyController extends Controller
             $setting->save();
         }
 
+        // The base currency's rate is 1 by definition. Other rates are NOT
+        // auto-rebased — the admin is warned in the UI to review them.
+        if (($currency->exchange_rate ?? 1) != 1) {
+            $currency->exchange_rate = 1;
+            $currency->save();
+        }
+
         return response()->json(['success' => true, 'default_currency_id' => $currency->id]);
     }
 
@@ -78,12 +85,15 @@ class CurrencyController extends Controller
             'code' => 'required',
             'name' => 'required',
             'symbol' => 'required',
+            'exchange_rate' => 'nullable|numeric|gt:0',
         ]);
 
         Currency::create([
             'name' => $request['name'],
             'code' => $request['code'],
             'symbol' => $request['symbol'],
+            // Rate = units of this currency per 1 base-currency unit
+            'exchange_rate' => (float) ($request['exchange_rate'] ?? 1) ?: 1,
         ]);
 
         return response()->json(['success' => true]);
@@ -108,12 +118,19 @@ class CurrencyController extends Controller
             'code' => 'required',
             'name' => 'required',
             'symbol' => 'required',
+            'exchange_rate' => 'nullable|numeric|gt:0',
         ]);
+
+        // The base currency (settings.currency_id) always keeps rate 1 — every
+        // other rate is expressed relative to it.
+        $isDefault = (int) optional(Setting::first())->currency_id === (int) $id;
+        $rate = $isDefault ? 1 : ((float) ($request['exchange_rate'] ?? 1) ?: 1);
 
         Currency::whereId($id)->update([
             'name' => $request['name'],
             'code' => $request['code'],
             'symbol' => $request['symbol'],
+            'exchange_rate' => $rate,
         ]);
 
         return response()->json(['success' => true]);
@@ -153,8 +170,15 @@ class CurrencyController extends Controller
 
     public function Get_Currencies()
     {
-        $Currencies = Currency::where('deleted_at', null)->get(['id', 'name']);
+        // Used by document forms / POS for the Multi-Currency picker; no
+        // `currency` permission required (any authenticated user may read it).
+        $Currencies = Currency::where('deleted_at', null)
+            ->get(['id', 'name', 'code', 'symbol', 'exchange_rate']);
 
-        return response()->json($Currencies);
+        return response()->json([
+            'currencies' => $Currencies,
+            'default_currency_id' => optional(Setting::first())->currency_id,
+            'enabled' => helpers::multi_currency_enabled(),
+        ]);
     }
 }

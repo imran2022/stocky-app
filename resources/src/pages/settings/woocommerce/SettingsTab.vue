@@ -42,6 +42,44 @@
     <a-card class="guide-card" :bordered="true" style="margin-top: 24px">
       <template #title>
         <span class="guide-card-title">
+          <ControlOutlined :style="{ color: token.colorInfo }" />
+          Sync tuning
+        </span>
+      </template>
+      <template #extra>
+        <a-button size="small" :disabled="!tuningFields.length" @click="resetTuning">{{ $t('Reset') }}</a-button>
+      </template>
+
+      <p class="guide-intro">
+        The defaults suit most stores. Change these only if sync is slow or times out on your hosting.
+        Every value is capped to a safe range, and clearing a field restores its default.
+      </p>
+
+      <a-collapse v-model:activeKey="tuningOpen" ghost>
+        <a-collapse-panel v-for="g in tuningGroups" :key="g.key" :header="g.title">
+          <a-row :gutter="16">
+            <a-col v-for="f in fieldsIn(g.key)" :key="f.key" :xs="24" :md="12">
+              <a-form-item :label="f.label" :help="f.hint">
+                <a-input-number
+                  v-if="f.type === 'integer'"
+                  v-model:value="syncOptions[f.key]"
+                  :min="f.min" :max="f.max" :placeholder="String(f.default)"
+                  style="width: 100%"
+                />
+                <a-switch v-else-if="f.type === 'boolean'" v-model:checked="syncOptions[f.key]" />
+                <a-input v-else v-model:value="syncOptions[f.key]" allow-clear placeholder="—" />
+              </a-form-item>
+            </a-col>
+          </a-row>
+        </a-collapse-panel>
+      </a-collapse>
+
+      <a-button type="primary" style="margin-top: 8px" @click="onSubmit">{{ $t('Save') }}</a-button>
+    </a-card>
+
+    <a-card class="guide-card" :bordered="true" style="margin-top: 24px">
+      <template #title>
+        <span class="guide-card-title">
           <BookOutlined :style="{ color: token.colorInfo }" />
           WooCommerce Sync Guide
         </span>
@@ -109,12 +147,13 @@
           Scheduled sync (cron)
         </div>
         <ul class="guide-list">
-          <li><ClockCircleOutlined :style="{ color: token.colorPrimary }" /><span>Products and stock also sync automatically: the Laravel scheduler pushes new (not-yet-linked) products every night at 02:00 (<a-typography-text code>woocommerce:sync --scope=products --only-unsynced</a-typography-text>) and syncs stock every hour (<a-typography-text code>--scope=stock</a-typography-text>).</span></li>
+          <li><ClockCircleOutlined :style="{ color: token.colorPrimary }" /><span>Stocky → WooCommerce runs on its own: new (not-yet-linked) products every night at 02:00 (<a-typography-text code>--scope=products --only-unsynced</a-typography-text>) and stock every hour (<a-typography-text code>--scope=stock</a-typography-text>).</span></li>
+          <li><CloudSyncOutlined :style="{ color: token.colorPrimary }" /><span>WooCommerce → Stocky runs too: orders every 15 minutes (<a-typography-text code>--scope=orders</a-typography-text>, only orders changed since the last run), products at 03:00 (<a-typography-text code>--scope=pull-products</a-typography-text>) and customers at 03:30 (<a-typography-text code>--scope=customers</a-typography-text>).</span></li>
           <li><SettingOutlined :style="{ color: token.colorPrimary }" /><span>For this to work, your server needs one cron entry that runs the Laravel scheduler every minute (on cPanel: Cron Jobs section; the same cron also processes queued sync batches):</span></li>
         </ul>
         <pre class="guide-code" :style="{ background: token.colorFillTertiary, borderColor: token.colorBorderSecondary }">* * * * * cd /path/to/your/app &amp;&amp; php artisan schedule:run &gt;&gt; /dev/null 2&gt;&amp;1</pre>
         <ul class="guide-list">
-          <li><CodeOutlined :style="{ color: token.colorPrimary }" /><span>You can also run it on demand from the terminal: <a-typography-text code>php artisan woocommerce:sync --scope=products|stock|all</a-typography-text> — add <a-typography-text code>--only-unsynced</a-typography-text> to push only products not yet linked to WooCommerce.</span></li>
+          <li><CodeOutlined :style="{ color: token.colorPrimary }" /><span>You can also run it on demand from the terminal: <a-typography-text code>php artisan woocommerce:sync --scope=products|stock|pull-products|orders|customers</a-typography-text> — add <a-typography-text code>--only-unsynced</a-typography-text> to push only products not yet linked to WooCommerce.</span></li>
         </ul>
       </div>
 
@@ -140,6 +179,11 @@
  * {store_url, consumer_key, consumer_secret, wp_username, wp_app_password};
  * POST woocommerce/test-connection → {ok}. Legacy validation: store_url
  * required + must start with http(s)://; keys required.
+ *
+ * The same endpoint also carries `sync_options` (batch sizes, timeouts, retries,
+ * lookup caps — formerly WOO_* env vars) plus `sync_options_meta`, which
+ * describes every field so the tuning form below renders itself. Sending a key
+ * as null/blank clears it, and the server falls back to env then to its default.
  */
 import { ref, computed, onMounted } from 'vue';
 import { message, theme } from 'ant-design-vue';
@@ -148,7 +192,7 @@ import {
   InfoCircleOutlined, GlobalOutlined, PlusOutlined, SelectOutlined,
   PictureOutlined, CheckCircleOutlined, CloudSyncOutlined, ClockCircleOutlined,
   SwapOutlined, MenuOutlined, ExclamationCircleOutlined, FieldTimeOutlined,
-  CodeOutlined,
+  CodeOutlined, ControlOutlined,
 } from '@ant-design/icons-vue';
 import { useI18n } from 'vue-i18n';
 import dayjs from 'dayjs';
@@ -173,6 +217,23 @@ const form = ref({
   wp_app_password: '',
 });
 
+const syncOptions = ref({});
+const tuningMeta = ref({ groups: [], fields: [] });
+const tuningOpen = ref([]);
+
+const tuningGroups = computed(() => tuningMeta.value.groups || []);
+const tuningFields = computed(() => tuningMeta.value.fields || []);
+function fieldsIn(group) {
+  return tuningFields.value.filter(f => f.group === group);
+}
+function resetTuning() {
+  const next = {};
+  for (const f of tuningFields.value) {
+    next[f.key] = f.default ?? (f.type === 'boolean' ? false : null);
+  }
+  syncOptions.value = next;
+}
+
 const rules = computed(() => ({
   store_url: [
     { required: true, message: t('Field_is_required') },
@@ -188,9 +249,13 @@ async function loadSettings() {
   try {
     const data = await http.get('woocommerce/settings');
     if (data.settings) {
-      form.value = { ...form.value, ...data.settings };
+      // sync_options is edited through its own form, not the credentials one.
+      const { sync_options: _stored, ...credentials } = data.settings;
+      form.value = { ...form.value, ...credentials };
       lastSyncAt.value = data.settings.last_sync_at;
     }
+    if (data.sync_options_meta) tuningMeta.value = data.sync_options_meta;
+    if (data.sync_options) syncOptions.value = { ...data.sync_options };
   } catch (e) { /* first-run: nothing saved yet */ }
 }
 
@@ -202,7 +267,7 @@ async function onSubmit() {
     return;
   }
   try {
-    await http.post('woocommerce/settings', form.value);
+    await http.post('woocommerce/settings', { ...form.value, sync_options: syncOptions.value });
     message.success(t('Successfully_Updated'));
     emit('updated');
     testConnection();

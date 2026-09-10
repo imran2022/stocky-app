@@ -127,10 +127,11 @@
                 <span class="value">{{ $sale->date }} {{ $sale->time }}</span>
                 <span class="label-ar">تاريخ</span>
             </div>
-            @if($sale->user)
+            @if($sale->seller || $sale->user)
             <div class="info-row">
                 <span class="label-en">Seller</span>
-                <span class="value">{{ $sale->user->username }}</span>
+                {{-- Attributed salesperson (Change Salesperson at POS); cashier otherwise --}}
+                <span class="value">{{ optional($sale->seller)->username ?? $sale->user->username }}</span>
                 <span class="label-ar">البائع</span>
             </div>
             @endif

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Portal;
 use App\Http\Controllers\Controller;
 use App\Models\Client;
 use App\Models\Sale;
+use App\Models\ServiceJob;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -77,6 +78,32 @@ class PortalStatementController extends Controller
             ->orderBy('payment_sale_returns.id')
             ->get();
 
+        // Service jobs the customer owes (accepted / in progress / delivered), dated
+        // by creation. Payments on those jobs credit the account like sale payments.
+        $serviceJobs = DB::table('service_jobs')
+            ->whereNull('deleted_at')
+            ->where('client_id', $clientId)
+            ->whereIn('status', ServiceJob::DUE_STATUSES)
+            ->when($fromDate, fn ($q) => $q->whereDate('created_at', '>=', $fromDate))
+            ->when($toDate, fn ($q) => $q->whereDate('created_at', '<=', $toDate))
+            ->select('id', 'Ref', 'created_at', 'total_amount', 'service_item')
+            ->orderBy('created_at')
+            ->orderBy('id')
+            ->get();
+
+        $servicePayments = DB::table('service_job_payments')
+            ->whereNull('service_job_payments.deleted_at')
+            ->join('service_jobs', 'service_job_payments.service_job_id', '=', 'service_jobs.id')
+            ->whereNull('service_jobs.deleted_at')
+            ->where('service_jobs.client_id', $clientId)
+            ->whereIn('service_jobs.status', ServiceJob::DUE_STATUSES)
+            ->when($fromDate, fn ($q) => $q->where('service_job_payments.date', '>=', $fromDate))
+            ->when($toDate, fn ($q) => $q->where('service_job_payments.date', '<=', $toDate))
+            ->select('service_job_payments.date', 'service_job_payments.Ref', 'service_job_payments.montant', 'service_jobs.Ref as job_ref')
+            ->orderBy('service_job_payments.date')
+            ->orderBy('service_job_payments.id')
+            ->get();
+
         $currentOpeningBalance = (float) ($client->opening_balance ?? 0);
         $totalOpeningBalancePaid = (float) $openingPayments->sum('montant');
         $originalOpeningBalance = $currentOpeningBalance + $totalOpeningBalancePaid;
@@ -87,7 +114,7 @@ class PortalStatementController extends Controller
                 'date' => $sale->date,
                 'type' => 'invoice',
                 'ref' => $sale->Ref,
-                'description' => 'Invoice',
+                'description' => __('portal.stmt_invoice'),
                 'debit' => (float) $sale->GrandTotal,
                 'credit' => 0,
             ];
@@ -97,7 +124,7 @@ class PortalStatementController extends Controller
                 'date' => $pmt->date,
                 'type' => 'payment',
                 'ref' => $pmt->Ref,
-                'description' => 'Payment for ' . ($pmt->sale_ref ?? ''),
+                'description' => __('portal.stmt_payment_for', ['ref' => $pmt->sale_ref ?? '']),
                 'debit' => 0,
                 'credit' => (float) $pmt->montant,
             ];
@@ -107,7 +134,7 @@ class PortalStatementController extends Controller
                 'date' => $opPmt->date,
                 'type' => 'opening_payment',
                 'ref' => $opPmt->Ref,
-                'description' => 'Opening Balance Payment',
+                'description' => __('portal.stmt_opening_payment'),
                 'debit' => 0,
                 'credit' => (float) $opPmt->montant,
             ];
@@ -117,7 +144,7 @@ class PortalStatementController extends Controller
                 'date' => $ret->date,
                 'type' => 'return',
                 'ref' => $ret->Ref,
-                'description' => 'Sale Return',
+                'description' => __('portal.stmt_sale_return'),
                 'debit' => 0,
                 'credit' => (float) $ret->GrandTotal,
             ];
@@ -127,9 +154,29 @@ class PortalStatementController extends Controller
                 'date' => $ref->date,
                 'type' => 'refund',
                 'ref' => $ref->Ref,
-                'description' => 'Refund for ' . ($ref->return_ref ?? ''),
+                'description' => __('portal.stmt_refund_for', ['ref' => $ref->return_ref ?? '']),
                 'debit' => (float) $ref->montant,
                 'credit' => 0,
+            ];
+        }
+        foreach ($serviceJobs as $job) {
+            $entries[] = [
+                'date' => substr((string) $job->created_at, 0, 10),
+                'type' => 'service',
+                'ref' => $job->Ref,
+                'description' => trim(__('portal.stmt_service').($job->service_item ? ' - '.$job->service_item : '')),
+                'debit' => (float) $job->total_amount,
+                'credit' => 0,
+            ];
+        }
+        foreach ($servicePayments as $pmt) {
+            $entries[] = [
+                'date' => $pmt->date,
+                'type' => 'service_payment',
+                'ref' => $pmt->Ref,
+                'description' => __('portal.stmt_service_payment_for', ['ref' => $pmt->job_ref ?? '']),
+                'debit' => 0,
+                'credit' => (float) $pmt->montant,
             ];
         }
 
@@ -141,9 +188,11 @@ class PortalStatementController extends Controller
             // Same-date ordering: debits (invoices, refunds) before credits (returns, payments)
             $rank = [
                 'invoice' => 0,
+                'service' => 0,
                 'refund' => 1,
                 'opening_payment' => 2,
                 'payment' => 3,
+                'service_payment' => 3,
                 'return' => 4,
             ];
             return ($rank[$a['type']] ?? 9) - ($rank[$b['type']] ?? 9);
@@ -154,7 +203,7 @@ class PortalStatementController extends Controller
                 'date' => $fromDate ?: '',
                 'type' => 'opening',
                 'ref' => '',
-                'description' => 'Opening Balance',
+                'description' => __('portal.stmt_opening'),
                 'debit' => $originalOpeningBalance > 0 ? round($originalOpeningBalance, 2) : 0,
                 'credit' => $originalOpeningBalance < 0 ? round(abs($originalOpeningBalance), 2) : 0,
             ]);

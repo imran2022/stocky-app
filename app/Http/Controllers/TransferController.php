@@ -331,6 +331,10 @@ class TransferController extends BaseController
             $current_Transfer = Transfer::findOrFail($id);
 
             // Check If User Has Permission view All Records
+            // Warehouse half of the same rule: record_view says whose documents,
+            // the assigned warehouses say which warehouses they may come from.
+            $this->abortIfDocumentWarehouseDenied($current_Transfer);
+
             if (! $view_records) {
                 // Check If User->id === Transfer->id
                 $this->authorizeForUser($request->user('api'), 'check_record', $current_Transfer);
@@ -668,6 +672,10 @@ class TransferController extends BaseController
             $Old_Details = TransferDetail::where('transfer_id', $id)->get();
 
             // Check If User Has Permission view All Records
+            // Warehouse half of the same rule: record_view says whose documents,
+            // the assigned warehouses say which warehouses they may come from.
+            $this->abortIfDocumentWarehouseDenied($current_Transfer);
+
             if (! $view_records) {
                 // Check If User->id === current_Transfer->id
                 $this->authorizeForUser($request->user('api'), 'check_record', $current_Transfer);
@@ -821,6 +829,10 @@ class TransferController extends BaseController
                 $Old_Details = TransferDetail::where('transfer_id', $Transfer_id)->get();
 
                 // Check If User Has Permission view All Records
+                // Warehouse half of the same rule: record_view says whose documents,
+                // the assigned warehouses say which warehouses they may come from.
+                $this->abortIfDocumentWarehouseDenied($current_Transfer);
+
                 if (! $view_records) {
                     // Check If User->id === Transfer->id
                     $this->authorizeForUser($request->user('api'), 'check_record', $current_Transfer);
@@ -1061,6 +1073,10 @@ class TransferController extends BaseController
 
         $details = [];
         // Check If User Has Permission view All Records
+        // Warehouse half of the same rule: record_view says whose documents,
+        // the assigned warehouses say which warehouses they may come from.
+        $this->abortIfDocumentWarehouseDenied($Transfer_data);
+
         if (! $view_records) {
             // Check If User->id === Transfer->id
             $this->authorizeForUser($request->user('api'), 'check_record', $Transfer_data);
@@ -1263,6 +1279,10 @@ class TransferController extends BaseController
 
         $details = [];
         // Check If User Has Permission view All Records
+        // Warehouse half of the same rule: record_view says whose documents,
+        // the assigned warehouses say which warehouses they may come from.
+        $this->abortIfDocumentWarehouseDenied($Transfer_data);
+
         if (! $view_records) {
             // Check If User->id === Transfer->id
             $this->authorizeForUser($request->user('api'), 'check_record', $Transfer_data);
@@ -1435,6 +1455,10 @@ class TransferController extends BaseController
                 ->where('deleted_at', '=', null)
                 ->findOrFail($id);
 
+            // Warehouse half of the same rule: record_view says whose documents,
+            // the assigned warehouses say which warehouses they may come from.
+            $this->abortIfDocumentWarehouseDenied($transfer);
+
             if (! $view_records) {
                 $this->authorizeForUser($request->user('api'), 'check_record', $transfer);
             }
@@ -1472,6 +1496,10 @@ class TransferController extends BaseController
             // Backward compatibility: If record_view is null, fall back to role permission check
             $view_records = $user->hasRecordView();
             $transfer = Transfer::where('deleted_at', '=', null)->findOrFail($id);
+
+            // Warehouse half of the same rule: record_view says whose documents,
+            // the assigned warehouses say which warehouses they may come from.
+            $this->abortIfDocumentWarehouseDenied($transfer);
 
             if (! $view_records) {
                 $this->authorizeForUser($request->user('api'), 'check_record', $transfer);

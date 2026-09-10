@@ -71,11 +71,53 @@ function currencySymbol() {
   const m = document.querySelector('meta[name="currency"]');
   return (m && m.content) ? m.content : '$';
 }
+// Multi-Currency: units of the active display currency per 1 base unit.
+// Cart/localStorage/data-* prices are always BASE; only display converts,
+// so switching currency instantly re-prices everything JS renders.
+function currencyRate() {
+  const m = document.querySelector('meta[name="currency-rate"]');
+  const r = m ? Number(m.content) : 1;
+  return Number.isFinite(r) && r > 0 ? r : 1;
+}
 function fmtMoney(v, sym) {
   const s = sym || currencySymbol();
-  return s + Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return s + (Number(v || 0) * currencyRate()).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 window.fmtMoney = fmtMoney;
+window.currencyRate = currencyRate;
+
+/* ----------------------------------------------------------------------------
+ * Wholesale Pricing by Quantity — quantity-break pricing for cart lines.
+ * A line carries `base_price` (its retail price) and `wholesale_tiers`
+ * ([{min, max, price}], max null = open-ended top bracket) once hydrated from
+ * the server; the effective unit price is then derived from its quantity.
+ * Rows without a ladder keep whatever price they were added with, so the
+ * feature being off (or a product having no tiers) changes nothing.
+ * -------------------------------------------------------------------------- */
+function cartProductId(item) {
+  if (item && item.product_id != null) return String(item.product_id);
+  return String((item && item.id) || '').split(':')[0];
+}
+
+function wholesaleUnitPrice(item) {
+  const tiers = item && Array.isArray(item.wholesale_tiers) ? item.wholesale_tiers : null;
+  const base = Number(item && item.base_price);
+  if (!tiers || !tiers.length || !isFinite(base)) return null;
+
+  const qty = Number(item.qty) || 0;
+  // Below the first bracket the retail price stands; otherwise the narrowest
+  // matching bracket (highest min) wins.
+  let price = base;
+  let bestMin = -1;
+  for (const t of tiers) {
+    const min = Number(t.min) || 0;
+    const max = (t.max === null || t.max === undefined || t.max === '') ? Infinity : Number(t.max);
+    if (qty + 1e-9 < min || qty > max + 1e-9) continue;
+    if (min >= bestMin) { bestMin = min; price = Number(t.price) || 0; }
+  }
+  return price;
+}
+window.wholesaleUnitPrice = wholesaleUnitPrice;
 
 /* ----------------------------------------------------------------------------
  * Cart — localStorage-backed. Key "shop.cart.v1" — must match legacy writes.
@@ -97,6 +139,13 @@ window.fmtMoney = fmtMoney;
     window.dispatchEvent(new CustomEvent('cart:changed', { detail: c }));
   }
   function calc(c) {
+    // Wholesale Pricing by Quantity: a line that carries a ladder is re-priced
+    // from it on every recalculation, so changing the qty moves the price
+    // between brackets on its own. Lines without a ladder are never touched.
+    c.items.forEach((i) => {
+      const p = wholesaleUnitPrice(i);
+      if (p != null) i.price = p;
+    });
     c.subtotal = c.items.reduce((a, i) => a + (Number(i.price) || 0) * (Number(i.qty) || 0), 0);
     c.grand = c.subtotal;
     return c;
@@ -154,6 +203,17 @@ window.fmtMoney = fmtMoney;
           currency: item.currency || c.currency,
         };
         if (stock != null) row.stock = stock;
+        // Ids the caller knew: they let the ladder (and checkout) address the
+        // line without re-parsing the composite "product:variant" key.
+        if (item.product_id != null) row.product_id = item.product_id;
+        if (item.product_variant_id != null) row.product_variant_id = item.product_variant_id;
+        // Wholesale Pricing by Quantity: a caller that already knows the
+        // product's ladder passes it through, so the line is priced from the
+        // right bracket the moment it lands in the cart.
+        if (Array.isArray(item.wholesale_tiers) && item.wholesale_tiers.length) {
+          row.wholesale_tiers = item.wholesale_tiers;
+          row.base_price = Number(item.base_price != null ? item.base_price : item.price) || 0;
+        }
         c.items.push(row);
       }
       save(calc(c));
@@ -189,7 +249,80 @@ window.fmtMoney = fmtMoney;
       save(c);
       return c;
     },
+    /* Wholesale Pricing by Quantity: attach fresh ladders (product id => tiers)
+       to the matching lines. A line's first ladder pins its current price as
+       `base_price`; a line whose ladder disappeared (feature switched off, or
+       the tiers deleted) is restored to that retail price. */
+    applyTiers(map) {
+      const c = load();
+      let changed = false;
+
+      c.items.forEach((i) => {
+        const rows = map ? map[cartProductId(i)] : null;
+        const next = Array.isArray(rows) && rows.length ? rows : null;
+
+        if (next) {
+          if (i.base_price == null) { i.base_price = Number(i.price) || 0; changed = true; }
+          if (JSON.stringify(i.wholesale_tiers || null) !== JSON.stringify(next)) {
+            i.wholesale_tiers = next;
+            changed = true;
+          }
+        } else if (i.wholesale_tiers) {
+          delete i.wholesale_tiers;
+          if (i.base_price != null) { i.price = Number(i.base_price) || 0; delete i.base_price; }
+          changed = true;
+        }
+      });
+
+      if (changed) save(calc(c));
+      return c;
+    },
   };
+})();
+
+/* ----------------------------------------------------------------------------
+ * Wholesale tier hydration — pulls the ladders for whatever is in the cart so
+ * the cart, mini-cart and checkout summary price their lines the same way the
+ * server will. Read fresh on every page load (and after an add) so an admin's
+ * price change lands immediately instead of living on in localStorage.
+ * -------------------------------------------------------------------------- */
+(function initWholesaleTiers() {
+  if (!window.__WHOLESALE_PRICING__ || !window.__WHOLESALE_TIERS_URL__) return;
+
+  let lastKey = null;
+  let timer = null;
+
+  function hydrate() {
+    const cart = window.CartLS.get();
+    const ids = [];
+    cart.items.forEach((i) => {
+      const pid = cartProductId(i);
+      if (pid && ids.indexOf(pid) === -1) ids.push(pid);
+    });
+    if (!ids.length) return;
+
+    // Same product set as the last successful fetch → nothing new to learn.
+    const key = ids.slice().sort().join(',');
+    if (key === lastKey) return;
+    lastKey = key;
+
+    fetch(window.__WHOLESALE_TIERS_URL__ + '?ids=' + encodeURIComponent(ids.join(',')), {
+      headers: { Accept: 'application/json' },
+      credentials: 'same-origin',
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d && d.enabled) window.CartLS.applyTiers(d.tiers || {}); })
+      .catch(() => { lastKey = null; });
+  }
+
+  function schedule() {
+    clearTimeout(timer);
+    timer = setTimeout(hydrate, 200);
+  }
+
+  window.addEventListener('cart:add-item', schedule);
+  document.addEventListener('DOMContentLoaded', schedule);
+  if (document.readyState !== 'loading') schedule();
 })();
 
 /* ----------------------------------------------------------------------------
@@ -500,18 +633,29 @@ window.Alpine = Alpine;
 Alpine.start();
 
 /* ----------------------------------------------------------------------------
- * PWA service worker — registered only on secure contexts (HTTPS or localhost).
+ * PWA service worker — registered only on secure contexts (HTTPS or localhost),
+ * and only while the PWA is enabled in System Settings → PWA (the layout sets
+ * __PWA_ENABLED__; an undefined flag means enabled). When it is switched off,
+ * unregister whatever an earlier visit installed instead.
  * -------------------------------------------------------------------------- */
 (function registerSW() {
   try {
     if (!('serviceWorker' in navigator)) return;
+    if (window.__PWA_ENABLED__ === false) {
+      navigator.serviceWorker.getRegistrations?.()
+        ?.then(regs => regs.forEach(reg => reg.unregister()))
+        ?.catch(() => {});
+      return;
+    }
     const isSecure = window.isSecureContext === true
       || location.protocol === 'https:'
       || location.hostname === 'localhost'
       || location.hostname === '127.0.0.1';
     if (!isSecure) return;
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
+      // The layout injects __SW_URL__ ('/sw.js?store_base=...') so the worker
+      // knows the configured storefront base path for shell caching.
+      navigator.serviceWorker.register(window.__SW_URL__ || '/sw.js', { scope: '/' }).catch(() => {});
     });
   } catch (_) {}
 })();

@@ -2,7 +2,7 @@
 
 @section('content')
 @php
-  $currency = $s->currency_code ?? '$';
+  $currency = store_currency()['symbol'];
   $endsAt = optional($sale?->ends_at)->toIso8601String();
 @endphp
 
@@ -12,7 +12,7 @@
     <span class="section-kicker inline-flex items-center gap-1">
       <x-store.icon name="lightning" class="w-4 h-4" />{{ __('messages.FlashSale') }}
     </span>
-    <h1 class="section-title mt-1">{{ $sale->name ?? __('messages.FlashSale') }}</h1>
+    <h1 class="section-title mt-1">{{ $sale?->localizedName() ?: __('messages.FlashSale') }}</h1>
     @if($endsAt)
       <div class="text-sm text-fg-muted mt-1" data-flash-ends="{{ $endsAt }}">
         {{ __('messages.EndsIn') }} <span class="flash-countdown font-semibold text-accent-500">—</span>
@@ -39,6 +39,7 @@
 
 <script>
 (function(){
+  var DAY = @json(__('messages.DayShort'));
   function pad(n){ return String(n).padStart(2,'0'); }
   function tick(){
     document.querySelectorAll('[data-flash-ends]').forEach(function(el){
@@ -47,7 +48,7 @@
       if (!out || isNaN(ends)) return;
       var diff = Math.max(0, Math.floor((ends - Date.now())/1000));
       var d = Math.floor(diff/86400), h = Math.floor((diff%86400)/3600), m = Math.floor((diff%3600)/60), s = diff%60;
-      out.textContent = (d>0 ? d+'d ' : '') + pad(h)+':'+pad(m)+':'+pad(s);
+      out.textContent = (d>0 ? d+DAY+' ' : '') + pad(h)+':'+pad(m)+':'+pad(s);
     });
   }
   tick(); setInterval(tick, 1000);

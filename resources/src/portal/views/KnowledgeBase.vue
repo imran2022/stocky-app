@@ -1,78 +1,70 @@
 <template>
-  <div class="portal-page portal-kb">
-    <header class="pc-page-header">
-      <div>
-        <h1 class="pc-page-title">Help center</h1>
-        <p class="pc-page-sub">Browse our articles and guides</p>
+  <div class="card">
+    <div class="card-header d-block">
+      <div class="d-flex flex-wrap align-items-center gap-2">
+        <h3 class="card-title mb-0">{{ $t('help_center') }}</h3>
+        <form class="ms-auto d-print-none" @submit.prevent>
+          <div class="input-icon">
+            <span class="input-icon-addon"><i class="ti ti-search"></i></span>
+            <input v-model="search" type="search" class="form-control" :placeholder="$t('search_articles')" @input="debounceFetch" />
+          </div>
+        </form>
       </div>
-    </header>
-
-    <div class="pc-card">
-      <div class="pc-toolbar">
-        <div class="pc-search">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
-          <input v-model="search" type="text" placeholder="Search articles..." @input="debounceFetch" />
-        </div>
-      </div>
-
-      <div v-if="loading" class="pc-inline-loading">
-        <div class="pc-spinner"></div><span>Loading articles...</span>
-      </div>
-
-      <template v-else>
-        <div v-if="!articles.length" class="pc-empty">
-          <div class="pc-empty-icon">📚</div>
-          <p>No articles found</p>
-        </div>
-
-        <div v-else class="pc-kb-content">
-          <template v-if="search.trim()">
-            <ul class="pc-article-list">
-              <li v-for="a in articles" :key="a.id">
-                <router-link :to="`/help/${a.slug}`" class="pc-article-link">
-                  <div class="pc-article-title">{{ a.title }}</div>
-                  <div class="pc-article-group" v-if="a.group">{{ a.group.name }}</div>
-                </router-link>
-              </li>
-            </ul>
-          </template>
-
-          <template v-else>
-            <section v-for="g in nonEmptyGroups" :key="g.id" class="pc-group-section">
-              <h2 class="pc-group-title">{{ g.name }}</h2>
-              <p class="pc-group-desc" v-if="g.description">{{ g.description }}</p>
-              <ul class="pc-article-list">
-                <li v-for="a in articlesByGroup[g.id]" :key="a.id">
-                  <router-link :to="`/help/${a.slug}`" class="pc-article-link">
-                    <div class="pc-article-title">{{ a.title }}</div>
-                  </router-link>
-                </li>
-              </ul>
-            </section>
-
-            <section v-if="ungrouped.length" class="pc-group-section">
-              <h2 class="pc-group-title">Other articles</h2>
-              <ul class="pc-article-list">
-                <li v-for="a in ungrouped" :key="a.id">
-                  <router-link :to="`/help/${a.slug}`" class="pc-article-link">
-                    <div class="pc-article-title">{{ a.title }}</div>
-                  </router-link>
-                </li>
-              </ul>
-            </section>
-          </template>
-        </div>
-      </template>
     </div>
+
+    <div v-if="loading" class="text-center py-6">
+      <div class="spinner-border text-primary" role="status"></div>
+      <div class="text-secondary mt-2">{{ $t('loading_articles') }}</div>
+    </div>
+
+    <template v-else>
+      <EmptyState v-if="!articles.length" icon="book-off" :title="$t('no_articles')" />
+
+      <div v-else-if="search.trim()" class="list-group list-group-flush">
+        <router-link v-for="a in articles" :key="a.id" :to="`/help/${a.slug}`" class="list-group-item list-group-item-action d-flex align-items-center gap-3">
+          <i class="ti ti-file-text fs-2 text-secondary"></i>
+          <span class="flex-fill">
+            <span class="d-block fw-medium">{{ a.title }}</span>
+            <small v-if="a.group" class="text-secondary">{{ a.group.name }}</small>
+          </span>
+          <i class="ti ti-chevron-right text-secondary"></i>
+        </router-link>
+      </div>
+
+      <div v-else class="card-body">
+        <div v-for="g in nonEmptyGroups" :key="g.id" class="mb-4">
+          <h3 class="mb-1">{{ g.name }}</h3>
+          <p v-if="g.description" class="text-secondary mb-2">{{ g.description }}</p>
+          <div class="list-group list-group-flush border rounded">
+            <router-link v-for="a in articlesByGroup[g.id]" :key="a.id" :to="`/help/${a.slug}`" class="list-group-item list-group-item-action d-flex align-items-center gap-3">
+              <i class="ti ti-file-text fs-2 text-secondary"></i>
+              <span class="flex-fill">{{ a.title }}</span>
+              <i class="ti ti-chevron-right text-secondary"></i>
+            </router-link>
+          </div>
+        </div>
+        <div v-if="ungrouped.length" class="mb-2">
+          <h3 class="mb-2">{{ $t('other_articles') }}</h3>
+          <div class="list-group list-group-flush border rounded">
+            <router-link v-for="a in ungrouped" :key="a.id" :to="`/help/${a.slug}`" class="list-group-item list-group-item-action d-flex align-items-center gap-3">
+              <i class="ti ti-file-text fs-2 text-secondary"></i>
+              <span class="flex-fill">{{ a.title }}</span>
+              <i class="ti ti-chevron-right text-secondary"></i>
+            </router-link>
+          </div>
+        </div>
+      </div>
+    </template>
   </div>
 </template>
 
 <script>
 import http from '../lib/http';
+import EmptyState from '../components/EmptyState.vue';
+
 export default {
-  data() {
-    return { groups: [], articles: [], search: '', loading: false, debounce: null };
-  },
+  components: { EmptyState },
+  data() { return { groups: [], articles: [], search: '', loading: false, debounce: null }; },
   computed: {
     articlesByGroup() {
       const map = {};
@@ -84,15 +76,12 @@ export default {
       }
       return map;
     },
-    nonEmptyGroups() {
-      return this.groups.filter(g => (this.articlesByGroup[g.id] || []).length > 0);
-    },
-    ungrouped() {
-      return this.articles.filter(a => !a.knowledge_base_article_group_id);
-    },
+    nonEmptyGroups() { return this.groups.filter((g) => (this.articlesByGroup[g.id] || []).length > 0); },
+    ungrouped() { return this.articles.filter((a) => !a.knowledge_base_article_group_id); },
   },
   mounted() { this.fetch(); },
   methods: {
+    pageMeta() { return { title: this.$t('help_center'), pretitle: this.$t('nav_support'), crumbs: [] }; },
     async fetch() {
       this.loading = true;
       try {
@@ -109,31 +98,3 @@ export default {
   },
 };
 </script>
-
-<style scoped>
-.portal-kb { padding-bottom: 1rem; }
-.pc-page-header { margin-bottom: 1.25rem; }
-.pc-page-title { font-size: 1.5rem; font-weight: 700; color: var(--pc-text); margin: 0 0 0.2rem; }
-.pc-page-sub { font-size: 0.9rem; color: var(--pc-text-muted); margin: 0; }
-.pc-card { background: var(--pc-surface); border: 1px solid var(--pc-border); border-radius: var(--pc-radius); box-shadow: var(--pc-shadow-sm); overflow: hidden; }
-.pc-toolbar { padding: 0.9rem 1.15rem; border-bottom: 1px solid var(--pc-border); }
-.pc-search { position: relative; display: flex; align-items: center; }
-.pc-search svg { position: absolute; left: 0.85rem; color: var(--pc-text-soft); pointer-events: none; }
-.pc-search input { width: 100%; padding: 0.6rem 1rem 0.6rem 2.3rem; border: 1px solid var(--pc-border-strong); border-radius: 10px; font-size: 0.92rem; background: var(--pc-surface-alt); box-sizing: border-box; }
-.pc-search input:focus { outline: none; background: var(--pc-surface); border-color: var(--pc-primary); box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15); }
-.pc-inline-loading { display: flex; align-items: center; justify-content: center; gap: 0.75rem; padding: 3rem; color: var(--pc-text-muted); }
-.pc-spinner { width: 28px; height: 28px; border: 2px solid rgba(79, 70, 229, 0.15); border-top-color: var(--pc-primary); border-radius: 50%; animation: pc-spin 0.7s linear infinite; }
-@keyframes pc-spin { to { transform: rotate(360deg); } }
-.pc-empty { padding: 3rem 1rem; text-align: center; color: var(--pc-text-soft); }
-.pc-empty-icon { font-size: 2.5rem; opacity: 0.7; margin-bottom: 0.5rem; }
-.pc-kb-content { padding: 1.5rem; display: flex; flex-direction: column; gap: 1.5rem; }
-.pc-group-section { padding-bottom: 1rem; border-bottom: 1px solid var(--pc-border); }
-.pc-group-section:last-child { border-bottom: none; padding-bottom: 0; }
-.pc-group-title { font-size: 1.05rem; font-weight: 700; color: var(--pc-text); margin: 0 0 0.3rem; }
-.pc-group-desc { font-size: 0.85rem; color: var(--pc-text-muted); margin: 0 0 0.75rem; }
-.pc-article-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.pc-article-link { display: flex; flex-direction: column; padding: 0.7rem 0.85rem; text-decoration: none; color: var(--pc-text); border-radius: 10px; transition: background 0.15s; }
-.pc-article-link:hover { background: var(--pc-surface-alt); color: var(--pc-primary); }
-.pc-article-title { font-size: 0.92rem; font-weight: 500; }
-.pc-article-group { font-size: 0.78rem; color: var(--pc-text-soft); margin-top: 0.15rem; }
-</style>

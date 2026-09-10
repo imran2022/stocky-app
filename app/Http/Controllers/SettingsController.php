@@ -231,6 +231,17 @@ class SettingsController extends Controller
             'enable_kitchen_display' => $request->has('enable_kitchen_display')
                 ? (($request['enable_kitchen_display'] == '1' || $request['enable_kitchen_display'] == 'true' || $request['enable_kitchen_display'] === 1 || $request['enable_kitchen_display'] === true) ? 1 : 0)
                 : (int) ($setting->enable_kitchen_display ?? 0),
+            // Kitchen prep-time target (minutes) for the board's overdue color escalation;
+            // empty/0 = no escalation
+            'kitchen_target_minutes' => $request->has('kitchen_target_minutes')
+                ? (($request['kitchen_target_minutes'] === '' || $request['kitchen_target_minutes'] === null || (int) $request['kitchen_target_minutes'] <= 0)
+                    ? null
+                    : min(1440, (int) $request['kitchen_target_minutes']))
+                : ($setting->kitchen_target_minutes ?? null),
+            // Auto-create a kitchen ticket when an online order is confirmed
+            'kitchen_auto_online_orders' => $request->has('kitchen_auto_online_orders')
+                ? (($request['kitchen_auto_online_orders'] == '1' || $request['kitchen_auto_online_orders'] == 'true' || $request['kitchen_auto_online_orders'] === 1 || $request['kitchen_auto_online_orders'] === true) ? 1 : 0)
+                : (int) ($setting->kitchen_auto_online_orders ?? 0),
             // Show/hide the Barcode (GTIN / UPC / EAN / ISBN) field on the product create form (default on)
             'show_product_gtin' => $request->has('show_product_gtin')
                 ? (($request['show_product_gtin'] == '1' || $request['show_product_gtin'] == 'true' || $request['show_product_gtin'] === 1 || $request['show_product_gtin'] === true) ? 1 : 0)
@@ -252,6 +263,26 @@ class SettingsController extends Controller
             'enable_multi_pack_selling' => $request->has('enable_multi_pack_selling')
                 ? (($request['enable_multi_pack_selling'] == '1' || $request['enable_multi_pack_selling'] == 'true' || $request['enable_multi_pack_selling'] === 1 || $request['enable_multi_pack_selling'] === true) ? 1 : 0)
                 : (int) ($setting->enable_multi_pack_selling ?? 0),
+            'enable_wholesale_pricing' => $request->has('enable_wholesale_pricing')
+                ? (($request['enable_wholesale_pricing'] == '1' || $request['enable_wholesale_pricing'] == 'true' || $request['enable_wholesale_pricing'] === 1 || $request['enable_wholesale_pricing'] === true) ? 1 : 0)
+                : (int) ($setting->enable_wholesale_pricing ?? 0),
+            // Master switch for the Multi-Currency module (default off)
+            'enable_multi_currency' => $request->has('enable_multi_currency')
+                ? (($request['enable_multi_currency'] == '1' || $request['enable_multi_currency'] == 'true' || $request['enable_multi_currency'] === 1 || $request['enable_multi_currency'] === true) ? 1 : 0)
+                : (int) ($setting->enable_multi_currency ?? 0),
+            // Change Salesperson During Checkout: POS shows a salesperson picker
+            // and the chosen user is saved as the sale's seller (default off)
+            'enable_pos_salesperson_switch' => $request->has('enable_pos_salesperson_switch')
+                ? (($request['enable_pos_salesperson_switch'] == '1' || $request['enable_pos_salesperson_switch'] == 'true' || $request['enable_pos_salesperson_switch'] === 1 || $request['enable_pos_salesperson_switch'] === true) ? 1 : 0)
+                : (int) ($setting->enable_pos_salesperson_switch ?? 0),
+            // Session timeout (Security tab): minutes before automatic logout;
+            // empty/null = never expire. Clamped to ≥5 so a typo can't lock
+            // everyone out the moment they log in.
+            'session_timeout_minutes' => $request->has('session_timeout_minutes')
+                ? (($request['session_timeout_minutes'] === '' || $request['session_timeout_minutes'] === null || (int) $request['session_timeout_minutes'] <= 0)
+                    ? null
+                    : max(5, (int) $request['session_timeout_minutes']))
+                : ($setting->session_timeout_minutes ?? null),
             // Allow Overselling: global switch — every stock check (POS, sales,
             // quotations, transfers, adjustments, damages, imports) is bypassed
             // and stock may go negative (default off)
@@ -284,6 +315,10 @@ class SettingsController extends Controller
                 ]);
             }
         }
+
+        // SetLocale caches default_language (it runs on every web request), and
+        // it is what guest pages like /login render in — drop it on save.
+        \Illuminate\Support\Facades\Cache::forget('settings.default_language');
 
         // Set selected language as default (only if language is provided and exists)
         if (! empty($default_language)) {
@@ -556,6 +591,14 @@ class SettingsController extends Controller
             $data['show_due'] = ($request['show_due'] == '1' || $request['show_due'] == 'true' || $request['show_due'] === true) ? 1 : 0;
         }
 
+        if ($request->has('show_previous_dues')) {
+            $data['show_previous_dues'] = ($request['show_previous_dues'] == '1' || $request['show_previous_dues'] == 'true' || $request['show_previous_dues'] === true) ? 1 : 0;
+        }
+
+        if ($request->has('show_net_balance')) {
+            $data['show_net_balance'] = ($request['show_net_balance'] == '1' || $request['show_net_balance'] == 'true' || $request['show_net_balance'] === true) ? 1 : 0;
+        }
+
         if ($request->has('show_payments')) {
             $data['show_payments'] = ($request['show_payments'] == '1' || $request['show_payments'] == 'true' || $request['show_payments'] === true) ? 1 : 0;
         }
@@ -595,7 +638,12 @@ class SettingsController extends Controller
         }
 
         if ($request->has('label_printer_connection')) {
-            $data['label_printer_connection'] = $request->input('label_printer_connection') === 'network' ? 'network' : 'windows';
+            $connection = $request->input('label_printer_connection');
+            $data['label_printer_connection'] = in_array($connection, ['network', 'qz'], true) ? $connection : 'windows';
+        }
+
+        if ($request->has('label_printer_render_mode')) {
+            $data['label_printer_render_mode'] = $request->input('label_printer_render_mode') === 'raster' ? 'raster' : 'native';
         }
 
         if ($request->has('label_printer_name')) {
@@ -610,6 +658,32 @@ class SettingsController extends Controller
         if ($request->has('label_printer_port')) {
             $port = (int) $request->input('label_printer_port');
             $data['label_printer_port'] = ($port >= 1 && $port <= 65535) ? $port : null;
+        }
+
+        if ($request->has('label_printer_dpi')) {
+            $data['label_printer_dpi'] = (int) $request->input('label_printer_dpi') === 300 ? 300 : 203;
+        }
+
+        if ($request->has('label_printer_tear')) {
+            $data['label_printer_tear'] = ($request['label_printer_tear'] == '1' || $request['label_printer_tear'] == 'true' || $request['label_printer_tear'] === true) ? 1 : 0;
+        }
+
+        if ($request->has('label_printer_offset_x_mm')) {
+            $data['label_printer_offset_x_mm'] = max(-10, min(10, (float) $request->input('label_printer_offset_x_mm')));
+        }
+
+        if ($request->has('label_printer_offset_y_mm')) {
+            $data['label_printer_offset_y_mm'] = max(-10, min(10, (float) $request->input('label_printer_offset_y_mm')));
+        }
+
+        if ($request->has('label_printer_width_mm')) {
+            $width = (float) $request->input('label_printer_width_mm');
+            $data['label_printer_width_mm'] = ($width >= 20 && $width <= 200) ? $width : null;
+        }
+
+        if ($request->has('label_printer_height_mm')) {
+            $height = (float) $request->input('label_printer_height_mm');
+            $data['label_printer_height_mm'] = ($height >= 10 && $height <= 200) ? $height : null;
         }
 
         if ($request->has('label_printer_gap_mm')) {
@@ -667,6 +741,11 @@ class SettingsController extends Controller
 
         if ($request->has('show_brands')) {
             $data['show_brands'] = ($request['show_brands'] == '1' || $request['show_brands'] == 'true' || $request['show_brands'] === true) ? 1 : 0;
+        }
+
+        // Customer purchase history panel in the POS (default ON)
+        if ($request->has('show_customer_history')) {
+            $data['show_customer_history'] = ($request['show_customer_history'] == '1' || $request['show_customer_history'] == 'true' || $request['show_customer_history'] === true) ? 1 : 0;
         }
 
         // Allow Overselling moved to the global settings row (Features tab).
@@ -766,7 +845,7 @@ class SettingsController extends Controller
                 $item['default_account_id'] = $settings->default_account_id;
             }
             $item['default_payment_method_id'] = '';
-            if (! empty($settings->default_payment_method_id) && PaymentMethod::where('id', $settings->default_payment_method_id)->whereNull('deleted_at')->first()) {
+            if (! empty($settings->default_payment_method_id) && PaymentMethod::active()->where('id', $settings->default_payment_method_id)->whereNull('deleted_at')->first()) {
                 $item['default_payment_method_id'] = $settings->default_payment_method_id;
             }
 
@@ -825,6 +904,9 @@ class SettingsController extends Controller
             $item['enable_3_decimal_pricing'] = (bool) ($settings->enable_3_decimal_pricing ?? false);
             // Kitchen display toggle (default false)
             $item['enable_kitchen_display'] = (bool) ($settings->enable_kitchen_display ?? false);
+            // Kitchen prep target minutes (null = no overdue escalation) + online auto-routing
+            $item['kitchen_target_minutes'] = $settings->kitchen_target_minutes ?? null;
+            $item['kitchen_auto_online_orders'] = (bool) ($settings->kitchen_auto_online_orders ?? false);
             // Show product GTIN/barcode field on the product create form (default true)
             $item['show_product_gtin'] = (bool) ($settings->show_product_gtin ?? true);
             // Resize uploaded product images on save (default on, 800px box) — must
@@ -836,6 +918,20 @@ class SettingsController extends Controller
             $item['show_serial_tracking'] = (bool) ($settings->show_serial_tracking ?? false);
             // Multi-pack selling toggle (default false)
             $item['enable_multi_pack_selling'] = (bool) ($settings->enable_multi_pack_selling ?? false);
+            // Wholesale Pricing by Quantity toggle (default false) — must be
+            // returned here or the System Settings form loads it undefined and
+            // every save silently turns the feature off.
+            $item['enable_wholesale_pricing'] = (bool) ($settings->enable_wholesale_pricing ?? false);
+            // Multi-Currency toggle (default false) — must be returned here or
+            // the System Settings form loads it undefined and every save
+            // silently turns the feature off.
+            $item['enable_multi_currency'] = (bool) ($settings->enable_multi_currency ?? false);
+            // Change Salesperson During Checkout toggle (default false) — must be
+            // returned here or the System Settings form loads it undefined and
+            // every save silently turns the feature off.
+            $item['enable_pos_salesperson_switch'] = (bool) ($settings->enable_pos_salesperson_switch ?? false);
+            // Session timeout: minutes before automatic logout (null = never)
+            $item['session_timeout_minutes'] = $settings->session_timeout_minutes ?? null;
             $item['allow_overselling'] = (bool) ($settings->allow_overselling ?? false);
             // Vehicle Fitment master switch (default false) — must be returned
             // here or the System Settings form loads it as undefined and every
@@ -904,7 +1000,7 @@ class SettingsController extends Controller
                 $zones_array[$key]['label'] = $zones_array[$key]['diff_from_GMT'].' - '.$zones_array[$key]['zone'];
             }
 
-            $Currencies = Currency::where('deleted_at', null)->get(['id', 'name']);
+            $Currencies = Currency::where('deleted_at', null)->get(['id', 'name', 'code', 'symbol']);
             $clients = client::where('deleted_at', '=', null)->get(['id', 'name']);
             $sms_gateway = sms_gateway::where('deleted_at', '=', null)->get(['id', 'title']);
 
@@ -919,7 +1015,8 @@ class SettingsController extends Controller
 
             $languages = Language::where('is_active', true)->get(['name', 'locale']);
             $accounts = Account::whereNull('deleted_at')->get(['id', 'account_name', 'account_num']);
-            $payment_methods = PaymentMethod::whereNull('deleted_at')->get(['id', 'name']);
+            // Default-payment-method picker: only active methods are offerable.
+            $payment_methods = PaymentMethod::active()->whereNull('deleted_at')->get(['id', 'name']);
 
             return response()->json([
                 'settings' => $item,
@@ -1049,6 +1146,77 @@ class SettingsController extends Controller
         return response()->json(['success' => true], 200);
     }
 
+    // ----------------- Feature toggles (Settings → Modules → Features tab) -----------------\\
+    // The same optional-capability switches as System Settings → Features,
+    // exposed as a small standalone endpoint so the Modules page can save them
+    // without posting the full settings row (the main update() clobbers any
+    // unguarded field that isn't sent).
+
+    public function getFeatureSettings(Request $request)
+    {
+        $this->authorizeForUser($request->user('api'), 'business_modules', Setting::class);
+        $settings = Setting::whereNull('deleted_at')->first();
+
+        return response()->json(['features' => [
+            'enable_3_decimal_pricing' => (bool) ($settings->enable_3_decimal_pricing ?? false),
+            'enable_kitchen_display' => (bool) ($settings->enable_kitchen_display ?? false),
+            'kitchen_target_minutes' => $settings->kitchen_target_minutes ?? null,
+            'kitchen_auto_online_orders' => (bool) ($settings->kitchen_auto_online_orders ?? false),
+            'show_product_gtin' => (bool) ($settings->show_product_gtin ?? true),
+            'product_image_resize' => (bool) ($settings->product_image_resize ?? true),
+            'product_image_max_size' => (int) ($settings->product_image_max_size ?? 800),
+            'show_serial_tracking' => (bool) ($settings->show_serial_tracking ?? false),
+            'enable_multi_pack_selling' => (bool) ($settings->enable_multi_pack_selling ?? false),
+            'enable_wholesale_pricing' => (bool) ($settings->enable_wholesale_pricing ?? false),
+            'enable_multi_currency' => (bool) ($settings->enable_multi_currency ?? false),
+            'enable_pos_salesperson_switch' => (bool) ($settings->enable_pos_salesperson_switch ?? false),
+            'vehicle_fitment_enabled' => (bool) ($settings->vehicle_fitment_enabled ?? false),
+            'auto_journal_enabled' => (bool) ($settings->auto_journal_enabled ?? config('accounting_v2.auto_generate_journals', false)),
+            'allow_overselling' => (bool) ($settings->allow_overselling ?? false),
+        ]], 200);
+    }
+
+    public function updateFeatureSettings(Request $request)
+    {
+        $this->authorizeForUser($request->user('api'), 'business_modules', Setting::class);
+        $setting = Setting::whereNull('deleted_at')->first();
+        if (! $setting) {
+            return response()->json(['message' => 'Settings not found'], 404);
+        }
+
+        $boolFields = [
+            'enable_3_decimal_pricing', 'enable_kitchen_display', 'kitchen_auto_online_orders', 'show_product_gtin',
+            'product_image_resize', 'show_serial_tracking', 'enable_multi_pack_selling',
+            'enable_wholesale_pricing', 'enable_multi_currency', 'enable_pos_salesperson_switch',
+            'vehicle_fitment_enabled', 'auto_journal_enabled', 'allow_overselling',
+        ];
+
+        // Only fields present in the payload are written — anything omitted
+        // keeps its stored value, mirroring the has() guards in update().
+        $data = [];
+        foreach ($boolFields as $field) {
+            if ($request->has($field)) {
+                $v = $request[$field];
+                $data[$field] = ($v == '1' || $v == 'true' || $v === 1 || $v === true) ? 1 : 0;
+            }
+        }
+        if ($request->has('product_image_max_size')) {
+            $data['product_image_max_size'] = max(50, min(5000, (int) $request['product_image_max_size']));
+        }
+        if ($request->has('kitchen_target_minutes')) {
+            $v = $request['kitchen_target_minutes'];
+            $data['kitchen_target_minutes'] = ($v === '' || $v === null || (int) $v <= 0)
+                ? null
+                : min(1440, (int) $v);
+        }
+
+        if ($data) {
+            Setting::whereId($setting->id)->update($data);
+        }
+
+        return response()->json(['success' => true], 200);
+    }
+
     // ----------------- Barcode label print defaults (Print Barcode page) -----------------\\
     // barcode_label_settings is a JSON blob of the label layout defaults
     // (template, element toggles, barcode height, font size, bold, paper size,
@@ -1125,6 +1293,72 @@ class SettingsController extends Controller
      * settings page. Accepts the (possibly unsaved) form values as overrides
      * on top of the stored pos_settings row.
      */
+    /** The sample label printed by Test Print, in both render modes. */
+    const LABEL_TEST_SAMPLE = [
+        'name' => 'Stocky Test Label',
+        'barcode' => '628112345678',
+        'Type_barcode' => 'CODE128',
+        'Net_price' => '49.99',
+        'qte' => 1,
+    ];
+
+    /**
+     * The stored label design, filled in with the defaults and the sticker
+     * size the test label is printed at. In raster mode the settings page has
+     * to draw the sample itself, so it needs exactly this — hence the
+     * companion endpoint below rather than the `barcode` permissioned
+     * getBarcodeLabelSettings.
+     */
+    private function labelTestDesign(Request $request, ?\App\Models\PosSetting $posSetting): array
+    {
+        $setting = Setting::whereNull('deleted_at')->first();
+        $design = $setting?->barcode_label_settings ? json_decode($setting->barcode_label_settings, true) : [];
+        $design = is_array($design) ? $design : [];
+        $design += [
+            'show_name' => true, 'show_price' => true, 'show_barcode' => true,
+            'show_barcode_number' => true, 'barcode_height' => 28,
+            'font_size' => 10, 'number_font_size' => 10, 'bold_font' => true,
+        ];
+        // Physical sticker size: unsaved form value > saved printer setting >
+        // the label design's sticker size (legacy fallback).
+        $design['width_mm'] = (float) ($request->input('width_mm')
+            ?: ($posSetting->label_printer_width_mm ?? null)
+            ?: ($design['custom_sticker_width'] ?? 50));
+        $design['height_mm'] = (float) ($request->input('height_mm')
+            ?: ($posSetting->label_printer_height_mm ?? null)
+            ?: ($design['custom_sticker_height'] ?? 30));
+        // Symbol for display; ASCII code ("AED", "USD") as the fallback the
+        // printer-font mode uses when the symbol has no ASCII form (د.إ, ₹…).
+        $currency = optional($setting?->Currency);
+        $design['currency'] = (string) ($currency->symbol ?? '') !== ''
+            ? $currency->symbol : (string) ($currency->code ?? '');
+        $design['currency_ascii'] = (string) ($currency->code ?? '');
+        $design['printer_dpi'] = ((int) ($request->input('printer_dpi')
+            ?: ($posSetting->label_printer_dpi ?? 203))) === 300 ? 300 : 203;
+        $design['offset_x_mm'] = (float) ($request->input('offset_x_mm')
+            ?? ($posSetting->label_printer_offset_x_mm ?? 0));
+        $design['offset_y_mm'] = (float) ($request->input('offset_y_mm')
+            ?? ($posSetting->label_printer_offset_y_mm ?? 0));
+        // Test prints carry a hairline frame at the label edges so alignment
+        // problems (offset, drift, wrong size) are visible at a glance.
+        // Product labels never set this.
+        $design['test_frame'] = true;
+
+        return $design;
+    }
+
+    /** Design + sample label the settings page renders in raster test prints. */
+    public function labelPrinterTestDesign(Request $request)
+    {
+        $this->authorizeForUser($request->user('api'), 'pos_settings', Setting::class);
+        $posSetting = \App\Models\PosSetting::where('deleted_at', '=', null)->first();
+
+        return response()->json([
+            'design' => $this->labelTestDesign($request, $posSetting),
+            'label' => self::LABEL_TEST_SAMPLE,
+        ]);
+    }
+
     public function testLabelPrinter(Request $request)
     {
         $this->authorizeForUser($request->user('api'), 'pos_settings', Setting::class);
@@ -1136,39 +1370,200 @@ class SettingsController extends Controller
 
         foreach (['label_printer_connection', 'label_printer_name', 'label_printer_ip',
             'label_printer_port', 'label_printer_gap_mm', 'label_printer_density',
-            'label_printer_speed', 'label_printer_direction'] as $key) {
+            'label_printer_speed', 'label_printer_direction', 'label_printer_render_mode',
+            'label_printer_width_mm', 'label_printer_height_mm', 'label_printer_dpi',
+            'label_printer_tear', 'label_printer_offset_x_mm', 'label_printer_offset_y_mm'] as $key) {
             if ($request->has($key)) {
                 $posSetting->{$key} = $request->input($key);
             }
         }
 
-        $setting = Setting::whereNull('deleted_at')->first();
-        $design = $setting?->barcode_label_settings ? json_decode($setting->barcode_label_settings, true) : [];
-        $design = is_array($design) ? $design : [];
-        $design += [
-            'show_name' => true, 'show_price' => true, 'show_barcode' => true,
-            'show_barcode_number' => true, 'barcode_height' => 28,
-            'font_size' => 10, 'number_font_size' => 10, 'bold_font' => true,
-        ];
-        $design['width_mm'] = (float) ($request->input('width_mm') ?: ($design['custom_sticker_width'] ?? 50));
-        $design['height_mm'] = (float) ($request->input('height_mm') ?: ($design['custom_sticker_height'] ?? 30));
-        $design['currency'] = optional($setting?->Currency)->symbol ?? '';
+        $design = $this->labelTestDesign($request, $posSetting);
 
-        $labels = [[
-            'name' => 'Stocky Test Label',
-            'barcode' => '628112345678',
-            'Type_barcode' => 'CODE128',
-            'Net_price' => '49.99',
-            'qte' => 1,
-        ]];
+        // Raster mode: the page rendered the sample label to an image itself.
+        if ($request->has('rasters')) {
+            $request->validate([
+                'rasters' => 'required|array|min:1|max:10',
+                'rasters.*.data' => 'required|string',
+                'rasters.*.width_bytes' => 'required|integer|min:1',
+                'rasters.*.height' => 'required|integer|min:1',
+            ]);
+            try {
+                $payload = (new \App\Services\TsplRasterService())
+                    ->build($request->input('rasters'), $design, $posSetting);
+            } catch (\InvalidArgumentException $e) {
+                return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
+            }
+        } else {
+            $payload = (new \App\Services\TsplLabelService())
+                ->build([self::LABEL_TEST_SAMPLE], $design, $posSetting);
+        }
 
-        $payload = (new \App\Services\TsplLabelService())->build($labels, $design, $posSetting);
+        // QZ Tray: the browser delivers the bytes to a printer on the client
+        // machine — hand the payload back instead of printing server-side.
+        // Base64 because a raster payload is binary and would not survive JSON.
+        if (\App\Services\LabelPrinterTransport::isClientSide($posSetting)) {
+            return response()->json([
+                'success' => true,
+                'qz' => true,
+                'printer' => (string) ($posSetting->label_printer_name ?? ''),
+                'payload_base64' => base64_encode($payload),
+            ]);
+        }
+
         $result = (new \App\Services\LabelPrinterTransport())->send($posSetting, $payload);
 
         return response()->json(
             ['success' => $result['ok'], 'message' => $result['message']],
             $result['ok'] ? 200 : 502
         );
+    }
+
+    /**
+     * Print two frames — one computed at 203 dpi, one at 300 — each labeled
+     * with its number. The frame that exactly matches the sticker edges IS
+     * the printhead's real resolution: the user reads the answer off the
+     * label instead of anyone guessing scale factors from photos.
+     */
+    public function dpiTestLabelPrinter(Request $request)
+    {
+        $this->authorizeForUser($request->user('api'), 'pos_settings', Setting::class);
+
+        $posSetting = \App\Models\PosSetting::where('deleted_at', '=', null)->first();
+        if (! $posSetting) {
+            return response()->json(['success' => false, 'message' => 'POS settings not found.'], 404);
+        }
+
+        foreach (['label_printer_connection', 'label_printer_name', 'label_printer_ip',
+            'label_printer_port', 'label_printer_gap_mm', 'label_printer_direction',
+            'label_printer_width_mm', 'label_printer_height_mm'] as $key) {
+            if ($request->has($key)) {
+                $posSetting->{$key} = $request->input($key);
+            }
+        }
+
+        $width = max(20, min(200, (float) ($posSetting->label_printer_width_mm ?: 50)));
+        $height = max(10, min(200, (float) ($posSetting->label_printer_height_mm ?: 30)));
+        $gap = max(0, min(10, (float) ($posSetting->label_printer_gap_mm ?? 2)));
+        $direction = ((int) ($posSetting->label_printer_direction ?? 0)) === 1 ? 1 : 0;
+
+        $payload = '';
+        foreach ([203 => 8, 300 => 12] as $dpi => $dotsPerMm) {
+            // Inset 2 mm: die-cut stickers are narrower than the liner and
+            // have rounded corners, so a border at the extreme edges prints
+            // on the liner where thermal ink is barely visible.
+            $inset = 2 * $dotsPerMm;
+            $frameW = (int) round($width * $dotsPerMm) - $inset;
+            $frameH = (int) round($height * $dotsPerMm) - $inset;
+            $margin = 4 * $dotsPerMm;
+            $payload .= "SIZE {$width} mm,{$height} mm\r\n"
+                . "GAP {$gap} mm,0 mm\r\n"
+                . "DIRECTION {$direction}\r\n"
+                . "REFERENCE 0,0\r\nSHIFT 0\r\nOFFSET 0 mm\r\n"
+                . "SET TEAR OFF\r\n"
+                . "CLS\r\n"
+                . "BOX {$inset},{$inset},{$frameW},{$frameH},4\r\n"
+                . sprintf("TEXT %d,%d,\"4\",0,1,1,\"%d\"\r\n", $margin, $margin, $dpi)
+                . "PRINT 1,1\r\n";
+        }
+
+        if (\App\Services\LabelPrinterTransport::isClientSide($posSetting)) {
+            return response()->json([
+                'success' => true,
+                'qz' => true,
+                'printer' => (string) ($posSetting->label_printer_name ?? ''),
+                'payload_base64' => base64_encode($payload),
+            ]);
+        }
+
+        $result = (new \App\Services\LabelPrinterTransport())->send($posSetting, $payload);
+
+        return response()->json(
+            ['success' => $result['ok'], 'message' => $result['message']],
+            $result['ok'] ? 200 : 502
+        );
+    }
+
+    /**
+     * Auto-calibrate label gap sensing. Sends the configured label size plus
+     * TSPL GAPDETECT: the printer feeds a few labels, measures the real
+     * sticker/gap lengths and stores them — the same calibration the vendor
+     * print tools perform. Run this once after loading a new roll, or when
+     * label positions drift.
+     */
+    public function calibrateLabelPrinter(Request $request)
+    {
+        $this->authorizeForUser($request->user('api'), 'pos_settings', Setting::class);
+
+        $posSetting = \App\Models\PosSetting::where('deleted_at', '=', null)->first();
+        if (! $posSetting) {
+            return response()->json(['success' => false, 'message' => 'POS settings not found.'], 404);
+        }
+
+        foreach (['label_printer_connection', 'label_printer_name', 'label_printer_ip',
+            'label_printer_port', 'label_printer_gap_mm',
+            'label_printer_width_mm', 'label_printer_height_mm'] as $key) {
+            if ($request->has($key)) {
+                $posSetting->{$key} = $request->input($key);
+            }
+        }
+
+        $width = max(20, min(200, (float) ($posSetting->label_printer_width_mm ?: 50)));
+        $height = max(10, min(200, (float) ($posSetting->label_printer_height_mm ?: 30)));
+        $gap = max(0, min(10, (float) ($posSetting->label_printer_gap_mm ?? 2)));
+
+        $payload = "SIZE {$width} mm,{$height} mm\r\n"
+            . "GAP {$gap} mm,0 mm\r\n"
+            . "SET TEAR OFF\r\n"
+            . "GAPDETECT\r\n";
+
+        if (\App\Services\LabelPrinterTransport::isClientSide($posSetting)) {
+            return response()->json([
+                'success' => true,
+                'qz' => true,
+                'printer' => (string) ($posSetting->label_printer_name ?? ''),
+                'payload_base64' => base64_encode($payload),
+            ]);
+        }
+
+        $result = (new \App\Services\LabelPrinterTransport())->send($posSetting, $payload);
+
+        return response()->json(
+            ['success' => $result['ok'], 'message' => $result['message']],
+            $result['ok'] ? 200 : 502
+        );
+    }
+
+    /**
+     * Public certificate used to sign QZ Tray requests. The qz-tray JS lib
+     * fetches this on connect; the settings page also offers it as a download
+     * so the user can install it as override.crt in QZ Tray (silent printing).
+     * Returns certificate:null when the server cannot generate one — the
+     * frontend then falls back to unsigned (per-session Allow prompt).
+     */
+    public function qzCertificate(Request $request)
+    {
+        try {
+            $certificate = (new \App\Services\QzCertificateService())->certificate();
+        } catch (\Throwable $e) {
+            return response()->json(['certificate' => null, 'message' => $e->getMessage()]);
+        }
+
+        return response()->json(['certificate' => $certificate]);
+    }
+
+    /** Sign a QZ Tray challenge string (called by the qz-tray JS lib per print). */
+    public function qzSign(Request $request)
+    {
+        $request->validate(['request' => 'required|string|max:10000']);
+
+        try {
+            $signature = (new \App\Services\QzCertificateService())->sign($request->input('request'));
+        } catch (\Throwable $e) {
+            return response()->json(['signature' => null, 'message' => $e->getMessage()]);
+        }
+
+        return response()->json(['signature' => $signature]);
     }
 
     public function getSettings(Request $request)
@@ -1221,7 +1616,7 @@ class SettingsController extends Controller
                 $item['default_account_id'] = $settings->default_account_id;
             }
             $item['default_payment_method_id'] = '';
-            if (! empty($settings->default_payment_method_id) && PaymentMethod::where('id', $settings->default_payment_method_id)->whereNull('deleted_at')->first()) {
+            if (! empty($settings->default_payment_method_id) && PaymentMethod::active()->where('id', $settings->default_payment_method_id)->whereNull('deleted_at')->first()) {
                 $item['default_payment_method_id'] = $settings->default_payment_method_id;
             }
 
@@ -1280,6 +1675,9 @@ class SettingsController extends Controller
             $item['enable_3_decimal_pricing'] = (bool) ($settings->enable_3_decimal_pricing ?? false);
             // Kitchen display toggle (default false)
             $item['enable_kitchen_display'] = (bool) ($settings->enable_kitchen_display ?? false);
+            // Kitchen prep target minutes (null = no overdue escalation) + online auto-routing
+            $item['kitchen_target_minutes'] = $settings->kitchen_target_minutes ?? null;
+            $item['kitchen_auto_online_orders'] = (bool) ($settings->kitchen_auto_online_orders ?? false);
             // Show product GTIN/barcode field on the product create form (default true)
             $item['show_product_gtin'] = (bool) ($settings->show_product_gtin ?? true);
             // Resize uploaded product images on save (default on, 800px box) — must
@@ -1291,6 +1689,20 @@ class SettingsController extends Controller
             $item['show_serial_tracking'] = (bool) ($settings->show_serial_tracking ?? false);
             // Multi-pack selling toggle (default false)
             $item['enable_multi_pack_selling'] = (bool) ($settings->enable_multi_pack_selling ?? false);
+            // Wholesale Pricing by Quantity toggle (default false) — must be
+            // returned here or the System Settings form loads it undefined and
+            // every save silently turns the feature off.
+            $item['enable_wholesale_pricing'] = (bool) ($settings->enable_wholesale_pricing ?? false);
+            // Multi-Currency toggle (default false) — must be returned here or
+            // the System Settings form loads it undefined and every save
+            // silently turns the feature off.
+            $item['enable_multi_currency'] = (bool) ($settings->enable_multi_currency ?? false);
+            // Change Salesperson During Checkout toggle (default false) — must be
+            // returned here or the System Settings form loads it undefined and
+            // every save silently turns the feature off.
+            $item['enable_pos_salesperson_switch'] = (bool) ($settings->enable_pos_salesperson_switch ?? false);
+            // Session timeout: minutes before automatic logout (null = never)
+            $item['session_timeout_minutes'] = $settings->session_timeout_minutes ?? null;
             $item['allow_overselling'] = (bool) ($settings->allow_overselling ?? false);
             // Vehicle Fitment master switch (default false) — must be returned
             // here or the System Settings form loads it as undefined and every
@@ -1359,7 +1771,7 @@ class SettingsController extends Controller
                 $zones_array[$key]['label'] = $zones_array[$key]['diff_from_GMT'].' - '.$zones_array[$key]['zone'];
             }
 
-            $Currencies = Currency::where('deleted_at', null)->get(['id', 'name']);
+            $Currencies = Currency::where('deleted_at', null)->get(['id', 'name', 'code', 'symbol']);
             $clients = client::where('deleted_at', '=', null)->get(['id', 'name']);
             $sms_gateway = sms_gateway::where('deleted_at', '=', null)->get(['id', 'title']);
 
@@ -1584,13 +1996,17 @@ class SettingsController extends Controller
         return response()->json(['success' => true]);
     }
 
-    // ------------------------------- PWA Icon Settings ------------------------ \\
+    // ------------------------------- PWA Settings ------------------------ \\
 
     /**
-     * Return information needed by the PWA settings tab in System Settings:
-     * the current icon URLs (with a cache-busting query) and any other relevant
-     * data. We do not store PWA icon filenames in the DB — icons live at
-     * public/pwa_images/pwa-icon-192.png and pwa-icon-512.png.
+     * Return everything the PWA settings tab in System Settings needs: the
+     * installable-app identity (name, colors, launch behavior) and the current
+     * icon URLs with a cache-busting query. Icon filenames are not stored in
+     * the DB — icons live at public/pwa_images/pwa-icon-{192,512}.png.
+     *
+     * Identity fields are returned raw (empty when unset) alongside the values
+     * that would be used instead, so the form can show them as placeholders
+     * rather than pretending they were configured.
      */
     public function get_pwa_settings(Request $request)
     {
@@ -1605,9 +2021,28 @@ class SettingsController extends Controller
         $bust192 = file_exists($icon192Path) ? filemtime($icon192Path) : null;
         $bust512 = file_exists($icon512Path) ? filemtime($icon512Path) : null;
 
+        $appName = $setting->app_name ?? 'Stocky';
+        $fallbackShortName = trim(explode('|', (string) ($setting->pwa_name ?? '') ?: $appName)[0]);
+
         return response()->json([
             'settings' => [
                 'id' => $setting ? $setting->id : null,
+                // Missing columns (migration not run) read as null and are
+                // treated exactly like "not configured".
+                'pwa_enabled' => (bool) ($setting->pwa_enabled ?? true),
+                'pwa_name' => $setting->pwa_name ?? '',
+                'pwa_short_name' => $setting->pwa_short_name ?? '',
+                'pwa_description' => $setting->pwa_description ?? '',
+                'pwa_start_url' => $setting->pwa_start_url ?? '',
+                'pwa_display' => $setting->pwa_display ?? 'standalone',
+                'pwa_orientation' => $setting->pwa_orientation ?? 'any',
+                'pwa_theme_color' => $setting->pwa_theme_color ?? '',
+                'pwa_background_color' => $setting->pwa_background_color ?? '',
+                // Placeholders shown when the matching field is left empty.
+                'app_name' => $appName,
+                'default_short_name' => $fallbackShortName !== '' ? $fallbackShortName : $appName,
+                'default_theme_color' => '#2f3640',
+                'default_background_color' => '#ffffff',
                 'icon_192_url' => '/pwa_images/pwa-icon-192.png'.($bust192 ? '?v='.$bust192 : ''),
                 'icon_512_url' => '/pwa_images/pwa-icon-512.png'.($bust512 ? '?v='.$bust512 : ''),
                 'icon_192_exists' => $bust192 !== null,
@@ -1617,10 +2052,14 @@ class SettingsController extends Controller
     }
 
     /**
-     * Replace the PWA icons used by all manifests (admin, portal, store,
-     * customer-display). Accepts up to two image uploads: icon_192 and icon_512.
-     * Each uploaded image is resized to its target square size and saved as
+     * Save the installable-app identity and replace the PWA icons used by all
+     * manifests (admin, portal, store, customer-display). Accepts up to two
+     * image uploads: icon_192 and icon_512. Each uploaded image is resized to
+     * its target square size and saved as
      * public/pwa_images/pwa-icon-{192,512}.png, overwriting the previous file.
+     *
+     * Identity fields are optional: an empty value clears the override so the
+     * manifest falls back to the app name / built-in defaults.
      */
     public function update_pwa_settings(Request $request)
     {
@@ -1629,7 +2068,18 @@ class SettingsController extends Controller
         $request->validate([
             'icon_192' => 'sometimes|file|image|mimes:png,jpg,jpeg,webp|max:1024',
             'icon_512' => 'sometimes|file|image|mimes:png,jpg,jpeg,webp|max:2048',
+            'pwa_name' => 'sometimes|nullable|string|max:120',
+            'pwa_short_name' => 'sometimes|nullable|string|max:60',
+            'pwa_description' => 'sometimes|nullable|string|max:255',
+            // Must stay inside the app's own origin, so only a path is allowed.
+            'pwa_start_url' => 'sometimes|nullable|string|max:191|regex:/^\//',
+            'pwa_display' => 'sometimes|nullable|in:standalone,fullscreen,minimal-ui,browser',
+            'pwa_orientation' => 'sometimes|nullable|in:any,portrait,landscape',
+            'pwa_theme_color' => 'sometimes|nullable|string|regex:/^#[0-9a-fA-F]{6}$/',
+            'pwa_background_color' => 'sometimes|nullable|string|regex:/^#[0-9a-fA-F]{6}$/',
         ]);
+
+        $this->savePwaIdentity($request);
 
         $dir = public_path('pwa_images');
         if (! file_exists($dir)) {
@@ -1663,6 +2113,46 @@ class SettingsController extends Controller
     }
 
     /**
+     * Persist the installable-app identity fields sent by the PWA settings tab.
+     *
+     * Only fields present in the request are touched, so a client that posts
+     * icons alone leaves the identity untouched. Columns missing from the
+     * schema (PWA migration not run) are skipped rather than throwing, keeping
+     * icon upload working on un-migrated installs.
+     */
+    protected function savePwaIdentity(Request $request): void
+    {
+        $setting = Setting::where('deleted_at', '=', null)->first();
+        if (! $setting) {
+            return;
+        }
+
+        $columns = [
+            'pwa_name', 'pwa_short_name', 'pwa_description', 'pwa_start_url',
+            'pwa_display', 'pwa_orientation', 'pwa_theme_color', 'pwa_background_color',
+        ];
+
+        $payload = [];
+
+        foreach ($columns as $column) {
+            if (! $request->has($column) || ! \Schema::hasColumn('settings', $column)) {
+                continue;
+            }
+            $value = trim((string) $request->input($column));
+            // Empty means "no override" — store NULL so the manifest falls back.
+            $payload[$column] = $value === '' ? null : $value;
+        }
+
+        if ($request->has('pwa_enabled') && \Schema::hasColumn('settings', 'pwa_enabled')) {
+            $payload['pwa_enabled'] = filter_var($request->input('pwa_enabled'), FILTER_VALIDATE_BOOLEAN) ? 1 : 0;
+        }
+
+        if ($payload) {
+            $setting->update($payload);
+        }
+    }
+
+    /**
      * Build the pharmacy-mode column updates to merge into the main settings update.
      * Returns an empty array if the pharmacy migration hasn't been run, so the main
      * UPDATE silently skips columns that don't exist (preserves backward compatibility).
@@ -1688,5 +2178,155 @@ class SettingsController extends Controller
             'block_expired_sale' => $request->has('block_expired_sale') ? $bool($request->input('block_expired_sale')) : (int) ($setting->block_expired_sale ?? 0),
             'print_expiry_on_receipt' => $request->has('print_expiry_on_receipt') ? $bool($request->input('print_expiry_on_receipt')) : (int) ($setting->print_expiry_on_receipt ?? 0),
         ];
+    }
+
+    // ------------------ Mobile app settings ------------------\\
+
+    /** Modules the app can hide; these keys are what the Flutter app checks. */
+    public const MOBILE_MODULE_KEYS = [
+        'dashboard', 'pos', 'products', 'sales', 'purchases', 'quotations',
+        'returns', 'customers', 'suppliers', 'expenses', 'adjustments',
+        'transfers', 'reports', 'accounting', 'store_orders', 'hrm', 'users',
+    ];
+
+    /**
+     * Every mobile-app knob shown in System Settings → Mobile App.
+     * Missing columns (migration not run) read as null and behave exactly
+     * like "not configured", so the app keeps its built-in defaults.
+     */
+    public function get_mobile_settings(Request $request)
+    {
+        $this->authorizeForUser($request->user('api'), 'appearance_settings', Setting::class);
+
+        $setting = Setting::where('deleted_at', '=', null)->first();
+        $logo = $setting->mobile_logo ?? null;
+        $logoPath = $logo ? public_path('images'.DIRECTORY_SEPARATOR.$logo) : null;
+
+        return response()->json([
+            'settings' => [
+                'id' => $setting ? $setting->id : null,
+                'mobile_app_enabled' => (bool) ($setting->mobile_app_enabled ?? true),
+                'mobile_app_name' => $setting->mobile_app_name ?? '',
+                'mobile_logo' => $logo ?? '',
+                'mobile_logo_url' => ($logo && $logoPath && file_exists($logoPath))
+                    ? url('/images/'.$logo).'?v='.filemtime($logoPath)
+                    : null,
+                'mobile_primary_color' => $setting->mobile_primary_color ?? '',
+                'mobile_theme_mode' => $setting->mobile_theme_mode ?? 'system',
+                'mobile_min_version' => $setting->mobile_min_version ?? '',
+                'mobile_maintenance_message' => $setting->mobile_maintenance_message ?? '',
+                'mobile_modules' => ($setting && $setting->mobile_modules)
+                    ? json_decode($setting->mobile_modules, true)
+                    : null,
+                'mobile_offline_enabled' => (bool) ($setting->mobile_offline_enabled ?? true),
+                'mobile_scanner_enabled' => (bool) ($setting->mobile_scanner_enabled ?? true),
+                'mobile_allow_price_edit' => (bool) ($setting->mobile_allow_price_edit ?? true),
+                'mobile_support_phone' => $setting->mobile_support_phone ?? '',
+                'mobile_support_email' => $setting->mobile_support_email ?? '',
+                // Shown as placeholders when the matching field is left empty.
+                'app_name' => $setting->app_name ?? config('app.name'),
+                'default_logo_url' => ($setting && $setting->logo)
+                    ? url('/images/'.$setting->logo)
+                    : null,
+                'module_keys' => self::MOBILE_MODULE_KEYS,
+            ],
+        ]);
+    }
+
+    public function update_mobile_settings(Request $request)
+    {
+        $this->authorizeForUser($request->user('api'), 'appearance_settings', Setting::class);
+
+        $request->validate([
+            'logo' => 'sometimes|file|image|mimes:png,jpg,jpeg,webp|max:2048',
+            'mobile_app_name' => 'sometimes|nullable|string|max:120',
+            'mobile_primary_color' => 'sometimes|nullable|string|regex:/^#[0-9a-fA-F]{6}$/',
+            'mobile_theme_mode' => 'sometimes|nullable|in:system,light,dark',
+            'mobile_min_version' => 'sometimes|nullable|string|max:20',
+            'mobile_maintenance_message' => 'sometimes|nullable|string|max:500',
+            'mobile_modules' => 'sometimes|nullable|string',
+            'mobile_support_phone' => 'sometimes|nullable|string|max:40',
+            'mobile_support_email' => 'sometimes|nullable|email|max:120',
+        ]);
+
+        $setting = Setting::where('deleted_at', '=', null)->firstOrFail();
+
+        $boolean = function ($value, $default = true) {
+            if ($value === null) {
+                return $default;
+            }
+
+            return filter_var($value, FILTER_VALIDATE_BOOLEAN);
+        };
+
+        $setting->mobile_app_enabled = $boolean($request->input('mobile_app_enabled'));
+        $setting->mobile_app_name = $request->input('mobile_app_name') ?: null;
+        $setting->mobile_primary_color = $request->input('mobile_primary_color') ?: null;
+        $setting->mobile_theme_mode = $request->input('mobile_theme_mode') ?: 'system';
+        $setting->mobile_min_version = $request->input('mobile_min_version') ?: null;
+        $setting->mobile_maintenance_message = $request->input('mobile_maintenance_message') ?: null;
+        $setting->mobile_offline_enabled = $boolean($request->input('mobile_offline_enabled'));
+        $setting->mobile_scanner_enabled = $boolean($request->input('mobile_scanner_enabled'));
+        $setting->mobile_allow_price_edit = $boolean($request->input('mobile_allow_price_edit'));
+        $setting->mobile_support_phone = $request->input('mobile_support_phone') ?: null;
+        $setting->mobile_support_email = $request->input('mobile_support_email') ?: null;
+
+        // Only keys the app knows about are stored, so a stale browser tab
+        // cannot introduce unknown module flags.
+        if ($request->filled('mobile_modules')) {
+            $decoded = json_decode((string) $request->input('mobile_modules'), true);
+            if (is_array($decoded)) {
+                $clean = [];
+                foreach (self::MOBILE_MODULE_KEYS as $key) {
+                    if (array_key_exists($key, $decoded)) {
+                        $clean[$key] = (bool) $decoded[$key];
+                    }
+                }
+                $setting->mobile_modules = json_encode($clean);
+            }
+        }
+
+        // Uploads live in public/images like every other Stocky upload.
+        if ($request->hasFile('logo') && $request->file('logo')->isValid()) {
+            $dir = public_path('images');
+            if (! file_exists($dir)) {
+                @mkdir($dir, 0755, true);
+            }
+
+            $filename = 'mobile-app-logo-'.time().'.png';
+            Image::make($request->file('logo')->getRealPath())
+                ->resize(512, 512, function ($constraint) {
+                    $constraint->aspectRatio();
+                    $constraint->upsize();
+                })
+                ->encode('png')
+                ->save($dir.DIRECTORY_SEPARATOR.$filename);
+
+            // Drop the previous file so uploads do not pile up.
+            $old = $setting->mobile_logo;
+            if ($old && $old !== $filename) {
+                $oldPath = $dir.DIRECTORY_SEPARATOR.$old;
+                if (file_exists($oldPath)) {
+                    @unlink($oldPath);
+                }
+            }
+
+            $setting->mobile_logo = $filename;
+        }
+
+        if ($request->boolean('remove_logo')) {
+            $old = $setting->mobile_logo;
+            if ($old) {
+                $oldPath = public_path('images'.DIRECTORY_SEPARATOR.$old);
+                if (file_exists($oldPath)) {
+                    @unlink($oldPath);
+                }
+            }
+            $setting->mobile_logo = null;
+        }
+
+        $setting->save();
+
+        return response()->json(['success' => true]);
     }
 }

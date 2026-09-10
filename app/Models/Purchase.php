@@ -12,6 +12,8 @@ class Purchase extends Model
         'date', 'Ref', 'provider_id', 'warehouse_id', 'GrandTotal', 'time',
         'discount', 'shipping', 'statut', 'notes', 'TaxNet', 'tax_rate', 'paid_amount',
         'payment_statut', 'created_at', 'updated_at', 'deleted_at',
+        // Multi-Currency snapshot; NULL = base currency, rate 1
+        'currency_id', 'exchange_rate',
     ];
 
     protected $casts = [
@@ -24,7 +26,14 @@ class Purchase extends Model
         'TaxNet' => 'double',
         'tax_rate' => 'double',
         'paid_amount' => 'double',
+        'currency_id' => 'integer',
+        'exchange_rate' => 'float',
     ];
+
+    public function currency()
+    {
+        return $this->belongsTo('App\Models\Currency');
+    }
 
     public function details()
     {

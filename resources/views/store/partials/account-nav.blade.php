@@ -14,6 +14,8 @@
     ['label' => __('messages.MyWishlist'),     'url' => route('store.wishlist'),   'active' => request()->routeIs('store.wishlist'), 'show' => true],
     ['label' => __('messages.Addresses'),      'url' => route('account').'#address',          'active' => false,               'show' => true],
     ['label' => __('messages.AccountDetails'), 'url' => route('account').'#account-details', 'active' => false,               'show' => true],
+    ['label' => __('messages.MyQuestions'),   'url' => route('account.questions'), 'active' => request()->routeIs('account.questions'), 'show' => true],
+    ['label' => __('messages.Preferences'),    'url' => route('account').'#preferences',     'active' => false,               'show' => true],
   ];
 @endphp
 

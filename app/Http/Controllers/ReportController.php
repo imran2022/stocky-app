@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Support\Facades\Schema;
+use App\Models\ServiceJob;
 use App\Models\Account;
 use App\Models\Adjustment;
 use App\Models\AdjustmentDetail;
@@ -68,8 +69,14 @@ class ReportController extends BaseController
         // New way: Check user's record_view field (user-level boolean)
         // Backward compatibility: If record_view is null, fall back to role permission check
         $ShowRecord = $user->hasRecordView();
+        $data = [];
+
+        // ✅ record_view decides WHOSE records; the assigned warehouses decide
+        // WHICH warehouses those records may come from. Both apply.
+        $scopeIds = $this->warehouseScopeIds();
 
         $Sales = Sale::with('details', 'client', 'facture')->where('deleted_at', '=', null)
+            ->when($scopeIds !== null, fn ($q) => $q->whereIn('warehouse_id', $scopeIds))
             ->where(function ($query) use ($ShowRecord) {
                 if (! $ShowRecord) {
                     return $query->where('user_id', '=', Auth::user()->id);
@@ -193,6 +200,28 @@ class ReportController extends BaseController
             ->orderByDesc('due')
             ->limit(8)
             ->get();
+
+        // Service jobs owed by customers (same status rule as ServiceJob::dueTotalsForClient),
+        // scoped to the same client search.
+        $serviceRow = DB::table('service_jobs')
+            ->join('clients as c', 'c.id', '=', 'service_jobs.client_id')
+            ->whereNull('service_jobs.deleted_at')
+            ->whereNull('c.deleted_at')
+            ->whereIn('service_jobs.status', ServiceJob::DUE_STATUSES)
+            ->when($request->filled('search'), function ($q) use ($request) {
+                $s = $request->search;
+                $q->where(function ($qq) use ($s) {
+                    $qq->where('c.name', 'LIKE', "%{$s}%")
+                        ->orWhere('c.code', 'LIKE', "%{$s}%")
+                        ->orWhere('c.phone', 'LIKE', "%{$s}%");
+                });
+            })
+            ->selectRaw('ROUND(SUM(service_jobs.total_amount), 2) as amount, ROUND(SUM(service_jobs.paid_amount), 2) as paid')
+            ->first();
+        $summary['service_amount'] = (float) ($serviceRow->amount ?? 0);
+        $summary['service_paid'] = (float) ($serviceRow->paid ?? 0);
+        $summary['service_due'] = round($summary['service_amount'] - $summary['service_paid'], 2);
+        $summary['total_due'] = round($summary['due'] + $summary['service_due'], 2);
         // --------------------------------------------------------------------
 
         $clients = $clients->offset($offSet)
@@ -231,6 +260,12 @@ class ReportController extends BaseController
                 ->sum('paid_amount');
 
             $item['return_Due'] = $item['total_amount_return'] - $item['total_paid_return'];
+
+            $service = ServiceJob::dueTotalsForClient($client->id);
+            $item['service_amount'] = $service['total'];
+            $item['service_paid'] = $service['paid'];
+            $item['service_due'] = $service['due'];
+            $item['total_due'] = $item['due'] + $service['due'];
 
             $item['name'] = $client->name;
             $item['phone'] = $client->phone;
@@ -282,6 +317,12 @@ class ReportController extends BaseController
             ->sum('paid_amount');
 
         $data['due'] = $data['total_amount'] - $data['total_paid'];
+
+        $service = ServiceJob::dueTotalsForClient($client->id);
+        $data['service_amount'] = $service['total'];
+        $data['service_paid'] = $service['paid'];
+        $data['service_due'] = $service['due'];
+        $data['total_due'] = $data['due'] + $service['due'];
 
         return response()->json(['report' => $data]);
     }
@@ -337,7 +378,12 @@ class ReportController extends BaseController
         // Backward compatibility: If record_view is null, fall back to role permission check
         $ShowRecord = $user->hasRecordView();
 
+        // ✅ record_view decides whose documents; the assigned warehouses
+        // decide which warehouses they may come from. Both apply.
+        $scopeIds = $this->warehouseScopeIds();
+
         $sales = Sale::where('deleted_at', '=', null)->with('client', 'warehouse')
+            ->when($scopeIds !== null, fn ($q) => $q->whereIn('warehouse_id', $scopeIds))
             ->where(function ($query) use ($ShowRecord) {
                 if (! $ShowRecord) {
                     return $query->where('user_id', '=', Auth::user()->id);
@@ -413,7 +459,12 @@ class ReportController extends BaseController
         // Backward compatibility: If record_view is null, fall back to role permission check
         $ShowRecord = $user->hasRecordView();
 
+        // ✅ record_view decides whose documents; the assigned warehouses
+        // decide which warehouses they may come from. Both apply.
+        $scopeIds = $this->warehouseScopeIds();
+
         $payments = DB::table('payment_sales')
+            ->when($scopeIds !== null, fn ($q) => $q->whereIn('sales.warehouse_id', $scopeIds))
             ->where(function ($query) use ($ShowRecord) {
                 if (! $ShowRecord) {
                     return $query->where('payment_sales.user_id', '=', Auth::user()->id);
@@ -495,7 +546,12 @@ class ReportController extends BaseController
         $ShowRecord = $user->hasRecordView();
         $data = [];
 
+        // ✅ record_view decides whose documents; the assigned warehouses
+        // decide which warehouses they may come from. Both apply.
+        $scopeIds = $this->warehouseScopeIds();
+
         $Quotations = Quotation::with('client', 'warehouse')
+            ->when($scopeIds !== null, fn ($q) => $q->whereIn('warehouse_id', $scopeIds))
             ->where('deleted_at', '=', null)
             ->where('client_id', $request->id)
             ->where(function ($query) use ($ShowRecord) {
@@ -568,7 +624,12 @@ class ReportController extends BaseController
         // Backward compatibility: If record_view is null, fall back to role permission check
         $ShowRecord = $user->hasRecordView();
 
+        // ✅ record_view decides whose documents; the assigned warehouses
+        // decide which warehouses they may come from. Both apply.
+        $scopeIds = $this->warehouseScopeIds();
+
         $SaleReturn = SaleReturn::where('deleted_at', '=', null)->with('sale', 'client', 'warehouse')
+            ->when($scopeIds !== null, fn ($q) => $q->whereIn('warehouse_id', $scopeIds))
             ->where('client_id', $request->id)
             ->where(function ($query) use ($ShowRecord) {
                 if (! $ShowRecord) {
@@ -887,7 +948,7 @@ class ReportController extends BaseController
     }
 
     $Sales = Sale::select('sales.*')
-        ->with('facture.payment_method', 'client', 'warehouse', 'user')
+        ->with('facture.payment_method', 'client', 'warehouse', 'user', 'seller')
         ->join('clients', 'sales.client_id', '=', 'clients.id')
         ->whereNull('sales.deleted_at')
         // ✅ warehouse restriction
@@ -939,6 +1000,12 @@ class ReportController extends BaseController
                         });
                     });
             });
+        })
+        // Seller dropdown (sends user_id). Not covered by $columns above, so it
+        // was silently ignored before. Seller = attribution: the salesperson
+        // picked at POS checkout, falling back to the cashier for plain sales.
+        ->when($request->filled('user_id'), function ($q) use ($request) {
+            $q->whereRaw('COALESCE(sales.seller_id, sales.user_id) = ?', [(int) $request->user_id]);
         });
 
     $totalRows = $Filtred->count();
@@ -1012,6 +1079,9 @@ class ReportController extends BaseController
             ->unique()
             ->implode(', ');
         $item['user_name'] = optional($Sale['user'])->username ?? '---';
+        // Attributed salesperson (Change Salesperson at POS); cashier otherwise.
+        $item['seller_name'] = optional($Sale['seller'])->username
+            ?? (optional($Sale['user'])->username ?? '---');
 
         $data[] = $item;
     }
@@ -1072,18 +1142,26 @@ class ReportController extends BaseController
             $from = $to;
         }
 
+        // ✅ Warehouse scope: the rows below carry warehouse_name, so keep the
+        // report inside the caller's assigned warehouses.
+        $scopeIds = $this->warehouseScopeIds();
+        $warehouseFilter = $this->filterWarehouseId($request->warehouse_id);
+
         $baseQuery = SaleDetail::query()
-            ->whereHas('sale', function ($q) use ($request, $helpers, $from, $to) {
+            ->whereHas('sale', function ($q) use ($request, $helpers, $from, $to, $scopeIds) {
                 $q->whereNull('sales.deleted_at')
                     ->whereBetween('sales.date', [$from, $to]);
+                if ($scopeIds !== null) {
+                    $q->whereIn('sales.warehouse_id', $scopeIds);
+                }
                 $helpers->Show_Records($q);
             });
 
         if ($request->filled('client_id')) {
             $baseQuery->whereHas('sale', fn ($q) => $q->where('sales.client_id', $request->client_id));
         }
-        if ($request->filled('warehouse_id')) {
-            $baseQuery->whereHas('sale', fn ($q) => $q->where('sales.warehouse_id', $request->warehouse_id));
+        if ($warehouseFilter) {
+            $baseQuery->whereHas('sale', fn ($q) => $q->where('sales.warehouse_id', $warehouseFilter));
         }
         if ($request->filled('product_id')) {
             $baseQuery->where('sale_details.product_id', $request->product_id);
@@ -1394,7 +1472,12 @@ class ReportController extends BaseController
         // Backward compatibility: If record_view is null, fall back to role permission check
         $ShowRecord = $user->hasRecordView();
 
+        // ✅ record_view decides whose documents; the assigned warehouses
+        // decide which warehouses they may come from. Both apply.
+        $scopeIds = $this->warehouseScopeIds();
+
         $purchases = Purchase::where('deleted_at', '=', null)
+            ->when($scopeIds !== null, fn ($q) => $q->whereIn('warehouse_id', $scopeIds))
             ->with('provider', 'warehouse')
             ->where('provider_id', $request->id)
             ->where(function ($query) use ($ShowRecord) {
@@ -1470,7 +1553,12 @@ class ReportController extends BaseController
         // Backward compatibility: If record_view is null, fall back to role permission check
         $ShowRecord = $user->hasRecordView();
 
+        // ✅ record_view decides whose documents; the assigned warehouses
+        // decide which warehouses they may come from. Both apply.
+        $scopeIds = $this->warehouseScopeIds();
+
         $payments = DB::table('payment_purchases')
+            ->when($scopeIds !== null, fn ($q) => $q->whereIn('purchases.warehouse_id', $scopeIds))
             ->where(function ($query) use ($ShowRecord) {
                 if (! $ShowRecord) {
                     return $query->where('user_id', '=', Auth::user()->id);
@@ -1552,7 +1640,12 @@ class ReportController extends BaseController
         // Backward compatibility: If record_view is null, fall back to role permission check
         $ShowRecord = $user->hasRecordView();
 
+        // ✅ record_view decides whose documents; the assigned warehouses
+        // decide which warehouses they may come from. Both apply.
+        $scopeIds = $this->warehouseScopeIds();
+
         $PurchaseReturn = PurchaseReturn::where('deleted_at', '=', null)
+            ->when($scopeIds !== null, fn ($q) => $q->whereIn('warehouse_id', $scopeIds))
             ->with('purchase', 'provider', 'warehouse')
             ->where('provider_id', $request->id)
             ->where(function ($query) use ($ShowRecord) {
@@ -2483,6 +2576,7 @@ class ReportController extends BaseController
 
         $products_alerts = product_warehouse::join('products', 'product_warehouse.product_id', '=', 'products.id')
             ->whereRaw('qte <= stock_alert')
+            ->whereIn('product_warehouse.warehouse_id', $this->userWarehouseIds())
             ->count();
 
         return response()->json($products_alerts);
@@ -3277,8 +3371,13 @@ class ReportController extends BaseController
         $metricMap = ['amount' => 'total', 'qty' => 'total_qty', 'orders' => 'total_sales'];
         $metric = $metricMap[$request->order_by] ?? 'total';
 
+        // ✅ record_view decides WHOSE records; the assigned warehouses decide
+        // WHICH warehouses those records may come from. Both apply.
+        $scopeIds = $this->warehouseScopeIds();
+
         $base = fn () => SaleDetail::join('sales', 'sale_details.sale_id', '=', 'sales.id')
             ->join('products', 'sale_details.product_id', '=', 'products.id')
+            ->when($scopeIds !== null, fn ($q) => $q->whereIn('sales.warehouse_id', $scopeIds))
             ->where(function ($query) use ($view_records) {
                 if (! $view_records) {
                     return $query->where('sales.user_id', '=', Auth::user()->id);
@@ -3496,11 +3595,15 @@ class ReportController extends BaseController
         $activity = [];
         $docsByUser = [];
         foreach ($activityTypes as $tbl) {
+            // Sales are credited to the attributed salesperson (Change
+            // Salesperson at POS), falling back to the cashier; the other
+            // document types have no attribution and count for their creator.
+            $ownerExpr = $tbl === 'sales' ? 'COALESCE(seller_id, user_id)' : 'user_id';
             $counts = DB::table($tbl)
                 ->whereNull('deleted_at')
-                ->whereIn('user_id', $matchingIds)
-                ->groupBy('user_id')
-                ->selectRaw('user_id, COUNT(*) as c')
+                ->whereIn(DB::raw($ownerExpr), $matchingIds)
+                ->groupBy(DB::raw($ownerExpr))
+                ->selectRaw($ownerExpr.' as user_id, COUNT(*) as c')
                 ->pluck('c', 'user_id');
             $activity[$tbl] = (int) $counts->sum();
             foreach ($counts as $uid => $c) {
@@ -3530,9 +3633,10 @@ class ReportController extends BaseController
             ->get();
 
         foreach ($users as $user) {
+            // Attribution-aware (same rule as the aggregate loop above).
             $item['total_sales'] = DB::table('sales')
                 ->where('deleted_at', '=', null)
-                ->where('user_id', $user->id)
+                ->whereRaw('COALESCE(seller_id, user_id) = ?', [$user->id])
                 ->count();
 
             $item['total_purchases'] = DB::table('purchases')
@@ -3602,13 +3706,20 @@ class ReportController extends BaseController
         // Backward compatibility: If record_view is null, fall back to role permission check
         $ShowRecord = $user->hasRecordView();
 
-        $sales = Sale::where('deleted_at', '=', null)->with('user', 'client', 'warehouse')
+                // ✅ record_view decides WHOSE records; the assigned warehouses decide
+        // WHICH warehouses those records may come from. Both apply.
+        $scopeIds = $this->warehouseScopeIds();
+
+        $sales = Sale::where('deleted_at', '=', null)->with('user', 'seller', 'client', 'warehouse')
+            ->when($scopeIds !== null, fn ($q) => $q->whereIn('warehouse_id', $scopeIds))
             ->where(function ($query) use ($ShowRecord) {
                 if (! $ShowRecord) {
                     return $query->where('user_id', '=', Auth::user()->id);
                 }
             })
-            ->where('user_id', $request->id)
+            // Attribution: sales credited to this user (Change Salesperson at
+            // POS), falling back to the cashier for plain sales.
+            ->whereRaw('COALESCE(seller_id, user_id) = ?', [(int) $request->id])
              // Search With Multiple Param
             ->where(function ($query) use ($request) {
                 return $query->when($request->filled('search'), function ($query) use ($request) {
@@ -3639,7 +3750,7 @@ class ReportController extends BaseController
 
         $data = [];
         foreach ($sales as $sale) {
-            $item['username'] = $sale['user']->username;
+            $item['username'] = optional($sale->seller)->username ?? $sale['user']->username;
             $item['client_name'] = $sale['client']->name;
             $item['warehouse_name'] = $sale['warehouse']->name;
             $item['date'] = $sale->date;
@@ -3680,7 +3791,12 @@ class ReportController extends BaseController
         $ShowRecord = $user->hasRecordView();
         $data = [];
 
+                // ✅ record_view decides WHOSE records; the assigned warehouses decide
+        // WHICH warehouses those records may come from. Both apply.
+        $scopeIds = $this->warehouseScopeIds();
+
         $Quotations = Quotation::with('client', 'warehouse', 'user')
+            ->when($scopeIds !== null, fn ($q) => $q->whereIn('warehouse_id', $scopeIds))
             ->where('deleted_at', '=', null)
             ->where('user_id', $request->id)
             ->where(function ($query) use ($ShowRecord) {
@@ -3753,7 +3869,12 @@ class ReportController extends BaseController
         // Backward compatibility: If record_view is null, fall back to role permission check
         $ShowRecord = $user->hasRecordView();
 
+                // ✅ record_view decides WHOSE records; the assigned warehouses decide
+        // WHICH warehouses those records may come from. Both apply.
+        $scopeIds = $this->warehouseScopeIds();
+
         $purchases = Purchase::where('deleted_at', '=', null)
+            ->when($scopeIds !== null, fn ($q) => $q->whereIn('warehouse_id', $scopeIds))
             ->with('user', 'provider', 'warehouse')
             ->where('user_id', $request->id)
             ->where(function ($query) use ($ShowRecord) {
@@ -3830,7 +3951,12 @@ class ReportController extends BaseController
         // Backward compatibility: If record_view is null, fall back to role permission check
         $ShowRecord = $user->hasRecordView();
 
+                // ✅ record_view decides WHOSE records; the assigned warehouses decide
+        // WHICH warehouses those records may come from. Both apply.
+        $scopeIds = $this->warehouseScopeIds();
+
         $SaleReturn = SaleReturn::where('deleted_at', '=', null)->with('user', 'client', 'warehouse')
+            ->when($scopeIds !== null, fn ($q) => $q->whereIn('warehouse_id', $scopeIds))
             ->where('user_id', $request->id)
             ->where(function ($query) use ($ShowRecord) {
                 if (! $ShowRecord) {
@@ -3905,7 +4031,12 @@ class ReportController extends BaseController
         // Backward compatibility: If record_view is null, fall back to role permission check
         $ShowRecord = $user->hasRecordView();
 
+                // ✅ record_view decides WHOSE records; the assigned warehouses decide
+        // WHICH warehouses those records may come from. Both apply.
+        $scopeIds = $this->warehouseScopeIds();
+
         $PurchaseReturn = PurchaseReturn::where('deleted_at', '=', null)
+            ->when($scopeIds !== null, fn ($q) => $q->whereIn('warehouse_id', $scopeIds))
             ->with('user', 'provider', 'warehouse')
             ->where('user_id', $request->id)
             ->where(function ($query) use ($ShowRecord) {
@@ -3982,7 +4113,15 @@ class ReportController extends BaseController
         // Backward compatibility: If record_view is null, fall back to role permission check
         $ShowRecord = $user->hasRecordView();
 
+                // ✅ record_view decides WHOSE records; the assigned warehouses decide
+        // WHICH warehouses those records may come from. Both apply.
+        $scopeIds = $this->warehouseScopeIds();
+
         $transfers = Transfer::with('from_warehouse', 'to_warehouse')
+            ->when($scopeIds !== null, fn ($q) => $q->where(function ($qq) use ($scopeIds) {
+                $qq->whereIn('from_warehouse_id', $scopeIds)
+                    ->orWhereIn('to_warehouse_id', $scopeIds);
+            }))
             ->with('user')
             ->where('user_id', $request->id)
             ->where(function ($query) use ($ShowRecord) {
@@ -4057,7 +4196,12 @@ class ReportController extends BaseController
         // Backward compatibility: If record_view is null, fall back to role permission check
         $ShowRecord = $user->hasRecordView();
 
+                // ✅ record_view decides WHOSE records; the assigned warehouses decide
+        // WHICH warehouses those records may come from. Both apply.
+        $scopeIds = $this->warehouseScopeIds();
+
         $Adjustments = Adjustment::with('warehouse')
+            ->when($scopeIds !== null, fn ($q) => $q->whereIn('warehouse_id', $scopeIds))
             ->with('user')
             ->where('user_id', $request->id)
             ->where(function ($query) use ($ShowRecord) {
@@ -4849,7 +4993,8 @@ class ReportController extends BaseController
             $warehouseIds = UserWarehouse::where('user_id', $user->id)->pluck('warehouse_id')->all();
             $warehouses = Warehouse::whereNull('deleted_at')->whereIn('id', $warehouseIds)->get(['id', 'name']);
         }
-        $warehouseId = (int) ($request->warehouse_id ?: 0);
+        // ✅ An out-of-scope warehouse_id must not replace the allowed scope.
+        $warehouseId = (int) $this->filterWarehouseId($request->warehouse_id);
 
         $rowsQuery = product_warehouse::query()
             ->join('products', 'products.id', '=', 'product_warehouse.product_id')
@@ -5833,10 +5978,10 @@ class ReportController extends BaseController
 
             ->where(function ($query) use ($request) {
                 return $query->when($request->filled('user_id'), function ($query) use ($request) {
-                    return $query->where(function ($query) use ($request) {
-                        return $query->whereHas('sale.user', function ($q) use ($request) {
-                            $q->where('user_id', $request->user_id);
-                        });
+                    // Seller = attribution: the salesperson picked at POS
+                    // checkout (seller_id), falling back to the cashier.
+                    return $query->whereHas('sale', function ($q) use ($request) {
+                        $q->whereRaw('COALESCE(seller_id, user_id) = ?', [(int) $request->user_id]);
                     });
                 });
             })
@@ -6141,6 +6286,269 @@ class ReportController extends BaseController
         ]);
     }
 
+    // -------------------- products_sold_summary (per item day report)  -------------\\
+
+    public function products_sold_summary(Request $request)
+    {
+        $this->authorizeForUser($request->user('api'), 'products_sold_summary', Sale::class);
+
+        // Primarily a day report, so the range defaults to today (not the usual 30 days).
+        $today = Carbon::today();
+        $from = $request->filled('from')
+            ? Carbon::parse($request->from)->toDateString()
+            : $today->toDateString();
+        $to = $request->filled('to')
+            ? Carbon::parse($request->to)->toDateString()
+            : $today->toDateString();
+        if ($from > $to) {
+            $from = $to;
+        }
+
+        $user = Auth::user();
+        $view_records = $user->hasRecordView();
+        $is_all_warehouses = (bool) $user->is_all_warehouses;
+
+        $allowedWarehouseIds = [];
+        if (! $is_all_warehouses) {
+            $allowedWarehouseIds = UserWarehouse::where('user_id', $user->id)
+                ->pluck('warehouse_id')
+                ->toArray();
+        }
+
+        // Optional filters (warehouse = "till", user = "sales person")
+        $warehouse_id = $request->filled('warehouse_id') ? (int) $request->warehouse_id : null;
+        if (! $is_all_warehouses && $warehouse_id && ! in_array($warehouse_id, $allowedWarehouseIds, true)) {
+            $warehouse_id = null;
+        }
+        $seller_id = $request->filled('user_id') ? (int) $request->user_id : null;
+        $category_id = $request->filled('category_id') ? (int) $request->category_id : null;
+        $statut = in_array($request->get('statut'), ['completed', 'pending', 'ordered'], true)
+            ? $request->get('statut')
+            : null;
+        $search = trim((string) $request->get('search', ''));
+
+        // Shared so the item rows and the header counters always describe the same sales.
+        $applyFilters = function ($query) use (
+            $from, $to, $view_records, $user, $is_all_warehouses,
+            $allowedWarehouseIds, $warehouse_id, $seller_id, $statut
+        ) {
+            $query->whereNull('s.deleted_at')
+                ->whereBetween('s.date', [$from, $to]);
+
+            if (! $view_records) {
+                $query->where('s.user_id', $user->id);
+            }
+            if (! $is_all_warehouses) {
+                $query->whereIn('s.warehouse_id', $allowedWarehouseIds);
+            }
+            if ($warehouse_id) {
+                $query->where('s.warehouse_id', $warehouse_id);
+            }
+            if ($seller_id) {
+                // Seller = attribution: the salesperson picked at POS checkout
+                // (seller_id), falling back to the cashier for legacy/plain sales.
+                $query->whereRaw('COALESCE(s.seller_id, s.user_id) = ?', [$seller_id]);
+            }
+            if ($statut) {
+                $query->where('s.statut', $statut);
+            }
+
+            return $query;
+        };
+
+        // ---- One row per product (per variant), aggregated over every sale in range ----
+        $itemsQuery = DB::table('sale_details as sd')
+            ->join('sales as s', 's.id', '=', 'sd.sale_id')
+            ->join('products as p', 'p.id', '=', 'sd.product_id')
+            ->leftJoin('categories as c', 'c.id', '=', 'p.category_id')
+            ->leftJoin('product_variants as pv', 'pv.id', '=', 'sd.product_variant_id')
+            ->leftJoin('units as u', 'u.id', '=', 'p.unit_sale_id');
+
+        $applyFilters($itemsQuery);
+
+        if ($category_id) {
+            $itemsQuery->where('p.category_id', $category_id);
+        }
+        if ($search !== '') {
+            $itemsQuery->where(function ($q) use ($search) {
+                $q->where('p.name', 'LIKE', "%{$search}%")
+                    ->orWhere('p.code', 'LIKE', "%{$search}%")
+                    ->orWhere('c.name', 'LIKE', "%{$search}%");
+            });
+        }
+
+        $items = $itemsQuery
+            ->select(
+                'c.id as category_id',
+                'c.name as category_name',
+                'p.id as product_id',
+                'p.name as product_name',
+                'p.code as product_code',
+                'pv.name as variant_name',
+                DB::raw("COALESCE(u.ShortName, '') as unit"),
+                DB::raw('SUM(COALESCE(sd.quantity, 0)) as quantity'),
+                DB::raw('SUM(COALESCE(sd.total, 0)) as total')
+            )
+            ->groupBy('c.id', 'c.name', 'p.id', 'p.name', 'p.code', 'pv.name', 'u.ShortName')
+            ->get();
+
+        // Sorting: default mirrors the printed receipt (category A→Z, then item A→Z)
+        $order = in_array($request->get('SortField'), ['product_name', 'quantity', 'total'], true)
+            ? $request->get('SortField')
+            : 'product_name';
+        $dir = strtolower((string) $request->input('SortType')) === 'desc' ? 'desc' : 'asc';
+
+        // Products with no category still have to appear on the printout.
+        // The frontend translates this label (category_id === null marks the group).
+        $uncategorized = 'Uncategorized';
+
+        $categories = [];
+        $grand_quantity = 0;
+        $grand_total = 0;
+        $items_count = 0;
+
+        foreach ($items as $row) {
+            $key = $row->category_id === null ? 0 : (int) $row->category_id;
+
+            if (! isset($categories[$key])) {
+                $categories[$key] = [
+                    'category_id' => $row->category_id !== null ? (int) $row->category_id : null,
+                    'category_name' => $row->category_name ?: $uncategorized,
+                    'items' => [],
+                    'sub_total_quantity' => 0,
+                    'sub_total' => 0,
+                ];
+            }
+
+            $product_name = $row->variant_name
+                ? '[' . $row->variant_name . ']' . $row->product_name
+                : $row->product_name;
+
+            $quantity = round((float) $row->quantity, 2);
+            $total = round((float) $row->total, 2);
+
+            $categories[$key]['items'][] = [
+                'product_id' => (int) $row->product_id,
+                'product_name' => $product_name,
+                'product_code' => $row->product_code,
+                'unit' => $row->unit,
+                'quantity' => $quantity,
+                'total' => $total,
+            ];
+
+            $categories[$key]['sub_total_quantity'] += $quantity;
+            $categories[$key]['sub_total'] += $total;
+            $grand_quantity += $quantity;
+            $grand_total += $total;
+            $items_count++;
+        }
+
+        foreach ($categories as $key => $group) {
+            usort($categories[$key]['items'], function ($a, $b) use ($order, $dir) {
+                if ($order === 'product_name') {
+                    $cmp = strcasecmp((string) $a['product_name'], (string) $b['product_name']);
+                } else {
+                    $cmp = $a[$order] <=> $b[$order];
+                }
+
+                return $dir === 'desc' ? -$cmp : $cmp;
+            });
+
+            $categories[$key]['sub_total_quantity'] = round($categories[$key]['sub_total_quantity'], 2);
+            $categories[$key]['sub_total'] = round($categories[$key]['sub_total'], 2);
+        }
+
+        $categories = array_values($categories);
+        usort($categories, function ($a, $b) {
+            return strcasecmp((string) $a['category_name'], (string) $b['category_name']);
+        });
+
+        // ---- Header counters: the whole day, independent of the category/search filters ----
+        $countersQuery = DB::table('sales as s');
+        $applyFilters($countersQuery);
+        $counters = $countersQuery
+            ->select(
+                DB::raw('COUNT(DISTINCT s.id) as transactions'),
+                DB::raw('COUNT(DISTINCT s.client_id) as customers')
+            )
+            ->first();
+
+        // ---- Cash register session state ("DAY IS STILL OPENED" / "DAY IS CLOSED") ----
+        $registerQuery = \App\Models\CashRegister::query()
+            ->whereDate('opened_at', '<=', $to)
+            ->where(function ($q) use ($from) {
+                $q->whereNull('closed_at')->orWhereDate('closed_at', '>=', $from);
+            });
+
+        if ($warehouse_id) {
+            $registerQuery->where('warehouse_id', $warehouse_id);
+        } elseif (! $is_all_warehouses) {
+            $registerQuery->whereIn('warehouse_id', $allowedWarehouseIds);
+        }
+        if ($seller_id) {
+            $registerQuery->where('user_id', $seller_id);
+        }
+
+        $has_open_register = (clone $registerQuery)->where('status', 'open')->exists();
+        $has_register = $registerQuery->exists();
+        $day_status = $has_open_register ? 'open' : ($has_register ? 'closed' : null);
+
+        // ---- Filter lists + receipt header data ----
+        if ($is_all_warehouses) {
+            $warehouses = Warehouse::where('deleted_at', '=', null)->get(['id', 'name']);
+        } else {
+            $warehouses = Warehouse::where('deleted_at', '=', null)
+                ->whereIn('id', $allowedWarehouseIds)
+                ->get(['id', 'name']);
+        }
+
+        $users = User::where('deleted_at', '=', null)->get(['id', 'username']);
+        $categories_list = Category::where('deleted_at', '=', null)->get(['id', 'name']);
+
+        $settings = Setting::where('deleted_at', '=', null)->first();
+        $helpers = new helpers;
+
+        // Fall back to the raw id when the warehouse/user was deleted, so a filtered
+        // report never renders as "All" on the printout.
+        $till = $warehouse_id
+            ? (optional($warehouses->firstWhere('id', $warehouse_id))->name ?: '#' . $warehouse_id)
+            : null;
+        $sales_person = $seller_id
+            ? (optional($users->firstWhere('id', $seller_id))->username ?: '#' . $seller_id)
+            : null;
+
+        return response()->json([
+            'categories' => $categories,
+            'totals' => [
+                'quantity' => round($grand_quantity, 2),
+                'total' => round($grand_total, 2),
+                'items' => $items_count,
+            ],
+            'meta' => [
+                'from' => $from,
+                'to' => $to,
+                // null means "All" — the frontend translates it
+                'till' => $till,
+                'sales_person' => $sales_person,
+                'customer_count' => (int) ($counters->customers ?? 0),
+                'transaction_count' => (int) ($counters->transactions ?? 0),
+                'day_status' => $day_status,
+                'printed_by' => $user->username,
+            ],
+            'company' => [
+                'name' => $settings->CompanyName ?? '',
+                'address' => $settings->CompanyAdress ?? '',
+                'phone' => $settings->CompanyPhone ?? '',
+                'email' => $settings->email ?? '',
+            ],
+            'warehouses' => $warehouses,
+            'users' => $users,
+            'categories_list' => $categories_list,
+            'currency' => $helpers->Get_Currency_Code(),
+            'totalRows' => $items_count,
+        ]);
+    }
+
     // -------------------- product_purchases_report  -------------\\
 
     public function product_purchases_report(Request $request)
@@ -6401,7 +6809,8 @@ class ReportController extends BaseController
          }
 
         $allWarehouseIds = $warehouses->pluck('id')->toArray();
-        $warehouse_id = (int) ($request->warehouse_id ?? 0);
+        // ✅ An out-of-scope warehouse_id must not replace the allowed scope.
+        $warehouse_id = (int) $this->filterWarehouseId($request->warehouse_id);
         $selectedWarehouseIds = $warehouse_id !== 0 ? [$warehouse_id] : $allWarehouseIds;
 
         // base query + search
@@ -6641,7 +7050,8 @@ class ReportController extends BaseController
             $warehouses = Warehouse::whereNull('deleted_at')->whereIn('id', $allWarehouseIds)->get(['id', 'name']);
         }
 
-        $warehouse_id = (int) ($request->warehouse_id ?? 0);
+        // ✅ An out-of-scope warehouse_id must not replace the allowed scope.
+        $warehouse_id = (int) $this->filterWarehouseId($request->warehouse_id);
         $selectedWarehouseIds = $warehouse_id !== 0 ? [$warehouse_id] : $allWarehouseIds;
 
         // base query + search
@@ -8592,7 +9002,9 @@ public function sales_by_brand_report(Request $request)
 
             $salesQuery = DB::table('sales')
                 ->whereNull('deleted_at')
-                ->where('user_id', $user->id)
+                // Credit the sale to the attributed salesperson (Change Salesperson
+                // at POS), falling back to the cashier for plain sales.
+                ->whereRaw('COALESCE(seller_id, user_id) = ?', [$user->id])
                 // ✅ user warehouse restriction
                 ->when(! $is_all_warehouses, function ($q) use ($allowedWarehouseIds) {
                     $q->whereIn('warehouse_id', $allowedWarehouseIds);
@@ -8624,7 +9036,10 @@ public function sales_by_brand_report(Request $request)
                 ->join('sales', 'payment_sales.sale_id', '=', 'sales.id')
                 ->whereNull('payment_sales.deleted_at')
                 ->whereNull('sales.deleted_at')
-                ->where('payment_sales.user_id', $user->id)
+                // Same attribution as total_sales above (the sale's credited
+                // seller, not payment_sales.user_id = whoever recorded the
+                // payment) so each row's method columns sum to its total.
+                ->whereRaw('COALESCE(sales.seller_id, sales.user_id) = ?', [$user->id])
                 // ✅ user warehouse restriction (via sales.warehouse_id)
                 ->when(! $is_all_warehouses, function ($q) use ($allowedWarehouseIds) {
                     $q->whereIn('sales.warehouse_id', $allowedWarehouseIds);
@@ -8956,7 +9371,12 @@ public function sales_by_brand_report(Request $request)
         }
 
         // Optional filters
-        $warehouseId = $request->input('warehouse_id');
+        // ✅ Warehouse scope: restrict to the caller's assigned warehouses and
+        // ignore a warehouse_id filter pointing outside them. $warehouseIds is
+        // null for unrestricted users, which leaves the queries unfiltered.
+        $scopeIds = $this->warehouseScopeIds();
+        $warehouseId = $this->filterWarehouseId($request->input('warehouse_id'));
+        $warehouseIds = $warehouseId ? [$warehouseId] : $scopeIds;
         $brandId = $request->input('brand_id');
         $categoryId = $request->input('category_id');
 
@@ -8965,7 +9385,7 @@ public function sales_by_brand_report(Request $request)
             ->join('sales as s', 's.id', '=', 'sd.sale_id')
             ->whereNull('s.deleted_at')
             ->where('s.statut', 'completed')
-            ->when($warehouseId, fn ($q) => $q->where('s.warehouse_id', $warehouseId))
+            ->when($warehouseIds, fn ($q) => $q->whereIn('s.warehouse_id', $warehouseIds))
             ->when($cutoff, fn ($q) => $q->whereRaw('CONCAT(s.date, " ", IFNULL(s.time, "00:00:00")) >= ?', [$cutoff]))
             ->groupBy('sd.product_id')
             ->select([
@@ -8978,7 +9398,7 @@ public function sales_by_brand_report(Request $request)
             ->join('sales as s2', 's2.id', '=', 'sd2.sale_id')
             ->whereNull('s2.deleted_at')
             ->where('s2.statut', 'completed')
-            ->when($warehouseId, fn ($q) => $q->where('s2.warehouse_id', $warehouseId))
+            ->when($warehouseIds, fn ($q) => $q->whereIn('s2.warehouse_id', $warehouseIds))
             ->groupBy('sd2.product_id')
             ->select([
                 'sd2.product_id',
@@ -9131,7 +9551,12 @@ public function sales_by_brand_report(Request $request)
         }
         $cutoff = now()->subDays($period)->toDateTimeString();
 
-        $warehouseId = $request->warehouse_id;
+        // ✅ Warehouse scope: restrict to the caller's assigned warehouses and
+        // ignore a warehouse_id filter pointing outside them. $warehouseIds is
+        // null for unrestricted users, which leaves the queries unfiltered.
+        $scopeIds = $this->warehouseScopeIds();
+        $warehouseId = $this->filterWarehouseId($request->warehouse_id);
+        $warehouseIds = $warehouseId ? [$warehouseId] : $scopeIds;
         $brandId = $request->brand_id;
         $categoryId = $request->category_id;
         $search = trim((string) $request->search);
@@ -9141,7 +9566,7 @@ public function sales_by_brand_report(Request $request)
             ->join('sales as h', 'h.id', '=', 'd.sale_id')
             ->whereNull('h.deleted_at')
             ->where('h.statut', 'completed')
-            ->when($warehouseId, fn ($q) => $q->where('h.warehouse_id', $warehouseId))
+            ->when($warehouseIds, fn ($q) => $q->whereIn('h.warehouse_id', $warehouseIds))
             ->whereRaw('CONCAT(h.date," ",IFNULL(h.time,"00:00:00")) >= ?', [$cutoff])
             ->groupBy('d.product_id')
             ->select('d.product_id', DB::raw('MAX(CONCAT(h.date," ",IFNULL(h.time,"00:00:00"))) as last_dt'));
@@ -9149,7 +9574,7 @@ public function sales_by_brand_report(Request $request)
         $purchaseWithin = DB::table('purchase_details as d')
             ->join('purchases as h', 'h.id', '=', 'd.purchase_id')
             ->whereNull('h.deleted_at')
-            ->when($warehouseId, fn ($q) => $q->where('h.warehouse_id', $warehouseId))
+            ->when($warehouseIds, fn ($q) => $q->whereIn('h.warehouse_id', $warehouseIds))
             ->whereRaw('COALESCE(CONCAT(h.date," ",IFNULL(h.time,"00:00:00")), h.created_at) >= ?', [$cutoff])
             ->groupBy('d.product_id')
             ->select('d.product_id', DB::raw('MAX(COALESCE(CONCAT(h.date," ",IFNULL(h.time,"00:00:00")), h.created_at)) as last_dt'));
@@ -9157,10 +9582,10 @@ public function sales_by_brand_report(Request $request)
         $transferWithin = DB::table('transfer_details as d')
             ->join('transfers as h', 'h.id', '=', 'd.transfer_id')
             ->whereNull('h.deleted_at')
-            ->when($warehouseId, function ($q) use ($warehouseId) {
-                $q->where(function ($qq) use ($warehouseId) {
-                    $qq->where('h.from_warehouse_id', $warehouseId)
-                        ->orWhere('h.to_warehouse_id', $warehouseId);
+            ->when($warehouseIds, function ($q) use ($warehouseIds) {
+                $q->where(function ($qq) use ($warehouseIds) {
+                    $qq->whereIn('h.from_warehouse_id', $warehouseIds)
+                        ->orWhereIn('h.to_warehouse_id', $warehouseIds);
                 });
             })
             ->whereRaw('COALESCE(CONCAT(h.date," ",IFNULL(h.time,"00:00:00")), h.created_at) >= ?', [$cutoff])
@@ -9170,7 +9595,7 @@ public function sales_by_brand_report(Request $request)
         $adjustWithin = DB::table('adjustment_details as d')
             ->join('adjustments as h', 'h.id', '=', 'd.adjustment_id')
             ->whereNull('h.deleted_at')
-            ->when($warehouseId, fn ($q) => $q->where('h.warehouse_id', $warehouseId))
+            ->when($warehouseIds, fn ($q) => $q->whereIn('h.warehouse_id', $warehouseIds))
             ->whereRaw('COALESCE(CONCAT(h.date," ",IFNULL(h.time,"00:00:00")), h.created_at) >= ?', [$cutoff])
             ->groupBy('d.product_id')
             ->select('d.product_id', DB::raw('MAX(COALESCE(CONCAT(h.date," ",IFNULL(h.time,"00:00:00")), h.created_at)) as last_dt'));
@@ -9178,22 +9603,22 @@ public function sales_by_brand_report(Request $request)
         // ---------------- Lifetime LAST movement (all-time, product-level) ----------------
         $saleAll = DB::table('sale_details as d')->join('sales as h', 'h.id', '=', 'd.sale_id')
             ->whereNull('h.deleted_at')->where('h.statut', 'completed')
-            ->when($warehouseId, fn ($q) => $q->where('h.warehouse_id', $warehouseId))
+            ->when($warehouseIds, fn ($q) => $q->whereIn('h.warehouse_id', $warehouseIds))
             ->groupBy('d.product_id')
             ->select('d.product_id', DB::raw('MAX(CONCAT(h.date," ",IFNULL(h.time,"00:00:00"))) as last_dt'));
 
         $purchaseAll = DB::table('purchase_details as d')->join('purchases as h', 'h.id', '=', 'd.purchase_id')
             ->whereNull('h.deleted_at')
-            ->when($warehouseId, fn ($q) => $q->where('h.warehouse_id', $warehouseId))
+            ->when($warehouseIds, fn ($q) => $q->whereIn('h.warehouse_id', $warehouseIds))
             ->groupBy('d.product_id')
             ->select('d.product_id', DB::raw('MAX(COALESCE(CONCAT(h.date," ",IFNULL(h.time,"00:00:00")), h.created_at)) as last_dt'));
 
         $transferAll = DB::table('transfer_details as d')->join('transfers as h', 'h.id', '=', 'd.transfer_id')
             ->whereNull('h.deleted_at')
-            ->when($warehouseId, function ($q) use ($warehouseId) {
-                $q->where(function ($qq) use ($warehouseId) {
-                    $qq->where('h.from_warehouse_id', $warehouseId)
-                        ->orWhere('h.to_warehouse_id', $warehouseId);
+            ->when($warehouseIds, function ($q) use ($warehouseIds) {
+                $q->where(function ($qq) use ($warehouseIds) {
+                    $qq->whereIn('h.from_warehouse_id', $warehouseIds)
+                        ->orWhereIn('h.to_warehouse_id', $warehouseIds);
                 });
             })
             ->groupBy('d.product_id')
@@ -9201,7 +9626,7 @@ public function sales_by_brand_report(Request $request)
 
         $adjustAll = DB::table('adjustment_details as d')->join('adjustments as h', 'h.id', '=', 'd.adjustment_id')
             ->whereNull('h.deleted_at')
-            ->when($warehouseId, fn ($q) => $q->where('h.warehouse_id', $warehouseId))
+            ->when($warehouseIds, fn ($q) => $q->whereIn('h.warehouse_id', $warehouseIds))
             ->groupBy('d.product_id')
             ->select('d.product_id', DB::raw('MAX(COALESCE(CONCAT(h.date," ",IFNULL(h.time,"00:00:00")), h.created_at)) as last_dt'));
 
@@ -9215,10 +9640,10 @@ public function sales_by_brand_report(Request $request)
             ->leftJoinSub($purchaseAll, 'pa', 'pa.product_id', '=', 'pr.id')
             ->leftJoinSub($transferAll, 'ta', 'ta.product_id', '=', 'pr.id')
             ->leftJoinSub($adjustAll, 'aa', 'aa.product_id', '=', 'pr.id')
-            ->leftJoin('product_warehouse as pwh', function ($j) use ($warehouseId) {
+            ->leftJoin('product_warehouse as pwh', function ($j) use ($warehouseIds) {
                 $j->on('pwh.product_id', '=', 'pr.id');
-                if ($warehouseId) {
-                    $j->where('pwh.warehouse_id', $warehouseId);
+                if ($warehouseIds) {
+                    $j->whereIn('pwh.warehouse_id', $warehouseIds);
                 }
             })
             ->whereNull('pr.deleted_at')
@@ -10025,7 +10450,12 @@ public function draftInvoices(Request $request)
 
         // ---- filters ----
         $dimension = in_array($request->dimension, ['product', 'variant'], true) ? $request->dimension : 'product';
-        $warehouseId = $request->filled('warehouse_id') ? $request->warehouse_id : null;
+        // ✅ Warehouse scope: restrict to the caller's assigned warehouses and
+        // ignore a warehouse_id filter pointing outside them. $warehouseIds is
+        // null for unrestricted users, which leaves the queries unfiltered.
+        $scopeIds = $this->warehouseScopeIds();
+        $warehouseId = $this->filterWarehouseId($request->warehouse_id);
+        $warehouseIds = $warehouseId ? [$warehouseId] : $scopeIds;
         $brandId = $request->filled('brand_id') ? $request->brand_id : null;
         $categoryId = $request->filled('category_id') ? $request->category_id : null;
         $search = trim((string) $request->search);
@@ -10040,33 +10470,33 @@ public function draftInvoices(Request $request)
         }
 
         // ---------- helpers to build inbound subqueries ----------
-        $buildPurchaseInbound = function (array $groupCols) use ($warehouseId) {
+        $buildPurchaseInbound = function (array $groupCols) use ($warehouseIds) {
             return DB::table('purchase_details as d')
                 ->join('purchases as h', 'h.id', '=', 'd.purchase_id')
                 ->whereNull('h.deleted_at')
-                ->when($warehouseId, fn ($q) => $q->where('h.warehouse_id', $warehouseId))
+                ->when($warehouseIds, fn ($q) => $q->whereIn('h.warehouse_id', $warehouseIds))
                 ->groupBy($groupCols)
                 ->select(array_merge($groupCols, [
                     DB::raw("MAX(COALESCE(TIMESTAMP(h.`date`, IFNULL(h.`time`,'00:00:00')), h.`created_at`)) as in_dt"),
                 ]));
         };
 
-        $buildTransferInbound = function (array $groupCols) use ($warehouseId) {
+        $buildTransferInbound = function (array $groupCols) use ($warehouseIds) {
             return DB::table('transfer_details as d')
                 ->join('transfers as h', 'h.id', '=', 'd.transfer_id')
                 ->whereNull('h.deleted_at')
-                ->when($warehouseId, fn ($q) => $q->where('h.to_warehouse_id', $warehouseId))
+                ->when($warehouseIds, fn ($q) => $q->whereIn('h.to_warehouse_id', $warehouseIds))
                 ->groupBy($groupCols)
                 ->select(array_merge($groupCols, [
                     DB::raw("MAX(COALESCE(TIMESTAMP(h.`date`, IFNULL(h.`time`,'00:00:00')), h.`created_at`)) as in_dt"),
                 ]));
         };
 
-        $buildAdjustInbound = function (array $groupCols) use ($warehouseId) {
+        $buildAdjustInbound = function (array $groupCols) use ($warehouseIds) {
             return DB::table('adjustment_details as d')
                 ->join('adjustments as h', 'h.id', '=', 'd.adjustment_id')
                 ->whereNull('h.deleted_at')
-                ->when($warehouseId, fn ($q) => $q->where('h.warehouse_id', $warehouseId))
+                ->when($warehouseIds, fn ($q) => $q->whereIn('h.warehouse_id', $warehouseIds))
                 ->where(function ($q) {
                     $q->where('d.type', '=', 'add')
                         ->orWhere('d.quantity', '>', 0);
@@ -10096,11 +10526,11 @@ public function draftInvoices(Request $request)
                 ->leftJoinSub($adjustInbound, 'ai', fn ($j) => $j
                     ->on('ai.product_id', '=', 'pv.product_id')
                     ->on('ai.product_variant_id', '=', 'pv.id'))
-                ->leftJoin('product_warehouse as pwh', function ($j) use ($warehouseId) {
+                ->leftJoin('product_warehouse as pwh', function ($j) use ($warehouseIds) {
                     $j->on('pwh.product_id', '=', 'pv.product_id')
                         ->on('pwh.product_variant_id', '=', 'pv.id');
-                    if ($warehouseId) {
-                        $j->where('pwh.warehouse_id', $warehouseId);
+                    if ($warehouseIds) {
+                        $j->whereIn('pwh.warehouse_id', $warehouseIds);
                     }
                 })
                 ->whereNull('pr.deleted_at')
@@ -10143,7 +10573,7 @@ public function draftInvoices(Request $request)
             $pi = DB::table('purchase_details as d')
                 ->join('purchases as h', 'h.id', '=', 'd.purchase_id')
                 ->whereNull('h.deleted_at')
-                ->when($warehouseId, fn ($q) => $q->where('h.warehouse_id', $warehouseId))
+                ->when($warehouseIds, fn ($q) => $q->whereIn('h.warehouse_id', $warehouseIds))
                 ->groupBy('product_id')
                 ->select([
                     'product_id',
@@ -10153,7 +10583,7 @@ public function draftInvoices(Request $request)
             $ti = DB::table('transfer_details as d')
                 ->join('transfers as h', 'h.id', '=', 'd.transfer_id')
                 ->whereNull('h.deleted_at')
-                ->when($warehouseId, fn ($q) => $q->where('h.to_warehouse_id', $warehouseId))
+                ->when($warehouseIds, fn ($q) => $q->whereIn('h.to_warehouse_id', $warehouseIds))
                 ->groupBy('product_id')
                 ->select([
                     'product_id',
@@ -10163,7 +10593,7 @@ public function draftInvoices(Request $request)
             $ai = DB::table('adjustment_details as d')
                 ->join('adjustments as h', 'h.id', '=', 'd.adjustment_id')
                 ->whereNull('h.deleted_at')
-                ->when($warehouseId, fn ($q) => $q->where('h.warehouse_id', $warehouseId))
+                ->when($warehouseIds, fn ($q) => $q->whereIn('h.warehouse_id', $warehouseIds))
                 ->where(function ($q) {
                     $q->where('d.type', '=', 'add')
                         ->orWhere('d.quantity', '>', 0);
@@ -10178,10 +10608,10 @@ public function draftInvoices(Request $request)
                 ->leftJoinSub($pi, 'pi', 'pi.product_id', '=', 'pr.id')
                 ->leftJoinSub($ti, 'ti', 'ti.product_id', '=', 'pr.id')
                 ->leftJoinSub($ai, 'ai', 'ai.product_id', '=', 'pr.id')
-                ->leftJoin('product_warehouse as pwh', function ($j) use ($warehouseId) {
+                ->leftJoin('product_warehouse as pwh', function ($j) use ($warehouseIds) {
                     $j->on('pwh.product_id', '=', 'pr.id');
-                    if ($warehouseId) {
-                        $j->where('pwh.warehouse_id', $warehouseId);
+                    if ($warehouseIds) {
+                        $j->whereIn('pwh.warehouse_id', $warehouseIds);
                     }
                 })
                 ->whereNull('pr.deleted_at')
@@ -10298,8 +10728,11 @@ public function draftInvoices(Request $request)
         $this->authorizeForUser($request->user('api'), 'Stock_Aging_Report', Product::class);
 
         // Fetch visible options; adjust table/column names if yours differ
+        $scopeIds = $this->warehouseScopeIds();
+
         $warehouses = DB::table('warehouses')
             ->whereNull('deleted_at')
+            ->when($scopeIds !== null, fn ($q) => $q->whereIn('id', $scopeIds))
             ->select('id', 'name')
             ->orderBy('name')
             ->get();

@@ -1284,6 +1284,59 @@ class PermissionsSeeder extends Seeder
                     'name' => 'business_modules',
                 ],
 
+                // Products sold summary (per item day report)
+                [
+                    'id' => 297,
+                    'name' => 'products_sold_summary',
+                ],
+
+                // ZATCA e-invoicing (Phase 2) settings
+                [
+                    'id' => 298,
+                    'name' => 'zatca_settings',
+                ],
+
+                // Multi-Currency: change the currency of a document
+                // (sale/purchase/quotation/POS pickers)
+                [
+                    'id' => 299,
+                    'name' => 'multi_currency',
+                ],
+
+                // Integrations platform
+                [
+                    'id' => 300,
+                    'name' => 'slack_settings',
+                ],
+                [
+                    'id' => 301,
+                    'name' => 'telegram_settings',
+                ],
+                [
+                    'id' => 302,
+                    'name' => 'salla_settings',
+                ],
+                [
+                    'id' => 303,
+                    'name' => 'xero_settings',
+                ],
+                [
+                    'id' => 304,
+                    'name' => 'prestashop_settings',
+                ],
+                [
+                    'id' => 305,
+                    'name' => 'google_sheets_settings',
+                ],
+                [
+                    'id' => 306,
+                    'name' => 'mailchimp_settings',
+                ],
+                [
+                    'id' => 307,
+                    'name' => 'jumia_settings',
+                ],
+
             ]
         );
     }

@@ -9,6 +9,10 @@
     :export-params="filterParams"
     export-rows-key="batches"
   >
+    <template #actions>
+      <!-- Multi-Currency: view amounts converted (display-only) -->
+      <ViewCurrencySelect />
+    </template>
     <template #filters>
       <a-select v-model:value="expiryWindow" style="width: 200px" :options="windowOptions" @change="crud.reload()" />
       <a-select
@@ -70,6 +74,7 @@ import { ref, computed, watch, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { ExclamationCircleOutlined, ClockCircleOutlined, CheckCircleOutlined } from '@ant-design/icons-vue';
 import ReportPage from '../../components/ReportPage.vue';
+import ViewCurrencySelect from '../../components/ViewCurrencySelect.vue';
 import { useCrudTable } from '../../composables/useCrudTable';
 import { useFormat } from '../../composables/useFormat';
 

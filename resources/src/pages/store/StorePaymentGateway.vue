@@ -7,8 +7,8 @@
 
     <a-alert
       type="info" show-icon style="margin-bottom: 16px"
-      message="PayPal, Paystack, Flutterwave and Razorpay are used by the ONLINE STORE checkout only."
-      description="Stripe keys are shared globally (admin and online store use the same Stripe integration). The payment methods list at the bottom controls what customers see at the online-store checkout."
+      message="PayPal, Paystack, Flutterwave, Razorpay, bKash and SSLCommerz are used by the ONLINE STORE checkout only."
+      description="Stripe keys are shared globally (admin and online store use the same Stripe integration). Each tab switches its method on or off for the online-store checkout; Offline Payments holds the methods paid outside the system."
     />
 
     <div v-if="loading" style="display: flex; justify-content: center; padding: 96px 0">
@@ -18,19 +18,19 @@
     <template v-else>
     <!-- Gateways — one card, one tab per provider -->
     <a-card :bordered="false" class="pg-card" style="margin-bottom: 16px">
-      <a-tabs v-model:active-key="gatewayTab" class="pg-tabs">
+      <a-tabs v-model:active-key="gatewayTab" :tab-position="isMobile ? 'top' : 'left'" class="pg-tabs">
         <!-- ============================== Stripe ============================== -->
         <a-tab-pane key="stripe">
           <template #tab>
             <span class="pg-tab">
-              <span class="pg-tab__dot" :class="{ 'pg-tab__dot--on': enabled }"></span>
+              <span class="pg-tab__dot" :class="{ 'pg-tab__dot--on': stripeOffered }"></span>
               <CreditCardOutlined /> Stripe
             </span>
           </template>
 
           <div class="pg-head">
             <div class="pg-head__left">
-              <a-avatar :size="52" style="background: #635bff; flex: 0 0 auto">
+              <a-avatar :size="avatarSize" style="background: #635bff; flex: 0 0 auto">
                 <template #icon><CreditCardOutlined /></template>
               </a-avatar>
               <div>
@@ -39,18 +39,19 @@
               </div>
             </div>
             <div class="pg-head__right">
-              <a-tag :color="enabled ? 'success' : 'default'">
-                <template #icon><component :is="enabled ? CheckCircleFilled : StopOutlined" /></template>
-                {{ enabled ? 'Enabled' : 'Disabled' }}
+              <a-tag :color="stripeOffered ? 'success' : 'default'">
+                <template #icon><component :is="stripeOffered ? CheckCircleFilled : StopOutlined" /></template>
+                {{ stripeOffered ? 'Enabled' : 'Disabled' }}
               </a-tag>
-              <a-switch v-model:checked="enabled" />
+              <a-switch v-model:checked="stripeEnabled" />
             </div>
           </div>
 
           <a-divider style="margin: 16px 0 20px" />
 
-          <!-- Keys (only when enabled) -->
-          <a-form v-if="enabled" layout="vertical" class="pg-form">
+          <!-- Keys stay editable even when cards are switched off, so turning
+               them back on does not mean re-entering credentials. -->
+          <a-form layout="vertical" class="pg-form">
             <!-- Field labels literal like legacy's .env-style naming. -->
             <a-form-item label="STRIPE KEY">
               <a-input v-model:value="gateway.stripe_key" :placeholder="$t('LeaveBlank')">
@@ -64,15 +65,29 @@
             </a-form-item>
           </a-form>
           <a-alert
-            v-else type="info" show-icon style="margin-bottom: 20px"
-            message="Stripe is disabled"
-            description="Turn Stripe on to enter your API keys and start accepting card payments in the online store. Turning it off clears the stored keys."
+            v-if="!stripeEnabled" type="info" show-icon style="margin-bottom: 20px"
+            message="Card payments are switched off"
+            description="Your keys are kept — the online-store checkout simply stops offering the card option until you switch it back on."
+          />
+          <a-alert
+            v-else-if="!gateway.stripe_key" type="warning" show-icon style="margin-bottom: 20px"
+            message="No Stripe key stored"
+            description="Enter your Stripe key and secret to start accepting card payments in the online store."
           />
 
-          <a-button type="primary" :loading="saving" @click="save">
-            <template #icon><SaveOutlined /></template>
-            {{ $t('submit') }}
-          </a-button>
+          <a-space>
+            <a-button type="primary" :loading="saving" @click="save">
+              <template #icon><SaveOutlined /></template>
+              {{ $t('submit') }}
+            </a-button>
+            <a-popconfirm
+              v-if="gateway.stripe_key"
+              :title="$t('RemoveStripeKeysConfirm')"
+              @confirm="clearStripeKeys"
+            >
+              <a-button danger :loading="saving">{{ $t('RemoveKeys') }}</a-button>
+            </a-popconfirm>
+          </a-space>
         </a-tab-pane>
 
         <!-- ============================== PayPal ============================== -->
@@ -86,7 +101,7 @@
 
           <div class="pg-head">
             <div class="pg-head__left">
-              <a-avatar :size="52" style="background: #003087; flex: 0 0 auto">
+              <a-avatar :size="avatarSize" style="background: #003087; flex: 0 0 auto">
                 <template #icon><DollarCircleOutlined /></template>
               </a-avatar>
               <div>
@@ -162,7 +177,7 @@
 
           <div class="pg-head">
             <div class="pg-head__left">
-              <a-avatar :size="52" style="background: #00c3f7; flex: 0 0 auto">
+              <a-avatar :size="avatarSize" style="background: #00c3f7; flex: 0 0 auto">
                 <template #icon><BankOutlined /></template>
               </a-avatar>
               <div>
@@ -229,7 +244,7 @@
 
           <div class="pg-head">
             <div class="pg-head__left">
-              <a-avatar :size="52" style="background: #f5a623; flex: 0 0 auto">
+              <a-avatar :size="avatarSize" style="background: #f5a623; flex: 0 0 auto">
                 <template #icon><GlobalOutlined /></template>
               </a-avatar>
               <div>
@@ -304,7 +319,7 @@
 
           <div class="pg-head">
             <div class="pg-head__left">
-              <a-avatar :size="52" style="background: #3395ff; flex: 0 0 auto">
+              <a-avatar :size="avatarSize" style="background: #3395ff; flex: 0 0 auto">
                 <template #icon><ThunderboltOutlined /></template>
               </a-avatar>
               <div>
@@ -367,46 +382,390 @@
             {{ $t('submit') }}
           </a-button>
         </a-tab-pane>
+
+        <!-- ============================== bKash ============================== -->
+        <a-tab-pane key="bkash">
+          <template #tab>
+            <span class="pg-tab">
+              <span class="pg-tab__dot" :class="{ 'pg-tab__dot--on': bkash.enabled }"></span>
+              <MobileOutlined /> bKash
+            </span>
+          </template>
+
+          <div class="pg-head">
+            <div class="pg-head__left">
+              <a-avatar :size="avatarSize" style="background: #e2136e; flex: 0 0 auto">
+                <template #icon><MobileOutlined /></template>
+              </a-avatar>
+              <div>
+                <div class="pg-head__title">bKash <a-tag color="blue" style="margin-left: 4px">Online Store</a-tag></div>
+                <div class="pg-head__sub">Used by the online store checkout only</div>
+              </div>
+            </div>
+            <div class="pg-head__right">
+              <a-tag :color="bkash.enabled ? 'success' : 'default'">
+                <template #icon><component :is="bkash.enabled ? CheckCircleFilled : StopOutlined" /></template>
+                {{ bkash.enabled ? 'Enabled' : 'Disabled' }}
+              </a-tag>
+              <a-switch v-model:checked="bkash.enabled" />
+            </div>
+          </div>
+
+          <a-divider style="margin: 16px 0 20px" />
+
+          <a-form v-if="bkash.enabled" layout="vertical" class="pg-form">
+            <a-form-item label="BKASH APP KEY">
+              <a-input v-model:value="bkash.app_key">
+                <template #prefix><KeyOutlined style="color: rgba(0,0,0,0.25)" /></template>
+              </a-input>
+            </a-form-item>
+            <a-form-item
+              label="BKASH APP SECRET"
+              :extra="bkash.secret_set ? $t('LeaveBlank') : undefined"
+            >
+              <a-input-password v-model:value="bkash.app_secret" :placeholder="bkash.secret_set ? $t('LeaveBlank') : ''" autocomplete="new-password">
+                <template #prefix><LockOutlined style="color: rgba(0,0,0,0.25)" /></template>
+              </a-input-password>
+            </a-form-item>
+            <a-form-item label="BKASH USERNAME">
+              <a-input v-model:value="bkash.username" placeholder="01XXXXXXXXX">
+                <template #prefix><KeyOutlined style="color: rgba(0,0,0,0.25)" /></template>
+              </a-input>
+            </a-form-item>
+            <a-form-item
+              label="BKASH PASSWORD"
+              :extra="bkash.password_set ? $t('LeaveBlank') : undefined"
+            >
+              <a-input-password v-model:value="bkash.password" :placeholder="bkash.password_set ? $t('LeaveBlank') : ''" autocomplete="new-password">
+                <template #prefix><LockOutlined style="color: rgba(0,0,0,0.25)" /></template>
+              </a-input-password>
+            </a-form-item>
+            <a-form-item
+              label="Sandbox (test mode)"
+              extra="ON uses tokenized.sandbox.bka.sh with your sandbox credentials; turn OFF to charge real bKash accounts on tokenized.pay.bka.sh."
+            >
+              <a-switch v-model:checked="bkash.sandbox" />
+            </a-form-item>
+            <a-alert
+              type="info" show-icon style="margin-bottom: 20px"
+              message="Uses bKash Tokenized Checkout (merchant credentials from the bKash merchant portal). bKash charges in BDT only — the option is offered at checkout only while the store's active currency is BDT."
+            />
+          </a-form>
+          <a-alert
+            v-else type="info" show-icon style="margin-bottom: 20px"
+            message="bKash is disabled"
+            description="Turn bKash on and enter your Tokenized Checkout App Key, App Secret, Username and Password (from the bKash merchant portal) to let customers pay with bKash at the online-store checkout."
+          />
+
+          <a-button type="primary" :loading="bkashSaving" @click="saveBkash">
+            <template #icon><SaveOutlined /></template>
+            {{ $t('submit') }}
+          </a-button>
+        </a-tab-pane>
+
+        <!-- ============================== SSLCommerz ============================== -->
+        <a-tab-pane key="sslcommerz">
+          <template #tab>
+            <span class="pg-tab">
+              <span class="pg-tab__dot" :class="{ 'pg-tab__dot--on': sslcommerz.enabled }"></span>
+              <SafetyCertificateOutlined /> SSLCommerz
+            </span>
+          </template>
+
+          <div class="pg-head">
+            <div class="pg-head__left">
+              <a-avatar :size="avatarSize" style="background: #2e3192; flex: 0 0 auto">
+                <template #icon><SafetyCertificateOutlined /></template>
+              </a-avatar>
+              <div>
+                <div class="pg-head__title">SSLCommerz <a-tag color="blue" style="margin-left: 4px">Online Store</a-tag></div>
+                <div class="pg-head__sub">Used by the online store checkout only</div>
+              </div>
+            </div>
+            <div class="pg-head__right">
+              <a-tag :color="sslcommerz.enabled ? 'success' : 'default'">
+                <template #icon><component :is="sslcommerz.enabled ? CheckCircleFilled : StopOutlined" /></template>
+                {{ sslcommerz.enabled ? 'Enabled' : 'Disabled' }}
+              </a-tag>
+              <a-switch v-model:checked="sslcommerz.enabled" />
+            </div>
+          </div>
+
+          <a-divider style="margin: 16px 0 20px" />
+
+          <a-form v-if="sslcommerz.enabled" layout="vertical" class="pg-form">
+            <a-form-item label="SSLCOMMERZ STORE ID">
+              <a-input v-model:value="sslcommerz.store_id" placeholder="teststore00live">
+                <template #prefix><KeyOutlined style="color: rgba(0,0,0,0.25)" /></template>
+              </a-input>
+            </a-form-item>
+            <a-form-item
+              label="SSLCOMMERZ STORE PASSWORD"
+              :extra="sslcommerz.password_set ? $t('LeaveBlank') : undefined"
+            >
+              <a-input-password v-model:value="sslcommerz.store_password" :placeholder="sslcommerz.password_set ? $t('LeaveBlank') : ''" autocomplete="new-password">
+                <template #prefix><LockOutlined style="color: rgba(0,0,0,0.25)" /></template>
+              </a-input-password>
+            </a-form-item>
+            <a-form-item
+              label="Sandbox (test mode)"
+              extra="ON uses sandbox.sslcommerz.com with sandbox credentials; turn OFF to charge real customers on securepay.sslcommerz.com."
+            >
+              <a-switch v-model:checked="sslcommerz.sandbox" />
+            </a-form-item>
+            <a-alert
+              type="info" show-icon style="margin-bottom: 12px"
+              message="Hosted checkout covering cards, bKash/Nagad/Rocket mobile banking and internet banking in Bangladesh. Credentials come from your SSLCommerz merchant panel (Store ID + Store Password / API credentials)."
+            />
+            <a-alert type="info" show-icon style="margin-bottom: 20px">
+              <template #message>
+                IPN URL (recommended backstop — set it under My Stores → IPN Settings on the SSLCommerz merchant panel):
+                <a-typography-text code copyable>{{ webhookUrl('sslcommerz') }}</a-typography-text>
+              </template>
+            </a-alert>
+          </a-form>
+          <a-alert
+            v-else type="info" show-icon style="margin-bottom: 20px"
+            message="SSLCommerz is disabled"
+            description="Turn SSLCommerz on and enter your Store ID and Store Password (from the SSLCommerz merchant panel) to accept cards, mobile banking and internet banking at the online-store checkout."
+          />
+
+          <a-button type="primary" :loading="sslcommerzSaving" @click="saveSslcommerz">
+            <template #icon><SaveOutlined /></template>
+            {{ $t('submit') }}
+          </a-button>
+        </a-tab-pane>
+        <!-- ============================== Manual / offline ============================== -->
+        <a-tab-pane key="manual">
+          <template #tab>
+            <span class="pg-tab">
+              <span class="pg-tab__dot" :class="{ 'pg-tab__dot--on': anyOfflineEnabled }"></span>
+              <DollarOutlined /> {{ $t('OfflinePayments') }}
+            </span>
+          </template>
+
+          <a-alert
+            type="info" show-icon style="margin-bottom: 20px"
+            :message="$t('OfflinePaymentsIntro')"
+          />
+
+          <!-- Cash on delivery -->
+          <div class="pg-head">
+            <div class="pg-head__left">
+              <a-avatar :size="avatarSize" style="background: #52c41a; flex: 0 0 auto">
+                <template #icon><DollarOutlined /></template>
+              </a-avatar>
+              <div>
+                <div class="pg-head__title">{{ $t('CashOnDelivery') }}</div>
+                <div class="pg-head__sub">{{ $t('CashOnDeliveryDesc') }}</div>
+              </div>
+            </div>
+            <div class="pg-head__right">
+              <a-switch v-model:checked="flags.cod" />
+            </div>
+          </div>
+
+          <a-divider />
+
+          <!-- Mobile money -->
+          <div class="pg-head">
+            <div class="pg-head__left">
+              <a-avatar :size="avatarSize" style="background: #1677ff; flex: 0 0 auto">
+                <template #icon><MobileOutlined /></template>
+              </a-avatar>
+              <div>
+                <div class="pg-head__title">{{ $t('MobileMoney') }}</div>
+                <div class="pg-head__sub">{{ $t('MobileMoneyDesc') }}</div>
+              </div>
+            </div>
+            <div class="pg-head__right">
+              <a-switch v-model:checked="flags.mobile_money" />
+            </div>
+          </div>
+
+          <a-divider />
+
+          <!-- Store wallet balance (the same switch as the E-Wallet module) -->
+          <div class="pg-head">
+            <div class="pg-head__left">
+              <a-avatar :size="avatarSize" style="background: #722ed1; flex: 0 0 auto">
+                <template #icon><WalletOutlined /></template>
+              </a-avatar>
+              <div>
+                <div class="pg-head__title">{{ $t('PayWithWallet') }}</div>
+                <div class="pg-head__sub">{{ $t('WalletMethodDesc') }}</div>
+              </div>
+            </div>
+            <div class="pg-head__right">
+              <a-switch v-model:checked="flags.wallet" />
+            </div>
+          </div>
+
+          <a-divider />
+
+          <!-- GCash -->
+          <div class="pg-head">
+            <div class="pg-head__left">
+              <a-avatar :size="avatarSize" style="background: #0075c9; flex: 0 0 auto">
+                <template #icon><MobileOutlined /></template>
+              </a-avatar>
+              <div>
+                <div class="pg-head__title">GCash <a-tag color="blue" style="margin-left: 4px">Online Store</a-tag></div>
+                <div class="pg-head__sub">{{ $t('GCashDesc') }}</div>
+              </div>
+            </div>
+            <div class="pg-head__right">
+              <a-switch v-model:checked="manual.gcash_enabled" />
+            </div>
+          </div>
+
+          <a-form v-if="manual.gcash_enabled" layout="vertical" class="pg-form" style="margin-top: 16px">
+            <a-row :gutter="16">
+              <a-col :xs="24" :md="12">
+                <a-form-item :label="$t('AccountName')">
+                  <a-input v-model:value="manual.gcash_account_name" :maxlength="150" />
+                </a-form-item>
+              </a-col>
+              <a-col :xs="24" :md="12">
+                <a-form-item :label="$t('MobileNumber')">
+                  <a-input v-model:value="manual.gcash_account_number" :maxlength="60" placeholder="09XX XXX XXXX" />
+                </a-form-item>
+              </a-col>
+            </a-row>
+            <a-form-item :label="$t('Instructions')" :extra="$t('OfflineInstructionsHint')">
+              <a-textarea v-model:value="manual.gcash_instructions" :rows="3" :maxlength="1000" show-count />
+            </a-form-item>
+            <a-form-item :label="$t('QrCode')">
+              <a-upload
+                :file-list="gcashQrList"
+                :before-upload="beforeQrUpload"
+                accept="image/png,image/jpeg,image/webp"
+                list-type="picture"
+                @remove="removeQr"
+              >
+                <a-button v-if="!gcashQrList.length">
+                  <template #icon><UploadOutlined /></template>
+                  {{ $t('Upload') }}
+                </a-button>
+              </a-upload>
+              <img v-if="!gcashQrList.length && manual.gcash_qr_url" :src="manual.gcash_qr_url" class="pg-qr" alt="GCash QR" />
+            </a-form-item>
+          </a-form>
+
+          <a-divider />
+
+          <!-- Bank transfer -->
+          <div class="pg-head">
+            <div class="pg-head__left">
+              <a-avatar :size="avatarSize" style="background: #4c5fd7; flex: 0 0 auto">
+                <template #icon><BankOutlined /></template>
+              </a-avatar>
+              <div>
+                <div class="pg-head__title">{{ $t('BankTransfer') }} <a-tag color="blue" style="margin-left: 4px">Online Store</a-tag></div>
+                <div class="pg-head__sub">{{ $t('BankTransferDesc') }}</div>
+              </div>
+            </div>
+            <div class="pg-head__right">
+              <a-switch v-model:checked="manual.bank_enabled" />
+            </div>
+          </div>
+
+          <a-form v-if="manual.bank_enabled" layout="vertical" class="pg-form" style="margin-top: 16px">
+            <a-row :gutter="16">
+              <a-col :xs="24" :md="12">
+                <a-form-item :label="$t('BankName')">
+                  <a-input v-model:value="manual.bank_name" :maxlength="150" />
+                </a-form-item>
+              </a-col>
+              <a-col :xs="24" :md="12">
+                <a-form-item :label="$t('Branch')">
+                  <a-input v-model:value="manual.bank_branch" :maxlength="150" />
+                </a-form-item>
+              </a-col>
+              <a-col :xs="24" :md="12">
+                <a-form-item :label="$t('AccountName')">
+                  <a-input v-model:value="manual.bank_account_name" :maxlength="150" />
+                </a-form-item>
+              </a-col>
+              <a-col :xs="24" :md="12">
+                <a-form-item :label="$t('AccountNumber')">
+                  <a-input v-model:value="manual.bank_account_number" :maxlength="60" />
+                </a-form-item>
+              </a-col>
+            </a-row>
+            <a-form-item :label="$t('Instructions')" :extra="$t('OfflineInstructionsHint')">
+              <a-textarea v-model:value="manual.bank_instructions" :rows="3" :maxlength="1000" show-count />
+            </a-form-item>
+          </a-form>
+
+          <a-divider />
+
+          <!-- Cash on pickup -->
+          <div class="pg-head">
+            <div class="pg-head__left">
+              <a-avatar :size="avatarSize" style="background: #f7971e; flex: 0 0 auto">
+                <template #icon><ShopOutlined /></template>
+              </a-avatar>
+              <div>
+                <div class="pg-head__title">{{ $t('CashOnPickup') }} <a-tag color="blue" style="margin-left: 4px">Online Store</a-tag></div>
+                <div class="pg-head__sub">{{ $t('CashOnPickupDesc') }}</div>
+              </div>
+            </div>
+            <div class="pg-head__right">
+              <a-switch v-model:checked="manual.pickup_enabled" />
+            </div>
+          </div>
+
+          <div v-if="manual.pickup_enabled" style="margin-top: 16px">
+            <a-form layout="vertical" class="pg-form">
+              <a-form-item :label="$t('Instructions')" :extra="$t('OfflineInstructionsHint')">
+                <a-textarea v-model:value="manual.pickup_instructions" :rows="2" :maxlength="1000" show-count />
+              </a-form-item>
+            </a-form>
+
+            <div class="pm-title" style="margin-top: 8px">{{ $t('PickupBranches') }}</div>
+            <div class="pm-sub">{{ $t('PickupBranchesHint') }}</div>
+
+            <a-alert
+              v-if="!branches.length"
+              type="warning" show-icon style="margin-bottom: 12px"
+              :message="$t('NoStoreWarehouses')"
+            />
+
+            <a-table
+              v-else
+              :columns="branchColumns"
+              :data-source="branches"
+              :pagination="false"
+              size="small"
+              row-key="warehouse_id"
+              :scroll="{ x: 'max-content' }"
+            >
+              <template #bodyCell="{ column, record }">
+                <template v-if="column.key === 'active'">
+                  <a-switch v-model:checked="record.active" size="small" />
+                </template>
+                <template v-else-if="column.key === 'address'">
+                  <a-input v-model:value="record.address" :maxlength="255" :placeholder="record.city || ''" />
+                </template>
+                <template v-else-if="column.key === 'hours'">
+                  <a-input v-model:value="record.hours" :maxlength="191" placeholder="Mon-Sat 9:00-18:00" />
+                </template>
+                <template v-else-if="column.key === 'contact'">
+                  <a-input v-model:value="record.contact" :maxlength="100" />
+                </template>
+              </template>
+            </a-table>
+          </div>
+
+          <a-button type="primary" :loading="manualSaving" style="margin-top: 20px" @click="saveManual">
+            <template #icon><SaveOutlined /></template>
+            {{ $t('submit') }}
+          </a-button>
+        </a-tab-pane>
       </a-tabs>
     </a-card>
 
-    <!-- Payment methods offered to customers at online-store checkout -->
-    <a-card :bordered="false" class="pg-card">
-      <div class="pm-title">Available payment methods</div>
-      <div class="pm-sub">Turn each option on or off for the online-store checkout</div>
-      <div class="pm-list">
-        <div v-for="m in methods" :key="m.key" class="pm-row">
-          <div class="pm-icon" :style="{ background: m.tint, color: m.color }">
-            <component :is="m.icon" />
-          </div>
-          <div class="pm-text">
-            <div class="pm-name">{{ m.name }}</div>
-            <div class="pm-desc">{{ m.desc }}</div>
-          </div>
-          <!-- Credit card / PayPal are toggled from their gateway tabs above. -->
-          <a-tag v-if="m.key === 'credit_card'" :color="enabled ? 'success' : 'default'">
-            {{ enabled ? 'Enabled' : 'Disabled' }}
-          </a-tag>
-          <a-tag v-else-if="m.key === 'paypal'" :color="paypal.enabled ? 'success' : 'default'">
-            {{ paypal.enabled ? 'Enabled' : 'Disabled' }}
-          </a-tag>
-          <a-tag v-else-if="m.key === 'paystack'" :color="paystack.enabled ? 'success' : 'default'">
-            {{ paystack.enabled ? 'Enabled' : 'Disabled' }}
-          </a-tag>
-          <a-tag v-else-if="m.key === 'flutterwave'" :color="flutterwave.enabled ? 'success' : 'default'">
-            {{ flutterwave.enabled ? 'Enabled' : 'Disabled' }}
-          </a-tag>
-          <a-tag v-else-if="m.key === 'razorpay'" :color="razorpay.enabled ? 'success' : 'default'">
-            {{ razorpay.enabled ? 'Enabled' : 'Disabled' }}
-          </a-tag>
-          <a-switch v-else v-model:checked="flags[m.model]" />
-        </div>
-      </div>
-      <a-button type="primary" :loading="methodsSaving" style="margin-top: 16px" @click="saveMethods">
-        <template #icon><SaveOutlined /></template>
-        {{ $t('submit') }}
-      </a-button>
-    </a-card>
     </template>
   </div>
 </template>
@@ -419,13 +778,13 @@
  * POST payment_gateway {stripe_key, stripe_secret, deleted} — `deleted:true`
  * wipes the stored pair, which the Enable/Disable toggle maps to.
  */
-import { ref, reactive, onMounted } from 'vue';
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue';
 import { message } from 'ant-design-vue';
 import { useI18n } from 'vue-i18n';
 import {
   CreditCardOutlined, CheckCircleFilled, StopOutlined, KeyOutlined, LockOutlined, SaveOutlined,
   DollarOutlined, MobileOutlined, WalletOutlined, DollarCircleOutlined, BankOutlined, ApiOutlined,
-  GlobalOutlined, ThunderboltOutlined,
+  GlobalOutlined, ThunderboltOutlined, ShopOutlined, UploadOutlined, SafetyCertificateOutlined,
 } from '@ant-design/icons-vue';
 import PageHeader from '../../components/PageHeader.vue';
 import http from '../../lib/http';
@@ -438,28 +797,169 @@ defineProps({ context: { type: String, default: 'store' } });
 
 const loading = ref(true);
 const gatewayTab = ref('stripe');
-const saving = ref(false);
-const enabled = ref(false);
-const gateway = ref({ stripe_key: '', stripe_secret: '' });
 
-// The methods the storefront checkout offers (see checkout.blade.php). Credit
-// card is toggled by the Stripe section above; the rest are on/off flags on the
-// store settings (Wallet reuses the E-Wallet `wallet_enabled` flag).
-const methods = [
-  { key: 'credit_card', name: 'Credit Card (Stripe)', desc: 'Pay by card, powered by Stripe', icon: CreditCardOutlined, color: '#635bff', tint: 'rgba(99, 91, 255, 0.12)' },
-  { key: 'paypal', name: 'PayPal', desc: 'Pay with a PayPal account or card via PayPal', icon: DollarCircleOutlined, color: '#003087', tint: 'rgba(0, 48, 135, 0.10)' },
-  { key: 'paystack', name: 'Paystack', desc: 'Cards, bank transfers and mobile money via Paystack', icon: BankOutlined, color: '#00a5d4', tint: 'rgba(0, 195, 247, 0.12)' },
-  { key: 'flutterwave', name: 'Flutterwave', desc: 'Cards, mobile money and bank transfers via Flutterwave', icon: GlobalOutlined, color: '#c77f00', tint: 'rgba(245, 166, 35, 0.14)' },
-  { key: 'razorpay', name: 'Razorpay', desc: 'Cards, UPI, netbanking and wallets via Razorpay', icon: ThunderboltOutlined, color: '#3395ff', tint: 'rgba(51, 149, 255, 0.12)' },
-  { key: 'cod', model: 'cod', name: 'Cash on Delivery', desc: 'Pay in cash when the order is delivered', icon: DollarOutlined, color: '#52c41a', tint: 'rgba(82, 196, 26, 0.12)' },
-  { key: 'mobile_money', model: 'mobile_money', name: 'Mobile Money', desc: 'Pay via a mobile-money transfer', icon: MobileOutlined, color: '#1677ff', tint: 'rgba(22, 119, 255, 0.12)' },
-  { key: 'wallet', model: 'wallet', name: 'Wallet', desc: 'Pay from the customer’s store wallet balance', icon: WalletOutlined, color: '#722ed1', tint: 'rgba(114, 46, 209, 0.12)' },
-];
+// Phones cannot spare 170px for the vertical tab rail, so the gateway tabs flip
+// to a horizontally scrollable top bar (and the provider avatars shrink) there.
+const isMobile = ref(typeof window !== 'undefined' && window.innerWidth < 768);
+const avatarSize = computed(() => (isMobile.value ? 40 : 52));
+const onViewportResize = () => { isMobile.value = window.innerWidth < 768; };
+onMounted(() => window.addEventListener('resize', onViewportResize));
+onBeforeUnmount(() => window.removeEventListener('resize', onViewportResize));
+
+const saving = ref(false);
+// `enabled` = credentials are stored; `stripeEnabled` = the admin offers cards
+// at checkout. Keeping them apart means switching cards off never wipes keys.
+const enabled = ref(false);
+const stripeEnabled = ref(true);
+const gateway = ref({ stripe_key: '', stripe_secret: '' });
+const stripeOffered = computed(() => stripeEnabled.value && !!gateway.value.stripe_key);
 
 // Method on/off flags + the two ids the store-settings update requires.
 const flags = reactive({ cod: true, mobile_money: true, wallet: false });
+
+
+/**
+ * Manual (offline) methods: GCash, bank transfer and cash on pickup. These
+ * carry the account details the shopper pays to; GCash and bank transfer also
+ * ask the shopper for a screenshot + reference number, verified per order.
+ */
+const manual = reactive({
+  gcash_enabled: false,
+  gcash_account_name: '',
+  gcash_account_number: '',
+  gcash_instructions: '',
+  gcash_qr_url: '',
+  bank_enabled: false,
+  bank_name: '',
+  bank_account_name: '',
+  bank_account_number: '',
+  bank_branch: '',
+  bank_instructions: '',
+  pickup_enabled: false,
+  pickup_instructions: '',
+});
+const manualSaving = ref(false);
+/** Lights the Offline Payments tab dot when any offline method is offered. */
+const anyOfflineEnabled = computed(() =>
+  manual.gcash_enabled || manual.bank_enabled || manual.pickup_enabled
+  || flags.cod || flags.mobile_money || flags.wallet);
+const gcashQrList = ref([]);
+const gcashQrFile = ref(null);
+const branches = ref([]);
+
+const branchColumns = computed(() => [
+  { title: t('Offer'), key: 'active', width: 80, align: 'center' },
+  { title: t('warehouse'), dataIndex: 'name', key: 'name', width: 180 },
+  { title: t('Address'), key: 'address', width: 260 },
+  { title: t('PickupHours'), key: 'hours', width: 200 },
+  { title: t('Phone'), key: 'contact', width: 160 },
+]);
+
+/** Hold the picked QR locally; it uploads with the rest of the tab. */
+function beforeQrUpload(file) {
+  gcashQrFile.value = file;
+  gcashQrList.value = [{ uid: '-1', name: file.name, status: 'done', url: URL.createObjectURL(file) }];
+  return false;
+}
+function removeQr() {
+  gcashQrFile.value = null;
+  gcashQrList.value = [];
+  return true;
+}
+
+async function saveManual() {
+  manualSaving.value = true;
+  try {
+    const body = {
+      payment_gcash_enabled: manual.gcash_enabled ? 1 : 0,
+      gcash_account_name: manual.gcash_account_name || '',
+      gcash_account_number: manual.gcash_account_number || '',
+      gcash_instructions: manual.gcash_instructions || '',
+      payment_bank_transfer_enabled: manual.bank_enabled ? 1 : 0,
+      bank_name: manual.bank_name || '',
+      bank_account_name: manual.bank_account_name || '',
+      bank_account_number: manual.bank_account_number || '',
+      bank_branch: manual.bank_branch || '',
+      bank_instructions: manual.bank_instructions || '',
+      payment_cash_on_pickup_enabled: manual.pickup_enabled ? 1 : 0,
+      pickup_instructions: manual.pickup_instructions || '',
+      payment_cod_enabled: flags.cod ? 1 : 0,
+      payment_mobile_money_enabled: flags.mobile_money ? 1 : 0,
+      wallet_enabled: flags.wallet ? 1 : 0,
+      // Required by the store-settings validator; sent back unchanged.
+      default_currency_id: storeMeta.value.default_currency_id,
+      default_warehouse_id: storeMeta.value.default_warehouse_id,
+    };
+
+    if (gcashQrFile.value) {
+      // A file forces multipart; nulls would arrive as the string "null".
+      const fd = new FormData();
+      Object.entries(body).forEach(([k, v]) => {
+        if (v !== null && v !== undefined) fd.append(k, v);
+      });
+      fd.append('gcash_qr', gcashQrFile.value);
+      await http.postForm('admin/store/settings', fd);
+      gcashQrFile.value = null;
+    } else {
+      await http.post('admin/store/settings', body);
+    }
+
+    // Branch details ride on their own endpoint (one row per warehouse).
+    if (branches.value.length) {
+      await http.post('store/pickup-branches', {
+        branches: branches.value.map(b => ({
+          warehouse_id: b.warehouse_id,
+          active: !!b.active,
+          address: b.address || null,
+          hours: b.hours || null,
+          contact: b.contact || null,
+          notes: b.notes || null,
+          sort_order: b.sort_order || 0,
+        })),
+      });
+    }
+
+    await loadManual();
+    message.success(t('Successfully_Updated'));
+  } catch (e) {
+    message.error(e?.data?.message || t('InvalidData'));
+  } finally {
+    manualSaving.value = false;
+  }
+}
+
+/** Re-read the offline config + branch rows after a save. */
+async function loadManual() {
+  const [store, br] = await Promise.all([
+    http.get('admin/store/settings').catch(() => null),
+    http.get('store/pickup-branches').catch(() => null),
+  ]);
+  applyManualSettings(store?.settings || {});
+  branches.value = (br?.branches || []).map(b => ({ ...b }));
+}
+
+function applyManualSettings(s) {
+  manual.gcash_enabled = !!Number(s.payment_gcash_enabled);
+  manual.gcash_account_name = s.gcash_account_name || '';
+  manual.gcash_account_number = s.gcash_account_number || '';
+  manual.gcash_instructions = s.gcash_instructions || '';
+  manual.gcash_qr_url = s.gcash_qr_path ? `/${String(s.gcash_qr_path).replace(/^\/+/, '')}` : '';
+  manual.bank_enabled = !!Number(s.payment_bank_transfer_enabled);
+  manual.bank_name = s.bank_name || '';
+  manual.bank_account_name = s.bank_account_name || '';
+  manual.bank_account_number = s.bank_account_number || '';
+  manual.bank_branch = s.bank_branch || '';
+  manual.bank_instructions = s.bank_instructions || '';
+  manual.pickup_enabled = !!Number(s.payment_cash_on_pickup_enabled);
+  manual.pickup_instructions = s.pickup_instructions || '';
+  // The switch-only offline methods live on the same tab, so they refresh here
+  // too (both on first load and after a save).
+  flags.cod = s.payment_cod_enabled == null ? true : !!Number(s.payment_cod_enabled);
+  flags.mobile_money = s.payment_mobile_money_enabled == null ? true : !!Number(s.payment_mobile_money_enabled);
+  flags.wallet = !!Number(s.wallet_enabled);
+  gcashQrList.value = [];
+}
 const storeMeta = ref({ default_currency_id: null, default_warehouse_id: null });
-const methodsSaving = ref(false);
 
 // PayPal config lives on the store settings row (client_secret is write-only:
 // the API never echoes it back, `secret_set` says whether one is stored).
@@ -487,6 +987,79 @@ const razorpay = reactive({
   webhook_secret: '', webhook_secret_set: false,
 });
 const razorpaySaving = ref(false);
+
+// bKash config — Tokenized Checkout merchant credentials; sandbox switch.
+const bkash = reactive({
+  enabled: false, app_key: '', app_secret: '', secret_set: false,
+  username: '', password: '', password_set: false, sandbox: true,
+});
+const bkashSaving = ref(false);
+
+// SSLCommerz config — Store ID + Store Password; sandbox switch.
+const sslcommerz = reactive({
+  enabled: false, store_id: '', store_password: '', password_set: false, sandbox: true,
+});
+const sslcommerzSaving = ref(false);
+
+async function saveBkash() {
+  if (bkash.enabled && (!bkash.app_key.trim() || !bkash.username.trim())) {
+    message.warning('bKash App Key and Username are required');
+    return;
+  }
+  bkashSaving.value = true;
+  try {
+    const body = {
+      bkash_enabled: bkash.enabled ? 1 : 0,
+      bkash_app_key: bkash.app_key.trim(),
+      bkash_username: bkash.username.trim(),
+      bkash_sandbox: bkash.sandbox ? 1 : 0,
+      // Required by the store-settings validator; sent back unchanged.
+      default_currency_id: storeMeta.value.default_currency_id,
+      default_warehouse_id: storeMeta.value.default_warehouse_id,
+    };
+    // Blank secrets → omitted → backend keeps the stored ones.
+    if (bkash.app_secret.trim()) body.bkash_app_secret = bkash.app_secret.trim();
+    if (bkash.password.trim()) body.bkash_password = bkash.password.trim();
+    await http.post('admin/store/settings', body);
+    if (bkash.app_secret.trim()) bkash.secret_set = true;
+    if (bkash.password.trim()) bkash.password_set = true;
+    bkash.app_secret = '';
+    bkash.password = '';
+    message.success(t('Successfully_Updated'));
+  } catch (e) {
+    message.error(e?.data?.message || t('InvalidData'));
+  } finally {
+    bkashSaving.value = false;
+  }
+}
+
+async function saveSslcommerz() {
+  if (sslcommerz.enabled && !sslcommerz.store_id.trim()) {
+    message.warning('SSLCommerz Store ID is required');
+    return;
+  }
+  sslcommerzSaving.value = true;
+  try {
+    const body = {
+      sslcommerz_enabled: sslcommerz.enabled ? 1 : 0,
+      sslcommerz_store_id: sslcommerz.store_id.trim(),
+      sslcommerz_sandbox: sslcommerz.sandbox ? 1 : 0,
+      // Required by the store-settings validator; sent back unchanged.
+      default_currency_id: storeMeta.value.default_currency_id,
+      default_warehouse_id: storeMeta.value.default_warehouse_id,
+    };
+    // Blank secret → omitted → backend keeps the stored one.
+    if (sslcommerz.store_password.trim()) body.sslcommerz_store_password = sslcommerz.store_password.trim();
+    await http.post('admin/store/settings', body);
+    if (sslcommerz.store_password.trim()) sslcommerz.password_set = true;
+    sslcommerz.store_password = '';
+    message.success(t('Successfully_Updated'));
+  } catch (e) {
+    message.error(e?.data?.message || t('InvalidData'));
+  } finally {
+    sslcommerzSaving.value = false;
+  }
+}
 
 async function saveRazorpay() {
   if (razorpay.enabled && !razorpay.key_id.trim()) {
@@ -604,41 +1177,49 @@ async function savePaypal() {
   }
 }
 
-async function saveMethods() {
-  methodsSaving.value = true;
-  try {
-    await http.post('admin/store/settings', {
-      payment_cod_enabled: flags.cod ? 1 : 0,
-      payment_mobile_money_enabled: flags.mobile_money ? 1 : 0,
-      wallet_enabled: flags.wallet ? 1 : 0,
-      // Required by the store-settings validator; sent back unchanged.
-      default_currency_id: storeMeta.value.default_currency_id,
-      default_warehouse_id: storeMeta.value.default_warehouse_id,
-    });
-    message.success(t('Successfully_Updated'));
-  } catch (e) {
-    message.error(e?.data?.message || t('InvalidData'));
-  } finally {
-    methodsSaving.value = false;
-  }
-}
-
 async function save() {
   saving.value = true;
   try {
-    if (enabled.value) {
-      await http.post('payment_gateway', {
-        stripe_key: gateway.value.stripe_key,
-        // blank secret → null keeps the stored one (leave-blank behaviour).
-        stripe_secret: gateway.value.stripe_secret ? gateway.value.stripe_secret : null,
-        deleted: false,
+    await http.post('payment_gateway', {
+      stripe_key: gateway.value.stripe_key,
+      // blank secret → null keeps the stored one (leave-blank behaviour).
+      stripe_secret: gateway.value.stripe_secret ? gateway.value.stripe_secret : null,
+      deleted: false,
+    });
+    // The offer-cards-at-checkout switch lives on the store settings, which a
+    // gateway-only role may not be allowed to write — the keys still save.
+    let flagSaved = true;
+    try {
+      await http.post('admin/store/settings', {
+        payment_stripe_enabled: stripeEnabled.value ? 1 : 0,
+        default_currency_id: storeMeta.value.default_currency_id,
+        default_warehouse_id: storeMeta.value.default_warehouse_id,
       });
-    } else {
-      // Disabling clears the stored keys via the backend's `deleted` path.
-      await http.post('payment_gateway', { deleted: true });
-      gateway.value.stripe_key = '';
-      gateway.value.stripe_secret = '';
+    } catch (e) {
+      flagSaved = false;
     }
+    enabled.value = !!gateway.value.stripe_key;
+    gateway.value.stripe_secret = '';
+    if (flagSaved) {
+      message.success(t('Successfully_Updated'));
+    } else {
+      message.warning(t('CardSwitchNotSaved'));
+    }
+  } catch (e) {
+    message.error(e?.data?.message || t('InvalidData'));
+  } finally {
+    saving.value = false;
+  }
+}
+
+/** Explicitly wipe the stored Stripe credentials (the old off-switch path). */
+async function clearStripeKeys() {
+  saving.value = true;
+  try {
+    await http.post('payment_gateway', { deleted: true });
+    gateway.value.stripe_key = '';
+    gateway.value.stripe_secret = '';
+    enabled.value = false;
     message.success(t('Successfully_Updated'));
   } catch (e) {
     message.error(e?.data?.message || t('InvalidData'));
@@ -658,9 +1239,7 @@ onMounted(async () => {
     enabled.value = !!gateway.value.stripe_key;
 
     const s = store?.settings || {};
-    flags.cod = s.payment_cod_enabled == null ? true : !!Number(s.payment_cod_enabled);
-    flags.mobile_money = s.payment_mobile_money_enabled == null ? true : !!Number(s.payment_mobile_money_enabled);
-    flags.wallet = !!Number(s.wallet_enabled);
+    stripeEnabled.value = s.payment_stripe_enabled == null ? true : !!Number(s.payment_stripe_enabled);
     paypal.enabled = !!Number(s.paypal_enabled);
     paypal.client_id = s.paypal_client_id || '';
     paypal.secret_set = !!s.paypal_secret_set;
@@ -677,8 +1256,24 @@ onMounted(async () => {
     razorpay.key_id = s.razorpay_key_id || '';
     razorpay.secret_set = !!s.razorpay_secret_set;
     razorpay.webhook_secret_set = !!s.razorpay_webhook_secret_set;
+    bkash.enabled = !!Number(s.bkash_enabled);
+    bkash.app_key = s.bkash_app_key || '';
+    bkash.secret_set = !!s.bkash_secret_set;
+    bkash.username = s.bkash_username || '';
+    bkash.password_set = !!s.bkash_password_set;
+    bkash.sandbox = s.bkash_sandbox == null ? true : !!Number(s.bkash_sandbox);
+    sslcommerz.enabled = !!Number(s.sslcommerz_enabled);
+    sslcommerz.store_id = s.sslcommerz_store_id || '';
+    sslcommerz.password_set = !!s.sslcommerz_password_set;
+    sslcommerz.sandbox = s.sslcommerz_sandbox == null ? true : !!Number(s.sslcommerz_sandbox);
+    applyManualSettings(s);
+    http.get('store/pickup-branches')
+      .then(br => { branches.value = (br?.branches || []).map(b => ({ ...b })); })
+      .catch(() => {});
     storeMeta.value = {
-      default_currency_id: store?.default_currency_id ?? s.currency_code ?? null,
+      // The id rides along on the settings payload; `currency_code` is the currency
+      // *symbol* (e.g. "$"), never an id. Do not fall back to it.
+      default_currency_id: s.default_currency_id != null ? Number(s.default_currency_id) : null,
       default_warehouse_id: s.default_warehouse_id ?? null,
     };
   } catch (e) {
@@ -693,6 +1288,14 @@ onMounted(async () => {
 .pg-card {
   border: 1px solid #f0f0f0;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+}
+/* Webhook URLs are long enough to push a phone-width card sideways. */
+.pg-card :deep(.ant-alert-message),
+.pg-card :deep(.ant-alert-description) {
+  word-break: break-word;
+}
+.pg-card :deep(.ant-typography code) {
+  word-break: break-all;
 }
 .pg-head {
   display: flex;
@@ -722,13 +1325,18 @@ onMounted(async () => {
 }
 .pg-form {
   max-width: 520px;
+  width: 100%;
   margin-bottom: 4px;
 }
 
-/* Gateway tabs: provider icon + name + a small status dot that shows at a
-   glance which gateways are live without opening their tab. */
+/* Gateway tabs (vertical, left rail): provider icon + name + a small status
+   dot that shows at a glance which gateways are live without opening their tab. */
+.pg-tabs :deep(.ant-tabs-nav) {
+  min-width: 170px;
+}
 .pg-tabs :deep(.ant-tabs-tab) {
-  padding-top: 4px;
+  justify-content: flex-start;
+  text-align: left;
 }
 .pg-tab {
   display: inline-flex;
@@ -748,7 +1356,14 @@ onMounted(async () => {
   box-shadow: 0 0 0 3px rgba(82, 196, 26, 0.18);
 }
 
-/* Available payment methods list */
+/* Offline payments tab */
+.pg-qr {
+  display: block;
+  max-width: 160px;
+  margin-top: 8px;
+  border-radius: 8px;
+  border: 1px solid #f0f0f0;
+}
 .pm-title {
   font-size: 16px;
   font-weight: 600;
@@ -758,39 +1373,69 @@ onMounted(async () => {
   color: rgba(0, 0, 0, 0.45);
   margin-bottom: 16px;
 }
-.pm-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+/* ---------------- Mobile (< 768px) ----------------
+   The tab rail flips to a top bar (see `isMobile`); the rest is about giving
+   the narrow card its width back: less chrome padding, smaller heads, and a
+   provider row that keeps its status tag + switch on the same line. */
+@media (max-width: 767px) {
+  .pg-card :deep(.ant-card-body) {
+    padding: 14px 12px;
+  }
+  .pg-tabs :deep(.ant-tabs-nav) {
+    min-width: 0;
+    margin-bottom: 12px;
+  }
+  /* Top tabs scroll horizontally rather than squeezing eight providers in. */
+  .pg-tabs :deep(.ant-tabs-tab) {
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+  .pg-tabs :deep(.ant-tabs-tab + .ant-tabs-tab) {
+    margin-left: 4px;
+  }
+  .pg-head {
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .pg-head__left {
+    gap: 10px;
+    min-width: 0;
+    align-items: flex-start;
+  }
+  .pg-head__title {
+    font-size: 15px;
+    line-height: 1.3;
+  }
+  .pg-head__sub {
+    font-size: 11px;
+  }
+  .pg-head__right {
+    flex: 0 0 auto;
+    gap: 6px;
+    padding-top: 2px;
+  }
+
+  /* Save / remove buttons stack instead of overflowing the card. */
+  .pg-card :deep(.ant-space) {
+    flex-wrap: wrap;
+  }
+  .pg-qr {
+    max-width: 120px;
+  }
 }
-.pm-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
-  border: 1px solid #f0f0f0;
-  border-radius: 10px;
-}
-.pm-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  flex: 0 0 auto;
-}
-.pm-text {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.pm-name {
-  font-weight: 600;
-  line-height: 1.2;
-}
-.pm-desc {
-  font-size: 12px;
-  color: rgba(0, 0, 0, 0.45);
+
+/* Narrow phones cannot fit the provider name and the status tag + switch on
+   one line, so the controls drop to their own right-aligned row. */
+@media (max-width: 479px) {
+  .pg-head {
+    flex-wrap: wrap;
+  }
+  .pg-head__left {
+    flex: 1 1 100%;
+  }
+  .pg-head__right {
+    margin-left: auto;
+  }
 }
 </style>

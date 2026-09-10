@@ -9,6 +9,10 @@
     :export-params="filterParams"
     export-rows-key="report"
   >
+    <template #actions>
+      <!-- Multi-Currency: view amounts converted (display-only) -->
+      <ViewCurrencySelect />
+    </template>
     <template #filters>
       <DateRangePicker v-model:value="range" :allow-clear="false" @change="crud.reload()" />
       <a-typography-text v-if="overallTotal" strong>
@@ -46,6 +50,7 @@ import ReportChart from '../../components/ReportChart.vue';
 import { useCrudTable } from '../../composables/useCrudTable';
 import { useFormat } from '../../composables/useFormat';
 import DateRangePicker from '../../components/DateRangePicker.vue';
+import ViewCurrencySelect from '../../components/ViewCurrencySelect.vue';
 
 const { t } = useI18n();
 const { money, dateTime } = useFormat();

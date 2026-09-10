@@ -22,6 +22,8 @@
           :options="warehouseOptions"
           @change="load()"
         />
+        <!-- Multi-Currency: view the base-currency figures converted -->
+        <ViewCurrencySelect class="wh-select" />
         <a-button type="primary" :loading="loading" @click="load()">
           <template #icon><ReloadOutlined /></template>
           {{ $t('Refresh') }}
@@ -257,11 +259,14 @@ import { useI18n } from 'vue-i18n';
 import http from '../lib/http';
 import { useAuthStore } from '../stores/auth';
 import { useFormat } from '../composables/useFormat';
+import ViewCurrencySelect from '../components/ViewCurrencySelect.vue';
 
 const { t } = useI18n();
 const auth = useAuthStore();
-// Currency/precision/separators come from the user's settings, like the legacy app.
-const { money, currency } = useFormat();
+// Currency/precision/separators come from the user's settings, like the legacy
+// app. money() follows the shared Multi-Currency display selector
+// (ViewCurrencySelect) automatically.
+const { money } = useFormat();
 
 /* ------------------------------------------------------------------ state */
 const loading = ref(true);

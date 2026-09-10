@@ -9,6 +9,10 @@
     :export-params="filterParams"
     export-rows-key="report"
   >
+    <template #actions>
+      <!-- Multi-Currency: view amounts converted (display-only) -->
+      <ViewCurrencySelect />
+    </template>
     <!-- Pending-pipeline view over the WHOLE filtered set (backend summary /
          age_buckets / by_user), not the visible page. -->
     <template #chart>
@@ -114,6 +118,7 @@ import { useUiStore } from '../../stores/ui';
 import { t as tf } from '../../i18n';
 import http from '../../lib/http';
 import DateRangePicker from '../../components/DateRangePicker.vue';
+import ViewCurrencySelect from '../../components/ViewCurrencySelect.vue';
 
 const { t } = useI18n();
 const { money, date } = useFormat();

@@ -1,6 +1,11 @@
 <template>
   <div class="page">
-    <PageHeader :title="$t('AI_Reports')" :breadcrumb="[$t('Reports'), $t('AI_Reports')]" />
+    <PageHeader :title="$t('AI_Reports')" :breadcrumb="[$t('Reports'), $t('AI_Reports')]">
+      <template #actions>
+        <!-- Multi-Currency: view amounts converted (display-only) -->
+        <ViewCurrencySelect />
+      </template>
+    </PageHeader>
 
     <!-- Question picker -->
     <a-card size="small" style="margin-bottom: 16px">
@@ -254,6 +259,7 @@ import {
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import PageHeader from '../../components/PageHeader.vue';
+import ViewCurrencySelect from '../../components/ViewCurrencySelect.vue';
 import { useFormat } from '../../composables/useFormat';
 import http from '../../lib/http';
 import { t } from '../../i18n';

@@ -7,11 +7,11 @@
 @php
   $popupData = $storePopups->map(fn ($p) => [
     'id' => $p->id,
-    'title' => $p->title,
-    'message' => $p->message,
+    'title' => $p->localized('title'),
+    'message' => $p->localized('message'),
     'type' => $p->type,
     'image_url' => $p->image ? asset($p->image) : null,
-    'cta_label' => $p->cta_label,
+    'cta_label' => $p->localized('cta_label'),
     'cta_url' => $p->cta_url,
     'trigger' => $p->trigger,
     'delay_seconds' => (int) $p->delay_seconds,

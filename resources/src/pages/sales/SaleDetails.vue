@@ -3,6 +3,14 @@
     <PageHeader :title="$t('SaleDetail')" :breadcrumb="[$t('Sales'), $t('SaleDetail')]">
       <template #actions>
         <a-space v-if="!loading" wrap>
+          <!-- Multi-Currency: view this document's amounts in another currency -->
+          <a-select
+            v-if="showCurrencySelect"
+            v-model:value="currencySelectId"
+            :options="currencyOptions"
+            :title="$t('Currency')"
+            style="min-width: 92px"
+          />
           <a-button @click="$router.push('/sales')">
             <template #icon><ArrowLeftOutlined /></template>
             {{ $t('Back') }}
@@ -124,7 +132,7 @@
               </a-tag>
             </div>
           </template>
-          <template v-else-if="column.key === 'price'">{{ money(record.price) }}</template>
+          <template v-else-if="column.key === 'price'">{{ docMoney(record.price) }}</template>
           <template v-else-if="column.key === 'quantity'">
             {{ num(record.quantity) }} {{ record.pack_name || record.unit_sale }}
             <div v-if="record.pack_name && Number(record.pack_multiplier) > 1" class="muted">
@@ -132,40 +140,40 @@
             </div>
           </template>
           <!-- DiscountNet is per unit; this column is a line total like Tax below. -->
-          <template v-else-if="column.key === 'discount'">{{ money(record.DiscountNet * record.quantity) }}</template>
-          <template v-else-if="column.key === 'tax'">{{ money(record.taxe * record.quantity) }}</template>
-          <template v-else-if="column.key === 'total'">{{ money(record.total) }}</template>
+          <template v-else-if="column.key === 'discount'">{{ docMoney(record.DiscountNet * record.quantity) }}</template>
+          <template v-else-if="column.key === 'tax'">{{ docMoney(record.taxe * record.quantity) }}</template>
+          <template v-else-if="column.key === 'total'">{{ docMoney(record.total) }}</template>
         </template>
       </a-table>
 
       <div class="inv-summary">
         <!-- Summary labels hardcoded English in legacy's invoice too. -->
         <table>
-          <tr><td>Subtotal:</td><td>{{ money(subtotal) }}</td></tr>
-          <tr><td>Order Tax:</td><td>{{ money(sale.TaxNet) }}</td></tr>
+          <tr><td>Subtotal:</td><td>{{ docMoney(subtotal) }}</td></tr>
+          <tr><td>Order Tax:</td><td>{{ docMoney(sale.TaxNet) }}</td></tr>
           <tr v-if="Number(sale.discount) > 0">
             <td>Discount:</td>
             <td class="neg">
               <template v-if="String(sale.discount_Method || '2') === '1'">
-                - {{ num(sale.discount) }}% ({{ money(discountAmount) }})
+                - {{ num(sale.discount) }}% ({{ docMoney(discountAmount) }})
               </template>
-              <template v-else>- {{ money(discountAmount) }}</template>
+              <template v-else>- {{ docMoney(discountAmount) }}</template>
             </td>
           </tr>
           <tr v-if="Number(sale.discount_from_points) > 0">
             <td>Discount from Points:</td>
-            <td class="neg">- {{ money(sale.discount_from_points) }}</td>
+            <td class="neg">- {{ docMoney(sale.discount_from_points) }}</td>
           </tr>
-          <tr><td>Shipping:</td><td>{{ money(sale.shipping) }}</td></tr>
-          <tr class="grand"><td>{{ $t('Total') }}:</td><td>{{ money(sale.GrandTotal) }}</td></tr>
-          <tr><td>{{ $t('Paid') }}:</td><td style="color: #52c41a">{{ money(sale.paid_amount) }}</td></tr>
-          <tr><td>{{ $t('Due') }}:</td><td style="color: #ff4d4f">{{ money(sale.due) }}</td></tr>
+          <tr><td>Shipping:</td><td>{{ docMoney(sale.shipping) }}</td></tr>
+          <tr class="grand"><td>{{ $t('Total') }}:</td><td>{{ docMoney(sale.GrandTotal) }}</td></tr>
+          <tr><td>{{ $t('Paid') }}:</td><td style="color: #52c41a">{{ docMoney(sale.paid_amount) }}</td></tr>
+          <tr><td>{{ $t('Due') }}:</td><td style="color: #ff4d4f">{{ docMoney(sale.due) }}</td></tr>
           <tr v-if="Number(sale.previous_dues) > 0">
-            <td>{{ $t('Previous_Dues') }}:</td><td>{{ money(sale.previous_dues) }}</td>
+            <td>{{ $t('Previous_Dues') }}:</td><td>{{ docMoney(sale.previous_dues) }}</td>
           </tr>
           <tr v-if="Number(sale.previous_dues) > 0">
             <td>{{ $t('Net_Balance') }}:</td>
-            <td>{{ money(Number(sale.previous_dues) + Number(sale.due)) }}</td>
+            <td>{{ docMoney(Number(sale.previous_dues) + Number(sale.due)) }}</td>
           </tr>
         </table>
       </div>
@@ -195,19 +203,24 @@ import {
 } from '@ant-design/icons-vue';
 import PageHeader from '../../components/PageHeader.vue';
 import { useFormat } from '../../composables/useFormat';
+import { useDetailsCurrency } from '../../composables/useDetailsCurrency';
 import { useAuthStore } from '../../stores/auth';
 import { docStatusColor, payStatusColor } from '../../lib/statusColors';
 import { SALE_STATUSES, PAYMENT_STATUSES, statusKey } from './saleVocab';
 import http from '../../lib/http';
 
 const { t } = useI18n();
-const { money, date, dateTime } = useFormat();
+const { date, dateTime } = useFormat();
 const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
 
 const loading = ref(true);
 const sale = ref({});
+
+// Multi-Currency: amounts arrive converted into the document's currency;
+// the header selector re-expresses them in any other currency (view-only).
+const { docMoney, currencyOptions, currencySelectId, showCurrencySelect } = useDetailsCurrency(sale);
 const details = ref([]);
 const company = ref({});
 const sendingEmail = ref(false);

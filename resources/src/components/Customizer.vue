@@ -1,7 +1,8 @@
 <template>
   <!-- Gate on the same setting legacy used for its customizer button. -->
   <template v-if="visible">
-    <!-- Floating handle at the bottom-right; the gear turns into a close icon. -->
+    <!-- Floating handle on the trailing edge (right in LTR, left in RTL);
+         the gear turns into a close icon. -->
     <button v-show="!modalOpen" class="cz-handle" :class="{ open }" @click="open = !open" :title="$t('Settings')">
       <SettingOutlined v-if="!open" />
       <CloseOutlined v-else />
@@ -9,7 +10,7 @@
 
     <a-drawer
       v-model:open="open"
-      placement="right"
+      :placement="ui.direction === 'rtl' ? 'left' : 'right'"
       root-class-name="cz-drawer"
       :width="300"
       :title="$t('Settings')"
@@ -205,7 +206,9 @@ function sameColor(c) {
 <style scoped>
 .cz-handle {
   position: fixed;
-  right: 24px;
+  /* Logical inset, so the handle sits bottom-right in LTR and bottom-left in
+     RTL without a second rule. */
+  inset-inline-end: 24px;
   bottom: 24px;
   z-index: 1001;
   width: 44px;
@@ -220,11 +223,12 @@ function sameColor(c) {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: right 0.2s;
+  transition: inset-inline-end 0.2s;
 }
-/* Slide clear of the right drawer (300px) so it doubles as a close button. */
+/* Slide clear of the 300px drawer so it doubles as a close button — the
+   drawer opens on the same edge, so this mirrors along with it. */
 .cz-handle.open {
-  right: 324px;
+  inset-inline-end: 324px;
 }
 .cz-layouts {
   display: flex;
@@ -303,7 +307,7 @@ function sameColor(c) {
   width: 80%;
   border-radius: 2px;
   background: rgba(109, 40, 217, 0.5);
-  margin-left: 6px;
+  margin-inline-start: 6px;
 }
 .cz-lang {
   display: inline-flex;

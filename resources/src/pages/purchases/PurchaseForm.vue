@@ -47,6 +47,17 @@
               />
             </a-form-item>
           </a-col>
+          <!-- Multi-Currency: entered/displayed amounts are in this currency;
+               the model (and the payload) stays in the base currency. -->
+          <a-col v-if="mcEnabled" :xs="24" :md="8">
+            <a-form-item :label="$t('Currency')">
+              <a-select
+                v-model:value="docCurrencyId"
+                show-search option-filter-prop="label"
+                :options="currencyOptions"
+              />
+            </a-form-item>
+          </a-col>
         </a-row>
       </a-card>
 
@@ -79,7 +90,7 @@
               <div class="muted">{{ record.code }}</div>
               <a-tag v-if="record.is_batch_tracked" color="warning" style="margin-top: 2px">Batch</a-tag>
             </template>
-            <template v-else-if="column.key === 'net_cost'">{{ money(record.Net_cost) }}</template>
+            <template v-else-if="column.key === 'net_cost'">{{ docMoney(record.Net_cost) }}</template>
             <template v-else-if="column.key === 'stock'">
               {{ record.stock ?? '—' }} {{ record.unitPurchase }}
             </template>
@@ -93,10 +104,10 @@
                 @update:value="v => setQty(record, v)"
               />
             </template>
-            <template v-else-if="column.key === 'discount'">{{ money(record.DiscountNet * record.quantity) }}</template>
-            <template v-else-if="column.key === 'tax'">{{ money(record.taxe * record.quantity) }}</template>
+            <template v-else-if="column.key === 'discount'">{{ docMoney(record.DiscountNet * record.quantity) }}</template>
+            <template v-else-if="column.key === 'tax'">{{ docMoney(record.taxe * record.quantity) }}</template>
             <template v-else-if="column.key === 'subtotal'">
-              <strong>{{ money(record.subtotal) }}</strong>
+              <strong>{{ docMoney(record.subtotal) }}</strong>
             </template>
             <template v-else-if="column.key === 'actions'">
               <a-space>
@@ -130,12 +141,12 @@
               </a-col>
               <a-col :xs="12" :md="8">
                 <a-form-item :label="$t('Discount')">
-                  <a-input-number v-model:value="purchase.discount" style="width: 100%" :min="0" />
+                  <a-input-number v-model:value="discountInput" style="width: 100%" :min="0" />
                 </a-form-item>
               </a-col>
               <a-col :xs="12" :md="8">
                 <a-form-item :label="$t('Shipping')">
-                  <a-input-number v-model:value="purchase.shipping" style="width: 100%" :min="0" />
+                  <a-input-number v-model:value="shippingInput" style="width: 100%" :min="0" />
                 </a-form-item>
               </a-col>
               <a-col :xs="12" :md="8">
@@ -161,14 +172,18 @@
 
         <a-col :xs="24" :lg="10">
           <a-card size="small">
-            <div class="sum-row"><span>{{ $t('Total') }}</span><span>{{ money(totals.total) }}</span></div>
-            <div class="sum-row"><span>{{ $t('OrderTax') }}</span><span>{{ money(totals.TaxNet) }} ({{ Number(purchase.tax_rate) || 0 }}%)</span></div>
+            <div class="sum-row"><span>{{ $t('Total') }}</span><span>{{ docMoney(totals.total) }}</span></div>
+            <div class="sum-row"><span>{{ $t('OrderTax') }}</span><span>{{ docMoney(totals.TaxNet) }} ({{ Number(purchase.tax_rate) || 0 }}%)</span></div>
             <div class="sum-row">
               <span>{{ $t('Discount') }}</span>
-              <span style="color: #ff4d4f">- {{ money(purchase.discount) }}</span>
+              <span style="color: #ff4d4f">- {{ docMoney(purchase.discount) }}</span>
             </div>
-            <div class="sum-row"><span>{{ $t('Shipping') }}</span><span>{{ money(purchase.shipping) }}</span></div>
-            <div class="sum-row grand"><span>{{ $t('Total') }}</span><span>{{ money(totals.GrandTotal) }}</span></div>
+            <div class="sum-row"><span>{{ $t('Shipping') }}</span><span>{{ docMoney(purchase.shipping) }}</span></div>
+            <div class="sum-row grand"><span>{{ $t('Total') }}</span><span>{{ docMoney(totals.GrandTotal) }}</span></div>
+            <!-- When a foreign currency is active, keep the base total visible -->
+            <div v-if="!dcIsBase" class="sum-row" style="border-bottom: none; font-size: 12px; color: rgba(128,128,128,.85)">
+              <span>{{ $t('Base_Currency_Equivalent') }}</span><span>{{ moneyBase(totals.GrandTotal) }}</span>
+            </div>
           </a-card>
 
           <!-- Legacy disables submit whenever a batch-tracked line lacks its
@@ -260,7 +275,11 @@
                 <a-date-picker v-model:value="b.mfg_date" value-format="YYYY-MM-DD" :placeholder="$t('Mfg_Date')" style="width: 140px" />
                 <a-date-picker v-model:value="b.expiry_date" value-format="YYYY-MM-DD" :placeholder="$t('Expiry_Date')" style="width: 140px" />
                 <a-input-number v-model:value="b.qty" :min="0" :placeholder="$t('Quantity')" style="width: 100px" />
-                <a-input-number v-model:value="b.unit_cost" :min="0" :placeholder="$t('UnitCost')" style="width: 110px" />
+                <a-input-number
+                  :value="toDocAmt(b.unit_cost)"
+                  :min="0" :placeholder="$t('UnitCost')" style="width: 110px"
+                  @update:value="v => (b.unit_cost = toBaseAmt(v))"
+                />
                 <a-button type="text" size="small" danger @click="editingLine.batches.splice(i, 1)">
                   <template #icon><DeleteOutlined /></template>
                 </a-button>
@@ -309,6 +328,7 @@ import { resolveScan } from '../../lib/scanMatch';
 import SerialEntry from '../../components/SerialEntry.vue';
 import QuickAddParty from '../../components/QuickAddParty.vue';
 import { useFormat } from '../../composables/useFormat';
+import { useDocCurrency } from '../../composables/useDocCurrency';
 import { recomputeCostLine, computeSimpleTotals } from '../../lib/lineCalc';
 import { hasBatchEntryErrors, batchTotalQty } from '../../lib/batchValidation';
 import http from '../../lib/http';
@@ -316,7 +336,23 @@ import http from '../../lib/http';
 const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
-const { money } = useFormat();
+// moneyBase: forms always show base-currency values as base, ignoring the
+// report pages' display-currency selector.
+const { moneyBase } = useFormat();
+
+// Multi-Currency: display/input conversion only — the model stays base.
+const {
+  enabled: mcEnabled,
+  currencyId: docCurrencyId,
+  options: currencyOptions,
+  isBase: dcIsBase,
+  toDoc: toDocAmt,
+  toBase: toBaseAmt,
+  docMoney,
+  loadCurrencies,
+  setFromDocument: setDocCurrency,
+  payloadFields: currencyPayload,
+} = useDocCurrency();
 
 const id = computed(() => route.params.id);
 const isEdit = computed(() => !!id.value);
@@ -343,6 +379,17 @@ const purchase = ref({
   tax_rate: 0,
   discount: 0,
   shipping: 0,
+});
+
+// Monetary inputs are typed in the document currency but stored in base.
+// (The purchase-level discount is always a fixed amount.)
+const discountInput = computed({
+  get: () => toDocAmt(purchase.value.discount),
+  set: (v) => { purchase.value.discount = toBaseAmt(v); },
+});
+const shippingInput = computed({
+  get: () => toDocAmt(purchase.value.shipping),
+  set: (v) => { purchase.value.shipping = toBaseAmt(v); },
 });
 
 const supplierOptions = computed(() => suppliers.value.map(s => ({ value: s.id, label: s.name })));
@@ -496,11 +543,13 @@ const units = ref([]);
 async function openLineEdit(line) {
   editingLine.value = line;
   lineDraft.value = {
-    Unit_cost: line.Unit_cost,
+    // The modal is typed in the document currency (fixed amounts only —
+    // percentages pass through); applyLineEdit converts back to base.
+    Unit_cost: toDocAmt(line.Unit_cost),
     tax_method: String(line.tax_method || '1'),
     tax_percent: line.tax_percent,
     discount_Method: String(line.discount_Method || '2'),
-    discount: line.discount,
+    discount: String(line.discount_Method || '2') === '2' ? toDocAmt(line.discount) : line.discount,
     purchase_unit_id: line.purchase_unit_id,
   };
   units.value = [];
@@ -519,11 +568,13 @@ async function openLineEdit(line) {
 function applyLineEdit() {
   const line = editingLine.value;
   Object.assign(line, {
-    Unit_cost: Number(lineDraft.value.Unit_cost) || 0,
+    Unit_cost: toBaseAmt(lineDraft.value.Unit_cost),
     tax_method: lineDraft.value.tax_method,
     tax_percent: Number(lineDraft.value.tax_percent) || 0,
     discount_Method: lineDraft.value.discount_Method,
-    discount: Number(lineDraft.value.discount) || 0,
+    discount: String(lineDraft.value.discount_Method) === '2'
+      ? toBaseAmt(lineDraft.value.discount)
+      : (Number(lineDraft.value.discount) || 0),
     purchase_unit_id: lineDraft.value.purchase_unit_id,
     // imei_number is NOT copied from the draft — SerialEntry writes it (and
     // serial_numbers) straight onto the line, so a stale draft copy here would
@@ -609,6 +660,8 @@ async function submit() {
     shipping: Number(purchase.value.shipping) || 0,
     GrandTotal: totals.value.GrandTotal,
     details: detailsPayload(),
+    // Multi-Currency snapshot ({} when the module is off)
+    ...currencyPayload(),
   };
   try {
     if (isEdit.value) {
@@ -631,6 +684,7 @@ async function submit() {
 // ---------------- bootstrap ----------------
 
 onMounted(async () => {
+  loadCurrencies();
   try {
     if (isEdit.value) {
       const data = await http.get(`purchases/${id.value}/edit`);
@@ -647,6 +701,8 @@ onMounted(async () => {
         discount: Number(p.discount) || 0,
         shipping: Number(p.shipping) || 0,
       };
+      // Reopen the purchase in its stored currency at its stored rate.
+      setDocCurrency(p.currency_id, p.exchange_rate);
       lines.value = (data.details || []).map(d => {
         const line = {
           ...d,

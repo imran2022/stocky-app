@@ -45,7 +45,9 @@
           :columns="columns" :data-source="details" :pagination="false"
           size="middle" :row-key="r => r.detail_id" :scroll="{ x: 'max-content' }"
           :row-class-name="r => (isRowLocked(r) ? 'row-locked' : '')"
-          :expandable="serialExpandable"
+          :row-expandable="serialRowExpandable"
+          :default-expand-all-rows="true"
+          :show-expand-column="showSerialColumn"
         >
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'product'">
@@ -205,11 +207,10 @@ const columns = computed(() => [
   { title: t('SubTotal'), key: 'subtotal', align: 'right' },
 ]);
 
-const serialExpandable = computed(() => ({
-  rowExpandable: r => !isEdit && !!r.is_imei,
-  defaultExpandAllRows: true,
-  showExpandColumn: !isEdit && details.value.some(d => d.is_imei),
-}));
+// Ant Design Vue has no `expandable` object prop (that is the React API), so
+// these must be passed as flat props or they are silently ignored.
+const serialRowExpandable = r => !isEdit && !!r.is_imei;
+const showSerialColumn = computed(() => !isEdit && details.value.some(d => d.is_imei));
 
 /** Edit-only: the product is gone from the warehouse, or has no purchase unit. */
 function isRowLocked(row) {

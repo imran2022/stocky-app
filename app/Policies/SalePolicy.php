@@ -85,6 +85,18 @@ class SalePolicy
         return $user->hasRole($permission->roles);
     }
 
+    public function products_sold_summary(User $user)
+    {
+        $permission = Permission::where('name', 'products_sold_summary')->first();
+
+        // New permission: installs that have not run the updater yet get a clean 403, not a 500.
+        if (! $permission) {
+            return false;
+        }
+
+        return $user->hasRole($permission->roles);
+    }
+
     public function product_sales_report(User $user)
     {
         $permission = Permission::where('name', 'product_sales_report')->first();
@@ -158,6 +170,32 @@ class SalePolicy
     public function report_warranty(User $user)
     {
         $permission = Permission::where('name', 'report_warranty')->first();
+
+        return $user->hasRole($permission->roles);
+    }
+
+    public function zatca_settings(User $user)
+    {
+        $permission = Permission::where('name', 'zatca_settings')->first();
+
+        // New permission: installs that have not run the updater yet get a clean 403, not a 500.
+        if (! $permission) {
+            return false;
+        }
+
+        return $user->hasRole($permission->roles);
+    }
+
+    // Multi-Currency: may this user change the currency of a document
+    // (sale/purchase/quotation/POS pickers)?
+    public function multi_currency(User $user)
+    {
+        $permission = Permission::where('name', 'multi_currency')->first();
+
+        // New permission: installs that have not run the updater yet get a clean 403, not a 500.
+        if (! $permission) {
+            return false;
+        }
 
         return $user->hasRole($permission->roles);
     }

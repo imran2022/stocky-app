@@ -8,12 +8,12 @@
     <link rel="icon" href="{{ asset('images/' . (($app_settings->favicon ?? null) ?: 'favicon.ico')) }}">
 
     {{-- PWA --}}
-    <link rel="manifest" href="/manifest-customer-display.webmanifest">
-    <meta name="theme-color" content="#0b0c10">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="Customer Display">
-    <link rel="apple-touch-icon" href="/pwa_images/pwa-icon-192.png">
+    @include('partials.pwa-head', [
+        'manifest' => '/pwa/customer-display.webmanifest',
+        'themeColor' => '#0b0c10',
+        'statusBar' => 'black-translucent',
+        'appTitle' => 'Customer Display',
+    ])
 
     <style>
       /* Base reset + dark background so there's no white flash before the Vue
@@ -43,22 +43,7 @@
     <p style="color:#fff;padding:24px;font-family:sans-serif">Customer Display assets are not built yet. Run <code>npm run vue3:build</code>.</p>
   @endif
 
-  {{-- PWA: register service worker --}}
-  <script>
-    (function () {
-      try {
-        if (!('serviceWorker' in navigator)) return;
-        var isSecure = window.isSecureContext === true
-          || location.protocol === 'https:'
-          || location.hostname === 'localhost'
-          || location.hostname === '127.0.0.1';
-        if (!isSecure) return;
-        window.addEventListener('load', function () {
-          navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function () {});
-        });
-      } catch (e) {}
-    })();
-  </script>
+  @include('partials.pwa-sw')
 </body>
 </html>
 

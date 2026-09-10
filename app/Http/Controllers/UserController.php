@@ -96,6 +96,10 @@ class UserController extends BaseController
             'avatar' => $user->avatar,
             'username' => $user->username,
             'currency' => $helpers->Get_Currency(),
+            // Multi-Currency module: master toggle + the base currency id, read
+            // by document forms/POS to show a currency picker (default off)
+            'enable_multi_currency' => (bool) ($settings->enable_multi_currency ?? false),
+            'default_currency_id' => $settings->currency_id ?? null,
             'logo' => $settings->logo ?? null,
             'default_language' => $settings->default_language ?? 'en',
             'show_language' => $settings->show_language ?? false,

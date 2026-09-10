@@ -167,6 +167,16 @@ class AuthServiceProvider extends ServiceProvider
         // Serial / IMEI tracking module
         'App\Models\ProductSerial' => 'App\Policies\ProductSerialPolicy',
 
+        // Integrations platform (ported from the SaaS)
+        'App\Models\SlackSetting' => 'App\Policies\SlackSettingPolicy',
+        'App\Models\TelegramSetting' => 'App\Policies\TelegramSettingPolicy',
+        'App\Models\SallaSetting' => 'App\Policies\SallaSettingPolicy',
+        'App\Models\XeroSetting' => 'App\Policies\XeroSettingPolicy',
+        'App\Models\PrestashopSetting' => 'App\Policies\PrestashopSettingPolicy',
+        'App\Models\GoogleSheetSetting' => 'App\Policies\GoogleSheetSettingPolicy',
+        'App\Models\MailchimpSetting' => 'App\Policies\MailchimpSettingPolicy',
+        'App\Models\JumiaSetting' => 'App\Policies\JumiaSettingPolicy',
+
     ];
 
     /**

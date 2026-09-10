@@ -16,6 +16,8 @@ use App\Services\OnlineOrderInvoiceService;
 use Auth;
 use DB;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 
 class OnlineOrdersApiController extends Controller
 {
@@ -56,8 +58,11 @@ class OnlineOrdersApiController extends Controller
 
         $allowedSort = ['date', 'created_at', 'total', 'ref', 'id'];
 
+        $proofFilter = $request->query('proof', '');
+
         $orders = OnlineOrder::query()
             ->with('client')
+            ->withCount(['paymentProofs as pending_proofs_count' => fn ($p) => $p->where('status', 'pending')])
             ->when($q !== '', function ($qq) use ($q) {
                 $qq->where(function ($w) use ($q) {
                     $w->where('ref', 'like', "%{$q}%")
@@ -74,6 +79,7 @@ class OnlineOrdersApiController extends Controller
             ->when($preorderFilter === 'no', fn ($qq) => $qq->where(function ($w) {
                 $w->where('has_preorder_items', false)->orWhereNull('has_preorder_items');
             }))
+            ->when($proofFilter === 'pending', fn ($qq) => $qq->whereHas('paymentProofs', fn ($p) => $p->where('status', 'pending')))
             ->when($from, fn ($qq) => $qq->whereDate('date', '>=', $from))
             ->when($to, fn ($qq) => $qq->whereDate('date', '<=', $to))
             ->when(in_array($sort, $allowedSort, true),
@@ -91,6 +97,8 @@ class OnlineOrdersApiController extends Controller
                 'total' => (float) $o->total,
                 'payment_method' => $o->payment_method ?? 'cod',
                 'payment_status' => $o->payment_status ?? 'pending',
+                'delivery_method' => $o->delivery_method ?? 'ship',
+                'has_pending_proof' => (int) ($o->pending_proofs_count ?? 0) > 0,
                 'is_flagged' => (bool) $o->is_flagged,
                 'flag_reason' => $o->flag_reason,
                 'created_at' => optional($o->created_at)->toDateTimeString() ?? (string) $o->date,
@@ -114,7 +122,7 @@ class OnlineOrdersApiController extends Controller
     public function show(Request $request, $id)
     {
         $this->authorizeForUser($request->user('api'), 'view', StoreSetting::class);
-        $order = OnlineOrder::with(['items.product', 'items.productVariant', 'client', 'warehouse'])
+        $order = OnlineOrder::with(['items.product', 'items.productVariant', 'client', 'warehouse', 'pickupBranch', 'paymentProofs'])
             ->findOrFail($id);
 
         $subtotal = $order->subtotal !== null && (float) $order->subtotal > 0
@@ -155,6 +163,25 @@ class OnlineOrdersApiController extends Controller
 
             'payment_method' => $order->payment_method ?? 'cod',
             'payment_status' => $order->payment_status ?? 'pending',
+
+            // Pickup (collected at a branch) vs shipped
+            'delivery_method' => $order->delivery_method ?? 'ship',
+            'pickup_branch_id' => $order->pickup_branch_id,
+            'pickup_branch_name' => optional($order->pickupBranch)->name,
+
+            'payment_proofs' => $order->paymentProofs->sortByDesc('id')->map(fn ($p) => [
+                'id' => $p->id,
+                'payment_method' => $p->payment_method,
+                'reference_number' => $p->reference_number,
+                'amount' => (float) $p->amount,
+                'paid_at' => optional($p->paid_at)->toDateString(),
+                'note' => $p->note,
+                'status' => $p->status,
+                'reject_reason' => $p->reject_reason,
+                'file_url' => $p->fileUrl(),
+                'submitted_at' => optional($p->created_at)->toDateTimeString(),
+                'reviewed_at' => optional($p->reviewed_at)->toDateTimeString(),
+            ])->values(),
 
             'items' => $order->items->map(function ($d) {
                 $name = optional($d->product)->name ?? ('#'.$d->product_id);
@@ -418,6 +445,10 @@ class OnlineOrdersApiController extends Controller
                     'payment_statut' => $alreadyPaid ? 'paid' : 'unpaid',
                     'notes' => null,
                     'user_id' => optional(Auth::user())->id,
+                    // Multi-Currency: inherit the order's snapshot so the
+                    // admin invoice prints in the customer's checkout currency
+                    'currency_id' => $order->currency_id,
+                    'exchange_rate' => $order->exchange_rate,
                 ]);
 
                 // If the online order was already paid, create a payment_sales record
@@ -499,6 +530,22 @@ class OnlineOrdersApiController extends Controller
                 return $sale;
             });
 
+            // Auto-route confirmed online orders to the Kitchen Display when both the
+            // module and the auto-send option are on. Best-effort: a kitchen failure
+            // must never roll back an already-confirmed order.
+            try {
+                $settings = \App\Models\Setting::whereNull('deleted_at')->first();
+                if ($settings && $settings->enable_kitchen_display && $settings->kitchen_auto_online_orders) {
+                    \App\Http\Controllers\KitchenOrderController::createForSale(
+                        $sale->id,
+                        trim(($order->ref ? $order->ref.' — ' : '').($order->isPickup() ? 'Pickup' : 'Delivery')),
+                        'online'
+                    );
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Kitchen auto-routing failed for online order '.$order->id.': '.$e->getMessage());
+            }
+
             return response()->json([
                 'ok' => true,
                 'status' => 'confirmed',
@@ -550,12 +597,69 @@ class OnlineOrdersApiController extends Controller
      * Map the online order payment_method string to a payment_methods.id.
      * Credit Card is always id=1 (seeded). For others, look up by name or create on the fly.
      */
+    /**
+     * POST /store/orders/{id}/payment-proofs/{proofId}/review
+     * Verify a shopper-submitted GCash / bank-transfer payment. Approving is
+     * what marks the order paid, so a later confirm records the payment
+     * against the generated Sale.
+     */
+    public function reviewProof(Request $request, $id, $proofId)
+    {
+        $this->authorizeForUser($request->user('api'), 'view', StoreSetting::class);
+
+        $data = $request->validate([
+            'status' => ['required', 'in:approved,rejected'],
+            'reject_reason' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $order = OnlineOrder::findOrFail($id);
+        $proof = $order->paymentProofs()->findOrFail($proofId);
+
+        if ($proof->status !== 'pending') {
+            return response()->json(['error' => __('messages.PaymentProofAlreadyReviewed')], 422);
+        }
+
+        DB::transaction(function () use ($proof, $order, $data, $request) {
+            $proof->update([
+                'status' => $data['status'],
+                'reject_reason' => $data['status'] === 'rejected' ? ($data['reject_reason'] ?? null) : null,
+                'reviewed_by' => optional($request->user('api'))->id,
+                'reviewed_at' => now(),
+            ]);
+
+            if ($data['status'] === 'approved' && ($order->payment_status ?? 'pending') !== 'paid') {
+                $order->update(['payment_status' => 'paid']);
+            }
+        });
+
+        // Let the customer know either way.
+        try {
+            $to = $order->customer_email ?: optional($order->client)->email;
+            if ($to) {
+                Mail::to($to)->send(new \App\Mail\PaymentProofReviewed($order->fresh(), $proof->fresh()));
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Payment proof review email failed: '.$e->getMessage());
+        }
+
+        return response()->json([
+            'success' => true,
+            'status' => $proof->status,
+            'payment_status' => $order->fresh()->payment_status,
+        ]);
+    }
+
     protected function resolvePaymentMethodId(string $method): int
     {
         $nameMap = [
-            'credit_card'  => 'Credit Card',
-            'mobile_money' => 'Mobile Money',
-            'cod'          => 'Cash on Delivery',
+            'credit_card'    => 'Credit Card',
+            'mobile_money'   => 'Mobile Money',
+            'cod'            => 'Cash on Delivery',
+            'gcash'          => 'GCash',
+            'bank_transfer'  => 'Bank Transfer',
+            'cash_on_pickup' => 'Cash on Pickup',
+            'bkash'          => 'bKash',
+            'sslcommerz'     => 'SSLCommerz',
         ];
 
         $name = $nameMap[$method] ?? $nameMap['cod'];

@@ -139,6 +139,14 @@
     $retPaidSum    = $returns->sum('paid_amount');
     $retDueSum     = $returns->sum(function($r){ return (float)($r->GrandTotal ?? 0) - (float)($r->paid_amount ?? 0); });
 
+    // Service jobs: only accepted / in-progress / delivered jobs are collectable.
+    $serviceJobs   = $serviceJobs ?? collect();
+    $svcDueStatuses = \App\Models\ServiceJob::DUE_STATUSES;
+    $svcGrandSum   = $serviceJobs->sum('total_amount');
+    $svcPaidSum    = $serviceJobs->sum('paid_amount');
+    $svcDueSum     = $serviceJobs->filter(function($j) use ($svcDueStatuses){ return in_array($j->status, $svcDueStatuses, true); })
+                        ->sum(function($j){ return (float)($j->total_amount ?? 0) - (float)($j->paid_amount ?? 0); });
+
     // ---------- Safe fallbacks for quick stats ----------
     $qsOpeningBalance = (float)($client->opening_balance ?? 0);
     $qsSalesGrand   = (float)($client->salesGrand ?? $salesGrandSum);
@@ -146,12 +154,13 @@
     $qsSaleDue      = (float)($client->sale_due   ?? ($qsSalesGrand - $qsSalesPaid));
 
     $qsReturnsDue   = (float)($client->return_due ?? $retDueSum);
+    $qsServiceDue   = (float)($client->service_due ?? $svcDueSum);
     $qsPaymentsTot  = (float)($client->paymentsTotal ?? $paymentsSum);
     $qsQuotesGrand  = (float)($client->quotationsTotal ?? $quotesGrand);
 
     $qsNetBalance   = isset($client->netBalance)
                       ? (float)$client->netBalance
-                      : ($qsOpeningBalance + $qsSaleDue - $qsReturnsDue);
+                      : ($qsOpeningBalance + $qsSaleDue + $qsServiceDue - $qsReturnsDue);
   @endphp
 
   <!-- HEADER -->
@@ -202,6 +211,10 @@
         <div class="value danger">{{ formatPrice($qsSaleDue, 2, $priceFormat) }}</div>
       </div>
 
+      <div class="kpi">
+        <div class="label">Service Jobs (Due)</div>
+        <div class="value danger">{{ formatPrice($qsServiceDue, 2, $priceFormat) }}</div>
+      </div>
       <div class="kpi">
         <div class="label">Returns (Due)</div>
         <div class="value warning">{{ formatPrice($qsReturnsDue, 2, $priceFormat) }}</div>
@@ -307,6 +320,56 @@
     </tfoot>
   </table>
 
+  <!-- SERVICE JOBS -->
+  @if($serviceJobs->count())
+  <h3>{{ __('pdf.service') }}</h3>
+  <table class="avoid-break">
+    <thead>
+      <tr>
+        <th style="width:12%;">{{ __('pdf.date') }}</th>
+        <th style="width:14%;">{{ __('pdf.ref') }}</th>
+        <th style="width:20%;">{{ __('pdf.service') }}</th>
+        <th style="width:12%;">{{ __('pdf.status') }}</th>
+        <th class="right" style="width:12%;">{{ __('pdf.grand_total') }}</th>
+        <th class="right" style="width:10%;">{{ __('pdf.paid') }}</th>
+        <th class="right" style="width:10%;">{{ __('pdf.due') }}</th>
+        <th style="width:10%;">{{ __('pdf.payment_status') }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      @foreach ($serviceJobs as $j)
+      @php
+        $jCounts = in_array($j->status, $svcDueStatuses, true);
+        $jDue = (float)($j->total_amount ?? 0) - (float)($j->paid_amount ?? 0);
+        $dateFormat = $settings->date_format ?? 'YYYY-MM-DD';
+        $phpDateFormat = str_replace(['YYYY', 'MM', 'DD'], ['Y', 'm', 'd'], $dateFormat);
+        $jDate = $j->created_at ? \Carbon\Carbon::parse($j->created_at)->format($phpDateFormat) : '-';
+      @endphp
+      <tr>
+        <td>{{ $jDate }}</td>
+        <td>{{ $j->Ref }}</td>
+        <td>{{ $j->service_item ?? '-' }}</td>
+        <td><span class="{{ pillSale($j->status) }}">{{ $j->status }}</span></td>
+        <td class="right">{{ formatPrice($j->total_amount, 2, $priceFormat) }}</td>
+        <td class="right">{{ formatPrice($j->paid_amount, 2, $priceFormat) }}</td>
+        <td class="right {{ $jCounts && $jDue > 0 ? 'danger' : 'muted' }}">{{ formatPrice($jDue, 2, $priceFormat) }}</td>
+        <td><span class="{{ pillPayment($j->payment_status) }}">{{ $j->payment_status }}</span></td>
+      </tr>
+      @endforeach
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="4" class="right">{{ __('pdf.totals') }}</td>
+        <td class="right">{{ formatPrice($svcGrandSum, 2, $priceFormat) }}</td>
+        <td class="right">{{ formatPrice($svcPaidSum, 2, $priceFormat) }}</td>
+        <td class="right">{{ formatPrice($svcDueSum, 2, $priceFormat) }}</td>
+        <td></td>
+      </tr>
+    </tfoot>
+  </table>
+  <div class="muted" style="margin-top:4px;">Due excludes pending, declined and cancelled jobs.</div>
+  @endif
+
   <!-- PAYMENTS -->
   <h3>{{ __('pdf.payments') }}</h3>
   <table class="avoid-break">
@@ -346,6 +409,8 @@
         <td>
           @if(isset($p->payment_type) && $p->payment_type === 'opening_balance')
             <span class="pill info">{{ __('pdf.opening_balance') }}</span>
+          @elseif(isset($p->payment_type) && $p->payment_type === 'service')
+            <span class="pill warn">{{ __('pdf.service') }}</span>
           @else
             <span class="pill success">{{ __('pdf.sale') }}</span>
           @endif

@@ -78,6 +78,11 @@
             {{ money(record.due) }}
           </strong>
         </template>
+        <template v-else-if="column.key === 'service_due'">
+          <strong :style="{ color: Number(record.service_due) > 0 ? '#ff4d4f' : undefined }">
+            {{ money(record.service_due) }}
+          </strong>
+        </template>
         <template v-else-if="column.key === 'return_Due'">
           <strong :style="{ color: Number(record.return_Due) > 0 ? '#faad14' : undefined }">
             {{ money(record.return_Due) }}
@@ -99,10 +104,11 @@
                 >
                   <ShopOutlined /> {{ $t('Edit_Online_Store_Account') }}
                 </a-menu-item>
-                <!-- Opening balance counts: clients_pay_due allocates to it first,
+                <!-- Opening balance and open service jobs count: clients_pay_due
+                     allocates opening balance first, then sales, then service jobs,
                      same as the details page's Pay Due button. -->
                 <a-menu-item
-                  v-if="(Number(record.due) || 0) + (Number(record.opening_balance) || 0) > 0 && auth.can('pay_due')"
+                  v-if="(Number(record.due) || 0) + (Number(record.service_due) || 0) + (Number(record.opening_balance) || 0) > 0 && auth.can('pay_due')"
                   key="pay-due"
                 >
                   <DollarOutlined /> {{ $t('pay_all_sell_due_at_a_time') }}
@@ -142,6 +148,7 @@
       :client="payTarget"
       :opening-balance="Number(payTarget?.opening_balance) || 0"
       :sales-due="Number(payTarget?.due) || 0"
+      :service-due="Number(payTarget?.service_due) || 0"
       :payment-methods="crud.payload.value?.payment_methods || []"
       :accounts="crud.payload.value?.accounts || []"
       :company="crud.payload.value?.company_info || {}"
@@ -361,6 +368,7 @@ const columns = computed(() => [
   { title: t('Credit_Limit'), key: 'credit_limit', dataIndex: 'credit_limit', align: 'right', exportValue: r => money(r.credit_limit) },
   { title: t('Opening_Balance'), key: 'opening_balance', dataIndex: 'opening_balance', align: 'right', exportValue: r => money(r.opening_balance) },
   { title: t('Due'), key: 'due', dataIndex: 'due', sorter: true, align: 'right', exportValue: r => money(r.due) },
+  { title: t('Service_Due'), key: 'service_due', dataIndex: 'service_due', align: 'right', exportValue: r => money(r.service_due) },
   { title: t('Total_Sell_Return_Due'), key: 'return_Due', dataIndex: 'return_Due', align: 'right', exportValue: r => money(r.return_Due) },
 ]);
 
@@ -381,7 +389,7 @@ async function loadTotals() {
     const data = await http.get('clients', { page: 1, limit: -1 });
     const rows = data.clients || [];
     totals.value = {
-      due: rows.reduce((s, r) => s + (Number(r.due) || 0), 0),
+      due: rows.reduce((s, r) => s + (Number(r.due) || 0) + (Number(r.service_due) || 0), 0),
       returnDue: rows.reduce((s, r) => s + (Number(r.return_Due) || 0), 0),
       credit: rows.reduce((s, r) => s + (Number(r.credit_limit) || 0), 0),
     };

@@ -8,10 +8,19 @@
   $s = $s ?? (\App\Models\StoreSetting::first() ?: new \App\Models\StoreSetting);
 
   $categories = $categories ?? collect();
+  // Storefront theme: 'electronics' swaps the header/footer/skin partials in
+  // this layout (every page keeps its own view); 'real_estate' has its own
+  // layout entirely; 'default' is the original store.
+  $storeTheme = $s->theme ?? 'default';
+  // "Skin" themes reuse this layout and swap head/header/footer partials from
+  // resources/views/store/<theme>/partials/. Register new ones in
+  // \App\Support\StoreThemes::SKINS.
+  $skinTheme = in_array($storeTheme, \App\Support\StoreThemes::SKINS, true) ? $storeTheme : null;
+  $isElectronics = $skinTheme !== null; // historical name: "a skin theme is active"
   $primary   = $s->primary_color   ?? '#3B82F6';
   $secondary = $s->secondary_color ?? '#22D3EE';
-  $title     = $s->seo_meta_title  ?? ($s->store_name ?? __('messages.Store'));
-  $desc      = $s->seo_meta_description ?? '';
+  $title     = $s->localizedText('seo_meta_title') ?? ($s->store_name ?? __('messages.Store'));
+  $desc      = $s->localizedText('seo_meta_description') ?? '';
 
   // Social links — normalize to [{platform,url}]
   $social = $s->social_links ?? [];
@@ -32,11 +41,11 @@
 
   $client = Auth::guard('store')->user();
 
-  $accountUrl   = url('/online_store/account');
-  $ordersUrl    = url('/online_store/account/orders');
-  $logoutUrl    = url('/online_store/logout');
-  $loginUrl     = url('/online_store/login');
-  $registerUrl  = url('/online_store/register');
+  $accountUrl   = route('account');
+  $ordersUrl    = route('account.orders');
+  $logoutUrl    = route('store.logout');
+  $loginUrl     = route('store.login.show');
+  $registerUrl  = route('store.register.show');
 
   $displayName = $client ? ($client->username ?: ($client->email ?? __('messages.Account'))) : '';
   $initial     = $client ? Str::upper(Str::substr($displayName, 0, 1)) : '';
@@ -65,7 +74,7 @@
 
   // ===== SEO (per-page $seo overrides, else StoreSetting defaults) =====
   $seo        = (isset($seo) && is_array($seo)) ? $seo : [];
-  $storeName  = $s->store_name ?: ($s->seo_meta_title ?: __('messages.Store'));
+  $storeName  = $s->store_name ?: ($s->localizedText('seo_meta_title') ?: __('messages.Store'));
   $seoPage    = $seo['title'] ?? null;
   $seoTpl     = trim((string) ($s->seo_title_template ?? ''));
   if ($seoPage) {
@@ -73,9 +82,9 @@
           ? str_replace(['{page}', '{store}'], [$seoPage, $storeName], $seoTpl)
           : ($seoPage . ' — ' . $storeName);
   } else {
-      $seoTitle = $s->seo_meta_title ?: $storeName;
+      $seoTitle = $s->localizedText('seo_meta_title') ?: $storeName;
   }
-  $seoDesc      = $seo['description'] ?? ($s->seo_meta_description ?? '');
+  $seoDesc      = $seo['description'] ?? ($s->localizedText('seo_meta_description') ?? '');
   $seoCanonical = $seo['canonical'] ?? $s->storeUrl(ltrim(request()->getPathInfo(), '/'));
   $seoType      = $seo['type'] ?? 'website';
   $ogImgRaw     = $seo['image'] ?? ($s->logo_path ?: ($s->hero_image_path ?: null));
@@ -100,7 +109,7 @@
       'url' => $s->canonicalBase(),
       'potentialAction' => [
           '@type' => 'SearchAction',
-          'target' => $s->storeUrl('online_store/shop') . '?q={search_term_string}',
+          'target' => $s->storeUrl(store_path_to('shop')) . '?q={search_term_string}',
           'query-input' => 'required name=search_term_string',
       ],
   ];
@@ -113,9 +122,21 @@
       if (! is_array($items)) return [];
       return collect($items)
           ->filter(fn ($it) => is_array($it) && trim((string) ($it['label'] ?? '')) !== '')
-          ->map(fn ($it) => ['label' => (string) $it['label'], 'url' => \App\Models\StoreSetting::menuItemUrl($it)])
+          ->map(fn ($it) => [
+              'label' => \App\Models\StoreSetting::menuItemLabel($it),
+              'url' => \App\Models\StoreSetting::menuItemUrl($it),
+          ])
           ->values()->all();
   };
+  $electronicsOpts   = $skinTheme ? \App\Support\StoreThemes::options($skinTheme, $s) : [];
+  // Used by the mobile drawer on every theme (the default header also sets it).
+  $currencyOptions   = \App\Services\StoreCurrencyService::options();
+  // Skin themes hide categories with nothing to sell (keeps demo/legacy
+  // categories out of the nav, search scope and mobile drawer).
+  if ($skinTheme && $categories->count()) {
+      $visibleCatIds = \App\Models\Product::query()->where('is_active', 1)->where('hide_from_online_store', 0)->distinct()->pluck('category_id')->all();
+      $categories = $categories->filter(fn ($c) => in_array($c->id, $visibleCatIds))->values();
+  }
   $headerMenu        = $menuItems('header');
   $footerShopMenu    = $menuItems('footer_shop');
   $footerSupportMenu = $menuItems('footer_support');
@@ -130,7 +151,12 @@
   <link rel="canonical" href="{{ $seoCanonical }}" />
   @if($seoNoindex)<meta name="robots" content="noindex, nofollow" />@endif
   <meta name="csrf-token" content="{{ csrf_token() }}">
-  <meta name="currency" content="{{ $s->currency_code ?? '$' }}">
+  {{-- Multi-Currency: the active display currency. Cart/data-* prices stay in
+       the base currency; storefront.js multiplies by currency-rate at render. --}}
+  @php $activeCurrency = store_currency(); @endphp
+  <meta name="currency" content="{{ $activeCurrency['symbol'] ?: ($s->currency_code ?? '$') }}">
+  <meta name="currency-rate" content="{{ $activeCurrency['rate'] }}">
+  <meta name="currency-code" content="{{ $activeCurrency['code'] }}">
   <meta name="price-decimals" content="{{ \App\utils\helpers::price_decimals() }}">
 
   {{-- Open Graph --}}
@@ -156,9 +182,18 @@
   @endforeach
 
   <script>window.__LOGGED_IN__ = @json(Auth::guard('store')->check());</script>
+  {{-- SW registration URL carries the configured store base path so sw.js can
+       cache the store shell separately from the admin shell. --}}
+  <script>window.__SW_URL__ = @json(store_sw_url());</script>
   <script>window.__ALLOW_OVERSELLING__ = @json($s->allow_overselling ?? true);</script>
   <script>window.__HIDE_PRICES__ = @json($hidePrices);</script>
   <script>window.__SHOW_STOCK__ = @json($s->show_stock ?? true);</script>
+  {{-- Wholesale Pricing by Quantity: when on, the cart re-prices its lines
+       from each product's quantity ladder (fetched from __WHOLESALE_TIERS_URL__). --}}
+  <script>
+    window.__WHOLESALE_PRICING__ = @json((bool) (\App\Models\Setting::whereNull('deleted_at')->value('enable_wholesale_pricing') ?? false));
+    window.__WHOLESALE_TIERS_URL__ = @json(route('store.wholesale.tiers'));
+  </script>
   <script>
     window.__MSG_ONLY_X_STOCK__ = @json(__('messages.Only_x_available_in_stock'));
     window.__MSG_MAX_ADDED__    = @json(__('messages.Max_stock_added_to_cart'));
@@ -167,36 +202,63 @@
   </script>
 
   {{-- Theme bootstrap — runs before paint to avoid FOUC --}}
+  @if($isElectronics)
   <script>
+    // Electronics theme is light-first; the dark class only applies when the
+    // visitor chose dark explicitly (and the theme toggle is enabled).
     (function () {
       try {
         var stored = localStorage.getItem('store.theme');
-        var mode = stored || 'dark';
-        if (mode === 'dark') document.documentElement.classList.add('dark');
-      } catch (e) { document.documentElement.classList.add('dark'); }
+        window.__STORE_THEME_DEFAULT__ = 'light';
+        if (stored === 'dark' && @json((bool) ($electronicsOpts['show_theme_toggle'] ?? false))) {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+        }
+      } catch (e) { document.documentElement.classList.remove('dark'); }
     })();
   </script>
+  @else
+  <script>
+    // Light-first: the dark class only applies when the visitor chose it.
+    (function () {
+      try {
+        var stored = localStorage.getItem('store.theme');
+        if (stored === 'dark') document.documentElement.classList.add('dark');
+        else document.documentElement.classList.remove('dark');
+      } catch (e) { document.documentElement.classList.remove('dark'); }
+    })();
+  </script>
+  @endif
 
   @if(!empty($s->favicon_path))
     <link rel="icon" href="{{ $assetPath($s->favicon_path) }}" />
   @endif
 
   {{-- PWA --}}
-  <link rel="manifest" href="/manifest-store.webmanifest">
-  <meta name="theme-color" content="{{ $primary }}">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <meta name="apple-mobile-web-app-title" content="{{ $s->store_name ?? 'Store' }}">
-  <link rel="apple-touch-icon" href="/pwa_images/pwa-icon-192.png">
+  @include('partials.pwa-head', [
+      'manifest' => '/pwa/store.webmanifest',
+      'themeColor' => $primary,
+      'appTitle' => $s->store_name ?? 'Store',
+  ])
 
-  {{-- Fonts — Inter (body) + JetBrains Mono (specs/prices) --}}
+  {{-- Fonts — Space Grotesk (display) + Inter (body) + JetBrains Mono (specs/prices) --}}
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet"
-        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap">
+        href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap">
 
   {{-- Storefront bundle --}}
   <link rel="stylesheet" href="{{ $cssStore }}">
+  <style>
+    /* Star ratings on the shared product card (used by every theme). */
+    .df-stars { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: rgb(var(--color-fg-muted)); margin-top: 2px; }
+    .df-stars-icons { display: inline-flex; gap: 1px; color: #f59e0b; }
+    .df-stars-icons svg { width: 12px; height: 12px; }
+    .df-stars-icons .is-empty { color: rgb(var(--color-border-strong)); }
+    .df-stars b { color: rgb(var(--color-fg-primary)); font-weight: 600; }
+    .product-badge-sale { background: #e11d48; color: #fff; }
+  </style>
 
   <style>
     :root {
@@ -209,8 +271,19 @@
 
     .mega-panel { box-shadow: 0 24px 48px -12px rgba(0,0,0,0.5); }
 
+    /* The mobile tab bar is fixed over the page, so the last thing on the
+       page — the footer — needs clearance or its final row sits under it. */
+    @media (max-width: 1023.98px) {
+      .store-footer { padding-bottom: 5rem; }
+    }
+
     {!! $s->custom_css ?? '' !!}
   </style>
+  @if($isElectronics)
+    @include('store.'.$skinTheme.'.partials.head')
+  @elseif($storeTheme === 'default')
+    @include('store.partials.theme-default-style')
+  @endif
 </head>
 <body x-data class="bg-bg-base text-fg-primary antialiased min-h-screen flex flex-col">
 
@@ -220,14 +293,16 @@
     <div class="w-10 h-10 border-2 border-line-subtle border-t-accent-500 rounded-full animate-spin"></div>
   </div>
 
-  {{-- Topbar --}}
-  <div class="bg-bg-elevated border-b border-line-subtle text-xs text-fg-secondary">
-    <div class="container flex items-center justify-between h-9">
-      <div class="truncate">{{ $s->topbar_text_left ?? __('messages.TopbarLeft') }}</div>
-      <div class="hidden md:flex items-center gap-2">
-        <span class="chip chip-info">{{ __('messages.New') }}</span>
-        <span>{{ $s->topbar_text_right ?? __('messages.TopbarRight') }}</span>
-      </div>
+  @if($isElectronics)
+    @include('store.'.$skinTheme.'.partials.header')
+  @else
+  {{-- Announcement bar --}}
+  <div class="announce-bar text-xs">
+    <div class="container flex items-center justify-center gap-2.5 h-9">
+      <span class="font-semibold text-fg-primary truncate">{{ $s->localizedText('topbar_text_left') ?? __('messages.TopbarLeft') }}</span>
+      <span class="hidden md:inline-block w-1 h-1 rounded-full bg-line-strong shrink-0"></span>
+      <span class="hidden md:inline text-fg-secondary truncate">{{ $s->localizedText('topbar_text_right') ?? __('messages.TopbarRight') }}</span>
+      <a href="{{ route('store.shop') }}" class="hidden sm:inline font-semibold text-accent-500 hover:text-accent-400 shrink-0">{{ __('messages.ShopNow') }}</a>
     </div>
   </div>
 
@@ -245,12 +320,13 @@
         </button>
 
         {{-- Logo --}}
-        <a href="{{ route('store.index') }}" class="flex items-center gap-2 shrink-0">
+        <a href="{{ route('store.index') }}" class="flex items-center gap-2.5 shrink-0">
           @if(!empty($s->logo_path))
             <img src="{{ $assetPath($s->logo_path) }}" alt="{{ $s->store_name ?? 'Store' }}"
                  class="h-9 max-w-[160px] object-contain">
           @else
-            <span class="font-bold text-lg tracking-tight">{{ $s->store_name ?? __('messages.Store') }}</span>
+            <span class="logo-mark">{{ Str::upper(Str::substr($s->store_name ?? __('messages.Store'), 0, 1)) }}</span>
+            <span class="logo-text">{{ $s->store_name ?? __('messages.Store') }}</span>
           @endif
         </a>
 
@@ -287,12 +363,13 @@
             <x-store.icon name="search"
                           class="absolute start-3 top-1/2 -translate-y-1/2 w-5 h-5 text-fg-muted" />
             <input type="text" name="q" id="store-search-input"
-                   class="input ps-10 pe-4"
+                   class="input h-11 rounded-xl bg-bg-surface ps-10 pe-10"
                    autocomplete="off"
                    placeholder="{{ __('messages.SearchProducts') }}"
                    value="{{ request('q') }}"
                    x-model="q"
                    @input.debounce.250ms="fetch">
+            <span class="kbd absolute end-3 top-1/2 -translate-y-1/2 pointer-events-none">/</span>
             <div x-show="results.length" x-cloak
                  class="absolute top-full left-0 right-0 mt-1 bg-bg-elevated border border-line-subtle rounded-md shadow-lg overflow-hidden max-h-96 overflow-y-auto z-50">
               <template x-for="p in results" :key="p.id">
@@ -311,7 +388,7 @@
         </div>
 
         {{-- Actions cluster --}}
-        <div class="ms-auto flex items-center gap-1">
+        <div class="ms-auto flex items-center gap-2">
 
           {{-- Mobile search --}}
           <button type="button"
@@ -323,7 +400,7 @@
 
           {{-- Theme toggle --}}
           <button type="button"
-                  class="btn btn-ghost btn-icon"
+                  class="btn btn-secondary btn-icon"
                   onclick="window.StoreTheme && window.StoreTheme.toggle()"
                   aria-label="{{ __('messages.ToggleTheme') }}"
                   title="{{ __('messages.ToggleTheme') }}">
@@ -331,9 +408,10 @@
             <x-store.icon name="sun"  class="w-5 h-5 hidden dark:inline" />
           </button>
 
-          {{-- Language --}}
-          <div class="relative hidden md:block" x-data="dropdown()" @click.outside="close">
-            <button type="button" class="btn btn-ghost h-10 px-3 text-sm font-medium" @click="toggle">
+          {{-- Language — visible on every width: the account control is, so
+               hiding this one below md left mobile with no way to switch. --}}
+          <div class="relative" x-data="dropdown()" @click.outside="close">
+            <button type="button" class="btn btn-ghost h-10 px-2 md:px-3 text-sm font-medium" @click="toggle">
               <x-store.icon name="globe" class="w-4 h-4 me-1" />{{ strtoupper(app()->getLocale()) }}
               <x-store.icon name="chevron-down" class="w-3 h-3 ms-1" />
             </button>
@@ -345,6 +423,26 @@
               <a class="block px-3 py-2 text-sm text-fg-primary hover:bg-bg-muted" href="{{ route('lang.switch', 'es') }}">Español</a>
             </div>
           </div>
+
+          {{-- Multi-Currency switcher (only when the module offers a choice) --}}
+          @php $currencyOptions = \App\Services\StoreCurrencyService::options(); @endphp
+          @if($currencyOptions->count() > 1)
+            <div class="relative hidden md:block" x-data="dropdown()" @click.outside="close">
+              <button type="button" class="btn btn-ghost h-10 px-3 text-sm font-medium" @click="toggle">
+                {{ $activeCurrency['code'] }}
+                <x-store.icon name="chevron-down" class="w-3 h-3 ms-1" />
+              </button>
+              <div x-show="open" x-cloak x-transition
+                   class="absolute end-0 mt-1 w-44 bg-bg-elevated border border-line-subtle rounded-md shadow-lg py-1 z-50">
+                @foreach($currencyOptions as $co)
+                  <a class="block px-3 py-2 text-sm text-fg-primary hover:bg-bg-muted {{ (int) $co->id === (int) ($activeCurrency['id'] ?? 0) ? 'font-semibold' : '' }}"
+                     href="{{ route('store.currency.switch', $co->id) }}">
+                    {{ $co->code }} — {{ $co->symbol }}
+                  </a>
+                @endforeach
+              </div>
+            </div>
+          @endif
 
           {{-- Account --}}
           @if($client)
@@ -366,19 +464,19 @@
                 <a class="flex items-center gap-2 px-3 py-2 text-sm text-fg-primary hover:bg-bg-muted" href="{{ $ordersUrl }}">
                   <x-store.icon name="package" class="w-4 h-4" />{{ __('messages.Orders') }}
                 </a>
-                <a class="flex items-center gap-2 px-3 py-2 text-sm text-fg-primary hover:bg-bg-muted" href="{{ url('/online_store/account/wishlist') }}">
+                <a class="flex items-center gap-2 px-3 py-2 text-sm text-fg-primary hover:bg-bg-muted" href="{{ route('store.wishlist') }}">
                   <x-store.icon name="heart" class="w-4 h-4" />{{ __('messages.MyWishlist') }}
                   <span class="wishlist-count ms-auto text-xs text-fg-muted"></span>
                 </a>
-                <a class="flex items-center gap-2 px-3 py-2 text-sm text-fg-primary hover:bg-bg-muted" href="{{ url('/online_store/account/returns') }}">
+                <a class="flex items-center gap-2 px-3 py-2 text-sm text-fg-primary hover:bg-bg-muted" href="{{ route('account.returns') }}">
                   <x-store.icon name="rotate-ccw" class="w-4 h-4" />{{ __('messages.MyReturns') }}
                 </a>
                 @if(optional($s ?? \App\Models\StoreSetting::first())->wallet_enabled)
-                <a class="flex items-center gap-2 px-3 py-2 text-sm text-fg-primary hover:bg-bg-muted" href="{{ url('/online_store/account/wallet') }}">
+                <a class="flex items-center gap-2 px-3 py-2 text-sm text-fg-primary hover:bg-bg-muted" href="{{ route('account.wallet') }}">
                   <x-store.icon name="wallet" class="w-4 h-4" />{{ __('messages.MyWallet') }}
                 </a>
                 @endif
-                <a class="flex items-center gap-2 px-3 py-2 text-sm text-fg-primary hover:bg-bg-muted" href="{{ url('/online_store/account/rewards') }}">
+                <a class="flex items-center gap-2 px-3 py-2 text-sm text-fg-primary hover:bg-bg-muted" href="{{ route('account.rewards') }}">
                   <x-store.icon name="gift" class="w-4 h-4" />{{ __('messages.MyRewards') }}
                 </a>
                 <div class="border-t border-line-subtle my-1"></div>
@@ -414,7 +512,8 @@
       <div class="hidden lg:block border-t border-line-subtle bg-bg-base">
         <div class="container">
           <ul class="flex flex-wrap items-center gap-1 py-2">
-            @foreach($categories as $category)
+            @php $barCats = $categories->take(9); $moreCats = $categories->slice(9); @endphp
+            @foreach($barCats as $category)
               <li class="relative group shrink-0">
                 <a href="{{ route('store.shop', ['category' => $category->id]) }}"
                    class="px-3 h-9 inline-flex items-center gap-1 text-sm rounded-md transition-colors {{ request('category') == $category->id ? 'text-accent-500 bg-accent-500/10' : 'text-fg-secondary hover:text-fg-primary hover:bg-bg-muted' }}">
@@ -437,11 +536,24 @@
                 @endif
               </li>
             @endforeach
+            @if($moreCats->count())
+              <li class="df-more shrink-0">
+                <a href="{{ route('store.shop') }}" class="px-3 h-9 inline-flex items-center gap-1 text-sm rounded-md text-fg-secondary hover:text-fg-primary hover:bg-bg-muted">
+                  {{ __('messages.More') }}<x-store.icon name="chevron-down" class="w-3 h-3" />
+                </a>
+                <div class="df-more-menu">
+                  @foreach($moreCats as $category)
+                    <a href="{{ route('store.shop', ['category' => $category->id]) }}">{{ $category->name }}</a>
+                  @endforeach
+                </div>
+              </li>
+            @endif
           </ul>
         </div>
       </div>
     @endif
   </header>
+  @endif
 
   {{-- Vehicle Fitment selector bar (only when the feature is enabled) --}}
   @include('store.partials.vehicle-selector')
@@ -527,6 +639,34 @@
               @endforeach
             </ul>
           </div>
+
+          {{-- Language / currency: the header dropdowns are desktop-only, so
+               without these a phone visitor cannot switch either. --}}
+          <div class="p-4 border-t border-line-subtle space-y-3">
+            <div>
+              <label class="form-label text-xs" for="mnav-lang">{{ __('messages.Language') }}</label>
+              <select id="mnav-lang" class="input"
+                      onchange="if (this.value) window.location.href = this.value;">
+                @foreach(store_locales() as $mnavCode => $mnavLabel)
+                  <option value="{{ route('lang.switch', $mnavCode) }}"
+                          @selected(app()->getLocale() === $mnavCode)>{{ $mnavLabel }}</option>
+                @endforeach
+              </select>
+            </div>
+
+            @if($currencyOptions->count() > 1)
+              <div>
+                <label class="form-label text-xs" for="mnav-currency">{{ __('messages.Currency') }}</label>
+                <select id="mnav-currency" class="input"
+                        onchange="if (this.value) window.location.href = this.value;">
+                  @foreach($currencyOptions as $co)
+                    <option value="{{ route('store.currency.switch', $co->id) }}"
+                            @selected((int) $co->id === (int) ($activeCurrency['id'] ?? 0))>{{ $co->code }} — {{ $co->symbol }}</option>
+                  @endforeach
+                </select>
+              </div>
+            @endif
+          </div>
         </aside>
       </div>
     </template>
@@ -572,7 +712,7 @@
   </div>
 
   {{-- Page content --}}
-  <main class="flex-1 pb-20 lg:pb-0">
+  <main class="flex-1">
     @yield('content')
   </main>
 
@@ -582,7 +722,7 @@
       @php
         $isHome = request()->routeIs('store.index');
         $isShop = request()->routeIs('store.shop');
-        $isAcct = request()->routeIs('store.account*') || str_contains(url()->current(), '/online_store/account');
+        $isAcct = request()->routeIs('account*') || request()->routeIs('store.wishlist') || request()->routeIs('my_*');
       @endphp
       <a href="{{ route('store.index') }}"
          class="flex flex-col items-center justify-center gap-0.5 {{ $isHome ? 'text-accent-500' : 'text-fg-secondary' }}">
@@ -623,10 +763,16 @@
   </nav>
 
   {{-- Footer --}}
-  <footer class="mt-16 bg-bg-surface border-t border-line-subtle">
+  {{-- pb-20 clears the fixed mobile tab bar, which otherwise covers the
+       last footer row (cookie settings / secure payment / fast shipping). --}}
+  @if($isElectronics)
+    @include('store.'.$skinTheme.'.partials.footer')
+  @else
+  <footer class="store-footer mt-16 bg-bg-surface border-t border-line-subtle">
     <div class="container py-10">
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-8">
-        <div class="col-span-2 md:col-span-2">
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-8" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
+        <style>@media (min-width: 768px) { .store-footer .grid { grid-template-columns: 1.5fr 1fr 1fr 1.2fr !important; } }</style>
+        <div class="col-span-2 md:col-span-1">
           <div class="flex items-center gap-2 mb-3">
             @if(!empty($s->logo_path))
               <img src="{{ $assetPath($s->logo_path) }}" alt="" class="h-8 max-w-[140px] object-contain">
@@ -634,7 +780,7 @@
               <span class="font-bold text-lg tracking-tight">{{ $s->store_name ?? __('messages.Store') }}</span>
             @endif
           </div>
-          <p class="text-sm text-fg-secondary max-w-md">{{ $s->footer_text ?? __('messages.FooterAbout') }}</p>
+          <p class="text-sm text-fg-secondary max-w-md">{{ $s->localizedText('footer_text') ?? __('messages.FooterAbout') }}</p>
 
           @if(!empty($social))
             <div class="flex items-center gap-2 mt-5">
@@ -683,8 +829,26 @@
               @if($client)
                 <li><a href="{{ $ordersUrl }}" class="text-fg-secondary hover:text-accent-500">{{ __('messages.Orders') }}</a></li>
               @endif
+              <li><a href="{{ $client ? route('account.returns') : $loginUrl }}" class="text-fg-secondary hover:text-accent-500">{{ __('messages.ReturnsRefunds') }}</a></li>
+              <li><a href="{{ $client ? route('account.orders') : $loginUrl }}" class="text-fg-secondary hover:text-accent-500">{{ __('messages.TrackOrder') }}</a></li>
             @endif
           </ul>
+        </div>
+
+        <div class="col-span-2 md:col-span-1">
+          <h6 class="text-xs font-semibold uppercase tracking-widest text-fg-muted mb-3">{{ __('messages.GetInTouch') }}</h6>
+          <ul class="space-y-2 text-sm text-fg-secondary df-foot-contact">
+            @if($s->contact_phone)<li><x-store.icon name="phone" /><a href="tel:{{ preg_replace('/\s+/', '', $s->contact_phone) }}">{{ $s->contact_phone }}</a></li>@endif
+            @if($s->contact_email)<li><x-store.icon name="mail" /><a href="mailto:{{ $s->contact_email }}">{{ $s->contact_email }}</a></li>@endif
+            @if($s->contact_address)<li><x-store.icon name="map-pin" /><span>{{ $s->contact_address }}</span></li>@endif
+          </ul>
+          <div class="df-pay mt-4" aria-label="{{ __('messages.SecurePayment') }}">
+            <span>VISA</span>
+            <span class="df-pay-mc"><i></i><i></i></span>
+            <span class="df-pay-pp">PayPal</span>
+            <span class="df-pay-ap"> Pay</span>
+            <span class="df-pay-gp"><b>G</b>&nbsp;Pay</span>
+          </div>
         </div>
       </div>
 
@@ -702,6 +866,7 @@
       </div>
     </div>
   </footer>
+  @endif
 
   {{-- Mini Cart (Alpine drawer + miniCart renderer) --}}
   <div id="miniCart" x-data="drawer({ side: 'end' })" @keydown.window="onEsc">
@@ -736,9 +901,9 @@
 
             <div id="mc-list" class="divide-y divide-line-subtle">
               <template x-for="it in items" :key="it.id">
-                <div class="flex items-center gap-3 py-3" :data-id="it.id">
+                <div class="flex items-center gap-3.5 py-4" :data-id="it.id">
                   <img :src="it.image || '{{ asset('images/products/no-image.png') }}'" :alt="it.name"
-                       class="w-14 h-14 rounded-md object-cover border border-line-subtle">
+                       class="w-[72px] h-[72px] rounded-lg object-cover border border-line-subtle shrink-0">
                   <div class="flex-1 min-w-0">
                     <div class="text-sm font-semibold truncate" x-text="it.name"></div>
                     <div class="text-xs text-fg-muted font-mono" x-text="hidePrices ? '' : money(it.price)"></div>
@@ -878,6 +1043,11 @@
                   <input class="checkbox" type="checkbox" name="remember">
                   <span class="text-fg-secondary">{{ __('messages.RememberMe') }}</span>
                 </label>
+                {{-- The standalone login page has had this link all along; the
+                     modal did not, so anyone signing in from a drawer had no
+                     way to recover an account. --}}
+                <a href="{{ route('store.password.request') }}"
+                   class="text-accent-500 hover:underline">{{ __('messages.ForgotPassword') }}</a>
               </div>
 
               <button type="submit" class="btn btn-primary btn-block btn-lg auth-submit">
@@ -1001,6 +1171,21 @@
 
   {{-- Storefront bundle (Alpine + theme + cart + UI components) --}}
   <script src="{{ $jsStore }}" defer></script>
+  @if(!$isElectronics)
+    <script>
+      // storefront.js boots dark-first when nothing is stored; the default
+      // theme is light-first, so undo that unless the visitor picked dark.
+      (function () { try { if (localStorage.getItem('store.theme') !== 'dark') { document.documentElement.classList.remove('dark'); document.addEventListener('DOMContentLoaded', function () { if (localStorage.getItem('store.theme') !== 'dark') document.documentElement.classList.remove('dark'); }); } } catch (e) {} })();
+    </script>
+  @endif
+  @if($isElectronics && empty($electronicsOpts['show_theme_toggle']))
+    <script>
+      // storefront.js boots dark-first from localStorage; this theme is light-only
+      // unless the admin enables the toggle, so undo that before first paint.
+      document.documentElement.classList.remove('dark');
+      document.addEventListener('DOMContentLoaded', function () { document.documentElement.classList.remove('dark'); });
+    </script>
+  @endif
 
   @if($s->cookie_consent_enabled ?? true)
     @include('store.partials.cookie-consent')

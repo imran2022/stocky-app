@@ -24,19 +24,36 @@ class PortalQuotationsController extends Controller
         $perPage = (int) $request->input('limit', 10);
         $page = max(1, (int) $request->input('page', 1));
         $search = $request->input('search');
+        $status = $request->input('status');
+        $dateFrom = $request->input('date_from');
+        $dateTo = $request->input('date_to');
 
-        $q = Quotation::query()
+        $base = Quotation::query()
             ->whereNull('deleted_at')
-            ->where('client_id', $portalClient->client_id)
+            ->where('client_id', $portalClient->client_id);
+
+        $q = (clone $base)
             ->with(['warehouse:id,name'])
             ->when($search, function ($query) use ($search) {
                 $query->where(function ($qr) use ($search) {
                     $qr->where('Ref', 'LIKE', "%{$search}%")
+                        ->orWhere('date', 'LIKE', "%{$search}%")
                         ->orWhere('statut', 'LIKE', "%{$search}%")
                         ->orWhere('notes', 'LIKE', "%{$search}%");
                 });
             })
-            ->orderByDesc('id');
+            ->when($status, fn ($query) => $query->where('statut', $status))
+            ->when($dateFrom, fn ($query) => $query->whereDate('date', '>=', $dateFrom))
+            ->when($dateTo, fn ($query) => $query->whereDate('date', '<=', $dateTo));
+
+        $q = $this->applyPortalSort($q, $request, [
+            'date' => 'date',
+            'Ref' => 'Ref',
+            'GrandTotal' => 'GrandTotal',
+            'statut' => 'statut',
+        ], 'date');
+
+        $statuses = (clone $base)->whereNotNull('statut')->distinct()->orderBy('statut')->pluck('statut')->values();
 
         $totalRows = (clone $q)->count();
         $rows = $perPage > 0
@@ -58,7 +75,19 @@ class PortalQuotationsController extends Controller
         return response()->json([
             'totalRows' => $totalRows,
             'quotations' => $data,
+            'statuses' => $statuses,
         ]);
+    }
+
+    /**
+     * Whitelisted sort for the portal list endpoints: ?sort=<column>&dir=asc|desc.
+     */
+    private function applyPortalSort($query, Request $request, array $allowed, string $default)
+    {
+        $sort = (string) $request->input('sort', '');
+        $dir = strtolower((string) $request->input('dir', 'desc')) === 'asc' ? 'asc' : 'desc';
+        $column = array_key_exists($sort, $allowed) ? $allowed[$sort] : $allowed[$default];
+        return $query->orderBy($column, $dir)->orderByDesc('id');
     }
 
     /**
@@ -124,7 +153,7 @@ class PortalQuotationsController extends Controller
         $systemUserId = User::whereNull('deleted_at')->orderBy('id')->value('id');
         if (! $systemUserId) {
             return response()->json([
-                'message' => 'No staff user available to receive the quotation request.',
+                'message' => __('portal.no_staff_user'),
             ], 500);
         }
 
@@ -174,7 +203,7 @@ class PortalQuotationsController extends Controller
     private function assertPortalActive($portalClient): void
     {
         if ((int) $portalClient->status !== 1) {
-            abort(403, 'Portal access is disabled');
+            abort(403, __('portal.portal_disabled'));
         }
     }
 }

@@ -1,7 +1,7 @@
 @extends('layouts.store')
 
 @section('content')
-@php $currency = $s->currency_code ?? '$'; @endphp
+@php $currency = store_currency()['symbol']; @endphp
 
 <div class="container py-8">
   <div class="flex items-end justify-between mb-6">

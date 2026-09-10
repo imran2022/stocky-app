@@ -3,12 +3,12 @@
   $productSlug = $p->slug ?? (string) $p->id;
   $galleryFilenames = $p->productGalleryFilenames();
   $galleryUrls = collect($galleryFilenames)
-    ->map(fn ($f) => $f ? asset('images/products/' . $f) : null)
+    ->map(fn ($f) => product_image_url_or_null($f))
     ->filter()
     ->values()
     ->all();
   $primaryFile = $p->primaryProductImageFilename();
-  $imgUrl = $primaryFile ? asset('images/products/' . $primaryFile) : asset('images/products/no-image.png');
+  $imgUrl = product_image_url($primaryFile);
   $descShort = \Illuminate\Support\Str::limit(strip_tags($p->note ?? ''), 600);
   $minPrice  = (float) ($p->display_price ?? ($p->price ?? 0));
   $variants  = $p->relationLoaded('variants') ? $p->variants : collect($p->variants ?? []);
@@ -20,8 +20,8 @@
       'name' => (string) ($v->name ?? ''),
       'price' => (float) ($v->price ?? 0),
       'display_price' => $final,
-      'display_price_formatted' => $currency . number_format($final, \App\utils\helpers::price_decimals(), '.', ','),
-      'image' => !empty($v->image) ? asset('images/products/' . $v->image) : null,
+      'display_price_formatted' => store_money($final),
+      'image' => product_image_url_or_null($v->image ?? null),
       'stock' => (int) max(0, $v->stock ?? $v->qty ?? 0),
     ];
   })->values();
@@ -29,7 +29,7 @@
 
   $isPreorder = (bool) ($p->is_preorder ?? false);
   $preorderAlways = (bool) ($p->preorder_always ?? false);
-  $preorderDate = $p->preorder_available_date ? $p->preorder_available_date->format('M d, Y') : null;
+  $preorderDate = $p->preorder_available_date ? store_date($p->preorder_available_date) : null;
 
   // Service or classified-ad products are inquiry-only (Request a Quotation).
   $quoteOnly = (($p->type ?? '') === 'is_service') || (bool) ($p->is_classified ?? false);
@@ -75,11 +75,25 @@
      aria-label="{{ $p->name }}">
     <img src="{{ $imgUrl }}" alt="{{ $p->name }}" loading="lazy">
 
-    @if($isPreorderActive)
-      <span class="product-badge product-badge-pre">{{ __('messages.PreOrder') }}</span>
-    @elseif(!$isAvailable)
-      <span class="product-badge product-badge-out">{{ __('messages.OutOfStock') }}</span>
-    @endif
+    {{-- Automatic state badge first, then the admin's own labels, stacked so
+         several never sit on top of each other. --}}
+    <div class="product-badges">
+      @php
+        $cardCompare = isset($p->compare_at_price) ? (float) $p->compare_at_price : null;
+        $cardPct = ($cardCompare !== null && $cardCompare > $minPrice + 0.001) ? (int) round(($cardCompare - $minPrice) / $cardCompare * 100) : 0;
+      @endphp
+      @if($cardPct > 0)
+        <span class="product-badge product-badge-sale">-{{ $cardPct }}%</span>
+      @endif
+      @if($isPreorderActive)
+        <span class="product-badge product-badge-pre">{{ __('messages.PreOrder') }}</span>
+      @elseif(!$isAvailable)
+        <span class="product-badge product-badge-out">{{ __('messages.OutOfStock') }}</span>
+      @endif
+      @foreach(\App\Services\ProductLabelService::badges($p->labels ?? null) as $badge)
+        <span class="product-badge {{ $badge['class'] }}">{{ $badge['text'] }}</span>
+      @endforeach
+    </div>
 
     <div class="product-actions">
       <button type="button" class="product-action-btn js-wishlist-toggle"
@@ -121,11 +135,23 @@
     @endphp
     @if(empty($hidePrices))
       <div class="price flex items-center gap-2 flex-wrap">
-        <span>{{ $currency }}{{ number_format($minPrice, \App\utils\helpers::price_decimals(), '.', ',') }}</span>
+        <span>{{ store_money($minPrice) }}</span>
         @if($onFlash)
-          <span class="text-sm text-fg-muted line-through">{{ $currency }}{{ number_format($compareAt, \App\utils\helpers::price_decimals(), '.', ',') }}</span>
+          <span class="text-sm text-fg-muted line-through">{{ store_money($compareAt) }}</span>
           <span class="chip chip-danger text-xs">-{{ round(($compareAt - $minPrice) / $compareAt * 100) }}%</span>
         @endif
+      </div>
+    @endif
+
+    @if(isset($p->rating_avg) && $p->rating_avg !== null && (int) ($p->rating_count ?? 0) > 0)
+      <div class="df-stars" aria-label="{{ $p->rating_avg }}/5">
+        <span class="df-stars-icons">
+          @for($i = 1; $i <= 5; $i++)
+            <x-store.icon name="star-fill" class="{{ $i <= round((float) $p->rating_avg) ? '' : 'is-empty' }}" />
+          @endfor
+        </span>
+        <b>{{ number_format((float) $p->rating_avg, 1) }}</b>
+        <span>({{ (int) $p->rating_count }})</span>
       </div>
     @endif
 
@@ -144,14 +170,14 @@
 
     @if($quoteOnly)
       <button type="button"
-              class="btn btn-primary btn-sm btn-block mt-2 js-request-quote"
+              class="btn btn-primary btn-sm btn-block btn-wrap mt-2 js-request-quote"
               data-id="{{ $p->id }}"
               data-name="{{ e($p->name) }}">
         <x-store.icon name="mail" class="w-4 h-4" />{{ __('messages.RequestQuotation') }}
       </button>
     @elseif(empty($hidePrices))
       <button type="button"
-              class="btn {{ $isPreorderActive ? 'btn-warning' : 'btn-primary' }} btn-sm btn-block mt-2 js-add-to-cart"
+              class="btn {{ $isPreorderActive ? 'btn-warning' : 'btn-accent-soft' }} btn-sm btn-block mt-2 js-add-to-cart"
               @if(!$isAvailable) disabled @endif
               data-out-of-stock="{{ $isAvailable ? '0' : '1' }}"
               data-is-preorder="{{ $isPreorderActive ? '1' : '0' }}"

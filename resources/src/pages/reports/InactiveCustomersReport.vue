@@ -9,6 +9,10 @@
     :export-params="filterParams"
     export-rows-key="report"
   >
+    <template #actions>
+      <!-- Multi-Currency: view amounts converted (display-only) -->
+      <ViewCurrencySelect />
+    </template>
     <template #filters>
       <a-select v-model:value="period" style="width: 200px" :options="periodOptions" @change="crud.reload()" />
     </template>
@@ -76,6 +80,7 @@ import {
 } from '@ant-design/icons-vue';
 import ReportPage from '../../components/ReportPage.vue';
 import ReportChart from '../../components/ReportChart.vue';
+import ViewCurrencySelect from '../../components/ViewCurrencySelect.vue';
 import { useCrudTable } from '../../composables/useCrudTable';
 import { useFormat } from '../../composables/useFormat';
 

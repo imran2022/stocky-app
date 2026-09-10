@@ -1,6 +1,11 @@
 <template>
   <div class="page">
-    <PageHeader :title="$t('User_report')" :breadcrumb="[$t('Reports'), $t('User_report')]" />
+    <PageHeader :title="$t('User_report')" :breadcrumb="[$t('Reports'), $t('User_report')]">
+      <template #actions>
+        <!-- Multi-Currency: view amounts converted (display-only) -->
+        <ViewCurrencySelect />
+      </template>
+    </PageHeader>
 
     <a-tabs v-model:activeKey="tab">
       <a-tab-pane key="sales" :tab="$t('Sales')">
@@ -138,6 +143,7 @@ import { useI18n } from 'vue-i18n';
 import PageHeader from '../../components/PageHeader.vue';
 import ReportTab from '../../components/ReportTab.vue';
 import StatusTag from '../../components/StatusTag.vue';
+import ViewCurrencySelect from '../../components/ViewCurrencySelect.vue';
 import { TAG_KEYS, documentTag } from '../../lib/statusTags';
 import { useFormat } from '../../composables/useFormat';
 

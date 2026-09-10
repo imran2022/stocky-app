@@ -93,7 +93,7 @@ class SyncService
             $parts[] = "Customer note:\n".$customerNote;
         }
 
-        $max = (int) env('WOO_PULL_ORDER_NOTES_MAX', 25);
+        $max = SyncOptions::int('pull_order_notes_max', 25);
         if ($max <= 0) {
             return implode("\n\n", $parts);
         }
@@ -314,7 +314,15 @@ class SyncService
      * - Idempotency via sales.woocommerce_order_id (unique).
      * - Skips orders whose line items cannot be mapped to local products.
      */
-    public function pullOrders(int $userId, ?int $warehouseId = null, ?callable $progress = null): array
+    /**
+     * Pull WooCommerce orders into Stocky sales.
+     *
+     * $modifiedAfterUtc (ISO-8601, UTC) narrows the scan to orders created or
+     * changed since that moment. Unattended runs need it: without a filter every
+     * run walks the store's entire order history, which is 1 API call per 50
+     * orders on every single pass. Leave it null for a full scan.
+     */
+    public function pullOrders(int $userId, ?int $warehouseId = null, ?callable $progress = null, ?string $modifiedAfterUtc = null): array
     {
         $created = 0;
         $updated = 0;
@@ -344,13 +352,20 @@ class SyncService
                     $progress(['stage' => 'fetching', 'page' => $page, 'processed' => $processed]);
                 }
 
-                $res = $this->client->getNoRetry('orders', [
+                $query = [
                     'page' => $page,
                     'per_page' => $perPage,
                     'orderby' => 'id',
                     'order' => 'asc',
                     // default: all statuses; Woo API returns recent
-                ], 20, 5);
+                ];
+                if (is_string($modifiedAfterUtc) && $modifiedAfterUtc !== '') {
+                    // dates_are_gmt makes Woo compare against UTC instead of site-local time.
+                    $query['modified_after'] = $modifiedAfterUtc;
+                    $query['dates_are_gmt'] = 'true';
+                }
+
+                $res = $this->client->getNoRetry('orders', $query, 20, 5);
 
                 if (!$res->successful()) {
                     $errors++;
@@ -1319,7 +1334,7 @@ class SyncService
         $ids = [];
         $page = 1;
         $per = 100;
-        $pageCap = (int) env('WOO_DELETE_VARIATIONS_PAGE_CAP', 50);
+        $pageCap = SyncOptions::int('delete_variations_page_cap', 50);
         $pageCap = max(1, min(500, $pageCap));
 
         try {
@@ -1456,7 +1471,7 @@ class SyncService
         $out = [];
         $page = 1;
         $per = 100;
-        $cap = (int) env('WOO_VARIATIONS_LIST_PAGE_CAP', 100);
+        $cap = SyncOptions::int('variations_list_page_cap', 100);
         $cap = max(1, min(500, $cap));
 
         while ($page <= $cap) {
@@ -1847,7 +1862,7 @@ class SyncService
                 }
 
                 // Hard cap to avoid infinite loops (configurable for large stores)
-                $cap = (int) env('WOO_REMOTE_INDEX_PAGE_CAP', 200);
+                $cap = SyncOptions::int('remote_index_page_cap', 200);
                 if ($cap > 0 && $page >= $cap) {
                     $this->log('products.push', 'warning', 'Remote index pagination capped', [
                         'page' => $page,
@@ -2085,10 +2100,34 @@ class SyncService
         return $this->pullProducts(false, $progress);
     }
 
+    /**
+     * Resolve a category id that is guaranteed to exist (FK-safe).
+     * Falls back to restoring a soft-deleted row, then creating a "General" category.
+     */
     private function ensureDefaultCategoryId(): int
     {
+        static $cached = null;
+        if ($cached !== null) {
+            return $cached;
+        }
+
         $id = (int) (\App\Models\Category::whereNull('deleted_at')->min('id') ?? 0);
-        return $id > 0 ? $id : 1;
+        if ($id <= 0) {
+            $trashed = \App\Models\Category::withTrashed()->orderBy('id')->first();
+            if ($trashed) {
+                $trashed->deleted_at = null;
+                $trashed->save();
+                $id = (int) $trashed->id;
+            } else {
+                $created = \App\Models\Category::create([
+                    'code' => 'GENERAL',
+                    'name' => 'General',
+                ]);
+                $id = (int) $created->id;
+            }
+        }
+
+        return $cached = $id;
     }
 
     /**
@@ -2272,14 +2311,38 @@ class SyncService
         return $brand;
     }
 
+    /**
+     * Resolve a unit id that is guaranteed to exist (FK-safe).
+     * Falls back to restoring a soft-deleted row, then creating a "Piece" unit.
+     */
     private function ensureDefaultUnitId(): int
     {
-        try {
-            $id = (int) (\App\Models\Unit::whereNull('deleted_at')->min('id') ?? 0);
-            return $id > 0 ? $id : 1;
-        } catch (\Throwable $e) {
-            return 1;
+        static $cached = null;
+        if ($cached !== null) {
+            return $cached;
         }
+
+        $id = (int) (\App\Models\Unit::whereNull('deleted_at')->min('id') ?? 0);
+        if ($id <= 0) {
+            // Unit model has no SoftDeletes trait, so query the column directly.
+            $trashed = \App\Models\Unit::whereNotNull('deleted_at')->orderBy('id')->first();
+            if ($trashed) {
+                $trashed->deleted_at = null;
+                $trashed->save();
+                $id = (int) $trashed->id;
+            } else {
+                $created = \App\Models\Unit::create([
+                    'name' => 'Piece',
+                    'ShortName' => 'pc',
+                    'base_unit' => null,
+                    'operator' => '*',
+                    'operator_value' => 1,
+                ]);
+                $id = (int) $created->id;
+            }
+        }
+
+        return $cached = $id;
     }
 
     private function ensureDefaultWarehouseId(): int
@@ -2471,7 +2534,7 @@ class SyncService
 
         $page = 1;
         $per = 100;
-        $cap = (int) env('WOO_PULL_VARIATIONS_PAGE_CAP', 50);
+        $cap = SyncOptions::int('pull_variations_page_cap', 50);
         $cap = max(1, min(500, $cap));
 
         while ($page <= $cap) {
@@ -3195,7 +3258,7 @@ class SyncService
         $errors  = (int) ($initial['errors'] ?? 0);
         $processed = (int) ($initial['processed'] ?? 0);
         $missingSku = (int) ($initial['missing_sku'] ?? 0);
-        $maxConsecutiveWooFailures = (int) env('WOO_MAX_CONSECUTIVE_FAILURES', 7);
+        $maxConsecutiveWooFailures = SyncOptions::int('max_consecutive_failures', 7);
         $maxConsecutiveWooFailures = max(1, min(100, $maxConsecutiveWooFailures));
         $consecutiveWooFailures = 0;
 
@@ -3844,7 +3907,7 @@ class SyncService
                                 if ($existingId <= 0) {
                                     $page2 = 1;
                                     $per2 = 100;
-                                    $cap2 = (int) env('WOO_SKU_SEARCH_PAGE_CAP', 5);
+                                    $cap2 = SyncOptions::int('sku_search_page_cap', 5);
                                     $cap2 = max(1, min(50, $cap2));
 
                                     while ($existingId <= 0 && $page2 <= $cap2) {
@@ -3890,7 +3953,7 @@ class SyncService
                                 if ($existingId <= 0) {
                                     $page3 = 1;
                                     $per3 = 100;
-                                    $cap3 = (int) env('WOO_SKU_SEARCH_PAGE_CAP', 5);
+                                    $cap3 = SyncOptions::int('sku_search_page_cap', 5);
                                     $cap3 = max(1, min(50, $cap3));
 
                                     while ($existingId <= 0 && $page3 <= $cap3) {
@@ -3962,7 +4025,7 @@ class SyncService
 
                                 // SKU is blocked in lookup table but we couldn't find the product (often TRASH or Woo lookup bug).
                                 // Default behavior: DO NOT create. Instead log and skip so user can restore or permanently delete in Woo.
-                                $allowAlt = (bool) env('WOO_ALLOW_ALT_SKU_ON_LOOKUP_CONFLICT', false);
+                                $allowAlt = SyncOptions::bool('allow_alt_sku_on_lookup_conflict');
                                 if (!$allowAlt) {
                                     $errors++;
                                     $emit(['stage' => 'sku_conflict_blocked', 'sku' => $sku]);
@@ -4220,7 +4283,7 @@ class SyncService
             // IMPORTANT: update existing Woo variations to match Stocky (price/sku/attributes/meta).
             // Previous behavior only created missing variations, leaving already-existing ones unchanged.
             try {
-                $batchTimeoutMs = (int) env('WOO_TIMEOUT_MS_BATCH', 30000);
+                $batchTimeoutMs = SyncOptions::int('http_timeout_ms', 30000);
                 $batchTimeoutSec = max(1, (int) ceil($batchTimeoutMs / 1000));
 
                 $updates = [];
@@ -4300,7 +4363,7 @@ class SyncService
             $maxAttempts = 5;
             $attempt = 0;
 
-            $batchTimeoutMs = (int) env('WOO_TIMEOUT_MS_BATCH', 30000);
+            $batchTimeoutMs = SyncOptions::int('http_timeout_ms', 30000);
             $batchTimeoutSec = max(1, (int) ceil($batchTimeoutMs / 1000));
 
             while (!empty($missing) && $attempt < $maxAttempts) {
@@ -4449,7 +4512,7 @@ class SyncService
 
                 $toDelete = array_values(array_unique(array_map('intval', $toDelete)));
                 if (!empty($toDelete)) {
-                    $batchTimeoutMs = (int) env('WOO_TIMEOUT_MS_BATCH', 30000);
+                    $batchTimeoutMs = SyncOptions::int('http_timeout_ms', 30000);
                     $batchTimeoutSec = max(1, (int) ceil($batchTimeoutMs / 1000));
 
                     if ($emit) {
@@ -5031,7 +5094,7 @@ class SyncService
                 return null;
             }
 
-            return asset('images/products/'.$imageName);
+            return product_image_url($imageName);
         } catch (\Throwable $e) {
             return null;
         }
@@ -5079,9 +5142,9 @@ class SyncService
             } catch (\Throwable $e) {
             }
 
-            $searchTimeout = (int) env('WOO_WP_MEDIA_SEARCH_TIMEOUT', 10);
+            $searchTimeout = SyncOptions::int('media_search_timeout', 10);
             // Shared hosting + large images can be slow: use a higher default, but keep a hard cap.
-            $uploadTimeout = (int) env('WOO_WP_MEDIA_UPLOAD_TIMEOUT', 60);
+            $uploadTimeout = SyncOptions::int('media_upload_timeout', 60);
             $searchTimeout = max(1, min(60, $searchTimeout));
             $uploadTimeout = max(1, min(300, $uploadTimeout));
 
@@ -5130,7 +5193,7 @@ class SyncService
                 $trySearch = function (string $term) use ($baseUrl, $username, $appPass, $searchTimeout, $matches): ?array {
                     $mediaList = Http::timeout($searchTimeout)
                         ->connectTimeout(5)
-                        ->retry((int) env('WOO_WP_MEDIA_RETRIES', 1), (int) env('WOO_WP_MEDIA_RETRY_SLEEP_MS', 250))
+                        ->retry(SyncOptions::int('media_retries', 1), SyncOptions::int('media_retry_sleep_ms', 250))
                         ->withBasicAuth($username, $appPass)
                         ->get($baseUrl.'/wp-json/wp/v2/media', [
                             'search' => $term,
@@ -5161,7 +5224,7 @@ class SyncService
                 $trySlug = function (string $slug) use ($baseUrl, $username, $appPass, $searchTimeout, $matches): ?array {
                     $mediaList = Http::timeout($searchTimeout)
                         ->connectTimeout(5)
-                        ->retry((int) env('WOO_WP_MEDIA_RETRIES', 1), (int) env('WOO_WP_MEDIA_RETRY_SLEEP_MS', 250))
+                        ->retry(SyncOptions::int('media_retries', 1), SyncOptions::int('media_retry_sleep_ms', 250))
                         ->withBasicAuth($username, $appPass)
                         ->get($baseUrl.'/wp-json/wp/v2/media', [
                             'slug' => $slug,
@@ -5225,7 +5288,7 @@ class SyncService
                 }
                 $upload = Http::timeout($uploadTimeout)
                     ->connectTimeout(5)
-                    ->retry((int) env('WOO_WP_MEDIA_RETRIES', 1), (int) env('WOO_WP_MEDIA_RETRY_SLEEP_MS', 250))
+                    ->retry(SyncOptions::int('media_retries', 1), SyncOptions::int('media_retry_sleep_ms', 250))
                     ->withBasicAuth($username, $appPass)
                     ->attach('file', fopen($abs, 'r'), $imageName)
                     ->withHeaders([
@@ -5608,11 +5671,11 @@ class SyncService
                 return null;
             }
 
-            $uploadTimeout = max(1, min(300, (int) env('WOO_WP_MEDIA_UPLOAD_TIMEOUT', 60)));
+            $uploadTimeout = max(1, min(300, SyncOptions::int('media_upload_timeout', 60)));
 
             $upload = Http::timeout($uploadTimeout)
                 ->connectTimeout(5)
-                ->retry((int) env('WOO_WP_MEDIA_RETRIES', 1), (int) env('WOO_WP_MEDIA_RETRY_SLEEP_MS', 250))
+                ->retry(SyncOptions::int('media_retries', 1), SyncOptions::int('media_retry_sleep_ms', 250))
                 ->withBasicAuth($username, $appPass)
                 ->attach('file', fopen($abs, 'r'), $imageName)
                 ->withHeaders([

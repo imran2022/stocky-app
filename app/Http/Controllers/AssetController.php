@@ -49,11 +49,13 @@ class AssetController extends BaseController
                 return $q->when($request->filled('search'), function ($q) use ($request) {
                     $s = $request->search;
 
-                    return $q->where('name', 'LIKE', "%{$s}%")
-                        ->orWhere('tag', 'LIKE', "%{$s}%")
+                    // Qualified: the warehouses and asset_categories joins both
+                    // carry `name`, and an unqualified column makes MySQL reject the query.
+                    return $q->where('assets.name', 'LIKE', "%{$s}%")
+                        ->orWhere('assets.tag', 'LIKE', "%{$s}%")
                         ->orWhere('asset_categories.name', 'LIKE', "%{$s}%")
-                        ->orWhere('serial_number', 'LIKE', "%{$s}%")
-                        ->orWhere('status', 'LIKE', "%{$s}%")
+                        ->orWhere('assets.serial_number', 'LIKE', "%{$s}%")
+                        ->orWhere('assets.status', 'LIKE', "%{$s}%")
                         ->orWhere('warehouses.name', 'LIKE', "%{$s}%");
                 });
             });

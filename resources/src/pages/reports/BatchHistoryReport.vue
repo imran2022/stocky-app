@@ -5,6 +5,8 @@
       :breadcrumb="[$t('Reports'), tf('Batch_History', 'Batch History')]"
     >
       <template #actions>
+        <!-- Multi-Currency: view amounts converted (display-only) -->
+        <ViewCurrencySelect />
         <a-button @click="$router.push('/reports/batch-register')">
           <template #icon><ArrowLeftOutlined /></template>
           {{ tf('back', 'Back') }}
@@ -183,6 +185,7 @@ import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { ArrowLeftOutlined, PrinterOutlined } from '@ant-design/icons-vue';
 import PageHeader from '../../components/PageHeader.vue';
+import ViewCurrencySelect from '../../components/ViewCurrencySelect.vue';
 import { useFormat } from '../../composables/useFormat';
 import { t as tf } from '../../i18n';
 import { printRows } from '../../lib/exporters';

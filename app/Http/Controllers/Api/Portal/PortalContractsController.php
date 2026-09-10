@@ -22,13 +22,18 @@ class PortalContractsController extends Controller
         $perPage = (int) $request->input('limit', 10);
         $page = max(1, (int) $request->input('page', 1));
         $search = $request->input('search');
+        $status = $request->input('status');
+        $dateFrom = $request->input('date_from');
+        $dateTo = $request->input('date_to');
 
-        $q = Contract::query()
+        $base = Contract::query()
             ->whereNull('deleted_at')
             ->where('client_id', $portalClient->client_id)
             ->where(function ($qr) {
                 $qr->whereNull('hide_from_customer')->orWhere('hide_from_customer', false);
-            })
+            });
+
+        $q = (clone $base)
             ->when($search, function ($query) use ($search) {
                 $query->where(function ($qr) use ($search) {
                     $qr->where('contract_number', 'LIKE', "%{$search}%")
@@ -37,7 +42,20 @@ class PortalContractsController extends Controller
                         ->orWhere('status', 'LIKE', "%{$search}%");
                 });
             })
-            ->orderByDesc('id');
+            ->when($status, fn ($query) => $query->where('status', $status))
+            ->when($dateFrom, fn ($query) => $query->whereDate('start_date', '>=', $dateFrom))
+            ->when($dateTo, fn ($query) => $query->whereDate('start_date', '<=', $dateTo));
+
+        $q = $this->applyPortalSort($q, $request, [
+            'start_date' => 'start_date',
+            'end_date' => 'end_date',
+            'contract_number' => 'contract_number',
+            'subject' => 'subject',
+            'value' => 'value',
+            'status' => 'status',
+        ], 'start_date');
+
+        $statuses = (clone $base)->whereNotNull('status')->distinct()->orderBy('status')->pluck('status')->values();
 
         $totalRows = (clone $q)->count();
         $rows = $perPage > 0
@@ -61,7 +79,19 @@ class PortalContractsController extends Controller
         return response()->json([
             'totalRows' => $totalRows,
             'contracts' => $data,
+            'statuses' => $statuses,
         ]);
+    }
+
+    /**
+     * Whitelisted sort for the portal list endpoints: ?sort=<column>&dir=asc|desc.
+     */
+    private function applyPortalSort($query, Request $request, array $allowed, string $default)
+    {
+        $sort = (string) $request->input('sort', '');
+        $dir = strtolower((string) $request->input('dir', 'desc')) === 'asc' ? 'asc' : 'desc';
+        $column = array_key_exists($sort, $allowed) ? $allowed[$sort] : $allowed[$default];
+        return $query->orderBy($column, $dir)->orderByDesc('id');
     }
 
     /**
@@ -107,7 +137,7 @@ class PortalContractsController extends Controller
 
         $path = Storage::disk('public')->path($att->file_path);
         if (! file_exists($path)) {
-            return response()->json(['message' => 'File not found'], 404);
+            return response()->json(['message' => __('portal.file_not_found')], 404);
         }
         return response()->download($path, $att->file_name);
     }
@@ -126,7 +156,7 @@ class PortalContractsController extends Controller
     private function assertPortalActive($portalClient): void
     {
         if ((int) $portalClient->status !== 1) {
-            abort(403, 'Portal access is disabled');
+            abort(403, __('portal.portal_disabled'));
         }
     }
 }

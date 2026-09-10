@@ -3,74 +3,27 @@
 namespace App\Http\Controllers;
 
 use App\Models\SyncJob;
+use App\Services\WooCommerce\InlineQueueRunner;
+use App\Services\WooCommerce\SyncOptions;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Artisan;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 
 class SyncJobController extends BaseController
 {
-    private const WOO_PRODUCTS_QUEUE_PREFIX = 'woocommerce-sync-';
-
     /**
      * Manual "no-cron" mode:
-     * When the UI polls sync status and the job is queued, run ONE queued batch inline.
-     * This makes "Sync now" work on shared hosting without a persistent queue worker.
+     * When the UI polls sync status, work this sync's queued batches inline for a
+     * short budget. This makes "Sync now" finish on shared hosting without a
+     * persistent queue worker, as long as the page stays open.
      */
-    private function tickProductsQueueOnce(SyncJob $job): void
+    private function drainProductsQueue(SyncJob $job): void
     {
-        try {
-            // IMPORTANT: in "no-cron" mode we run a queue job inside this HTTP request.
-            // If PHP's max_execution_time is short, the request can be killed mid-batch and appear "stuck".
-            $tickLimit = (int) env('WOO_POLL_TICK_MAX_SECONDS', 300);
-            $tickLimit = max(30, min(1800, $tickLimit));
-            @ini_set('max_execution_time', (string) $tickLimit);
-            if (function_exists('set_time_limit')) {
-                @set_time_limit($tickLimit);
-            }
+        $jobId = (int) $job->id;
 
-            if (!Schema::hasTable('jobs')) {
-                return;
-            }
+        InlineQueueRunner::drain(function () use ($jobId) {
+            $current = SyncJob::query()->find($jobId);
 
-            $queue = self::WOO_PRODUCTS_QUEUE_PREFIX.(int) $job->id;
-            $hasQueued = DB::table('jobs')->where('queue', $queue)->exists();
-            if (!$hasQueued) {
-                return;
-            }
-
-            // Prevent concurrent ticks (multiple polling requests)
-            $lockKey = 'woo_tick_queue:'.$queue;
-            $lock = null;
-            try {
-                $lock = Cache::store('file')->lock($lockKey, 120);
-                if (!$lock->get()) {
-                    return;
-                }
-            } catch (\Throwable $e) {
-                $lock = null;
-            }
-
-            try {
-                Artisan::call('queue:work', [
-                    'connection' => 'database',
-                    '--once' => true,
-                    '--queue' => $queue,
-                    '--sleep' => 1,
-                    '--tries' => 1,
-                    '--timeout' => (int) env('QUEUE_WORKER_TIMEOUT', 1200),
-                ]);
-            } finally {
-                try {
-                    if ($lock) {
-                        $lock->release();
-                    }
-                } catch (\Throwable $e) {
-                }
-            }
-        } catch (\Throwable $e) {
-        }
+            return ! $current || ! in_array((string) $current->status, ['pending', 'running', 'cancelling'], true);
+        });
     }
 
     /**
@@ -114,7 +67,7 @@ class SyncJobController extends BaseController
         try {
             $stage = (string) ($job->stage ?? '');
             if ($job->status === 'running' && $stage !== '' && str_starts_with($stage, 'queued')) {
-                $this->tickProductsQueueOnce($job);
+                $this->drainProductsQueue($job);
                 // Reload after tick (status/stage/heartbeat may have changed)
                 $job = SyncJob::query()->findOrFail($id);
             }
@@ -124,7 +77,7 @@ class SyncJobController extends BaseController
         // Stuck detection: if worker heartbeat hasn't moved, mark as failed so UI doesn't hang forever.
         $stuck = false;
         try {
-            $stuckAfterSeconds = (int) env('WOO_SYNC_STUCK_SECONDS', 600);
+            $stuckAfterSeconds = SyncOptions::int('stuck_seconds');
             $stuckAfterSeconds = max(60, min(3600, $stuckAfterSeconds));
 
             $stage = (string) ($job->stage ?? '');
@@ -132,14 +85,14 @@ class SyncJobController extends BaseController
 
             // Between batches, the job may be queued waiting for the next worker tick.
             if ($stage !== '' && str_starts_with($stage, 'queued')) {
-                $queueWait = (int) env('WOO_SYNC_QUEUE_WAIT_SECONDS', 1800);
+                $queueWait = SyncOptions::int('queue_wait_seconds');
                 $queueWait = max(120, min(21600, $queueWait));
                 $effectiveStuckSeconds = max($effectiveStuckSeconds, $queueWait);
             }
 
             // Media uploads can legitimately take longer on shared hosting.
             if ($stage === 'media') {
-                $uploadTimeout = (int) env('WOO_WP_MEDIA_UPLOAD_TIMEOUT', 60);
+                $uploadTimeout = SyncOptions::int('media_upload_timeout', 60);
                 $uploadTimeout = max(1, min(300, $uploadTimeout));
                 $effectiveStuckSeconds = max($effectiveStuckSeconds, $uploadTimeout + 60);
             }

@@ -12,6 +12,9 @@ use App\Models\ProductVariant;
 use App\Models\SyncJob;
 use App\Models\WooCommerceLog;
 use App\Models\WooCommerceSetting;
+use App\Services\WooCommerce\InlineQueueRunner;
+use App\Services\WooCommerce\SyncOptions;
+use App\Services\WooCommerce\SyncQueue;
 use App\Services\WooCommerce\SyncService;
 use App\Services\WooCommerce\Client as WooCommerceClient;
 use Illuminate\Http\Request;
@@ -28,8 +31,6 @@ use App\Models\Sale;
 class WooCommerceSyncController extends BaseController
 {
     private const ACTIVE_PRODUCTS_SYNC_TOKENS_KEY = 'woo_products_sync_active_tokens';
-    private const WOO_PRODUCTS_QUEUE_PREFIX = 'woocommerce-sync-';
-    private const WOO_STOCK_QUEUE_PREFIX = 'woocommerce-stock-';
 
     private function progressCache()
     {
@@ -86,7 +87,10 @@ class WooCommerceSyncController extends BaseController
             if (!Schema::hasTable('jobs')) {
                 return;
             }
-            $q = DB::table('jobs')->where('payload', 'like', '%WooCommerceProductsSyncJob%');
+            $q = DB::table('jobs')->where(function ($w) {
+                $w->where('payload', 'like', '%WooCommerceProductsSyncJob%')
+                    ->orWhere('payload', 'like', '%WooCommerceProductsPullJob%');
+            });
             if (is_string($token) && $token !== '') {
                 $q->where('payload', 'like', '%'.$token.'%');
             }
@@ -161,7 +165,13 @@ class WooCommerceSyncController extends BaseController
     {
         $settings = WooCommerceSetting::first();
 
-        return response()->json(['settings' => $settings]);
+        return response()->json([
+            'settings' => $settings,
+            // Effective tuning values (saved value, else env, else default) plus the
+            // field descriptors the settings screen renders its form from.
+            'sync_options' => SyncOptions::all(),
+            'sync_options_meta' => SyncOptions::meta(),
+        ]);
     }
 
     public function saveSettings(Request $request)
@@ -169,14 +179,18 @@ class WooCommerceSyncController extends BaseController
 
         $this->authorizeForUser($request->user('api'), 'view', WooCommerceSetting::class);
 
-        $data = $request->validate([
+        $data = $request->validate(array_merge([
             'store_url' => 'required|string',
             'consumer_key' => 'required|string',
             'consumer_secret' => 'required|string',
             'wp_username' => 'nullable|string',
             'wp_app_password' => 'nullable|string',
             'sync_interval' => 'nullable|string',
-        ]);
+        ], SyncOptions::validationRules()));
+
+        // Handled separately: it is a JSON blob that needs clamping, and it must
+        // survive a request that only posts credentials.
+        unset($data['sync_options']);
 
         // Detect store change before saving
         $existing = WooCommerceSetting::first();
@@ -192,8 +206,12 @@ class WooCommerceSyncController extends BaseController
             $storeChanged = ($prevUrl !== $newUrl) || ($prevKey !== $newKey) || ($prevSecret !== $newSecret);
         }
 
+        $syncOptions = $request->has('sync_options')
+            ? SyncOptions::sanitize((array) $request->input('sync_options'))
+            : null;
+
         $settings = null;
-        DB::transaction(function () use ($data, &$settings) {
+        DB::transaction(function () use ($data, $syncOptions, &$settings) {
             $settings = WooCommerceSetting::first();
             if (! $settings) {
                 $settings = new WooCommerceSetting;
@@ -201,8 +219,13 @@ class WooCommerceSyncController extends BaseController
             foreach ($data as $k => $v) {
                 $settings->$k = $v;
             }
+            if ($syncOptions !== null) {
+                $settings->sync_options = $syncOptions;
+            }
             $settings->save();
         }, 3);
+
+        SyncOptions::flush();
 
         // If the Woo store has changed, clear previous product/category/customer mappings so they can be re-synced to the new store
         if ($storeChanged && $settings) {
@@ -228,7 +251,11 @@ class WooCommerceSyncController extends BaseController
             }, 3);
         }
 
-        return response()->json(['success' => true, 'settings' => $settings]);
+        return response()->json([
+            'success' => true,
+            'settings' => $settings,
+            'sync_options' => SyncOptions::all(),
+        ]);
     }
 
     public function connectStore(Request $request)
@@ -331,15 +358,14 @@ class WooCommerceSyncController extends BaseController
 
             $this->addActiveProductsSyncToken($token);
 
-            $queue = self::WOO_PRODUCTS_QUEUE_PREFIX.(int) $syncJob->id;
             if (method_exists(WooCommerceProductsPullJob::class, 'dispatchAfterResponse')) {
                 WooCommerceProductsPullJob::dispatchAfterResponse($token, $onlyUnsynced, (int) $syncJob->id)
-                    ->onConnection('database')
-                    ->onQueue($queue);
+                    ->onConnection(SyncQueue::CONNECTION)
+                    ->onQueue(SyncQueue::NAME);
             } else {
                 WooCommerceProductsPullJob::dispatch($token, $onlyUnsynced, (int) $syncJob->id)
-                    ->onConnection('database')
-                    ->onQueue($queue);
+                    ->onConnection(SyncQueue::CONNECTION)
+                    ->onQueue(SyncQueue::NAME);
             }
 
             return response()->json(['ok' => true, 'token' => $token, 'sync_job_id' => (int) $syncJob->id]);
@@ -393,15 +419,14 @@ class WooCommerceSyncController extends BaseController
 
         $this->addActiveProductsSyncToken($token);
 
-        $queue = self::WOO_PRODUCTS_QUEUE_PREFIX.(int) $syncJob->id;
         if (method_exists(WooCommerceProductsSyncJob::class, 'dispatchAfterResponse')) {
             WooCommerceProductsSyncJob::dispatchAfterResponse($token, $onlyUnsynced, (int) $syncJob->id)
-                ->onConnection('database')
-                ->onQueue($queue);
+                ->onConnection(SyncQueue::CONNECTION)
+                ->onQueue(SyncQueue::NAME);
         } else {
             WooCommerceProductsSyncJob::dispatch($token, $onlyUnsynced, (int) $syncJob->id)
-                ->onConnection('database')
-                ->onQueue($queue);
+                ->onConnection(SyncQueue::CONNECTION)
+                ->onQueue(SyncQueue::NAME);
         }
 
         return response()->json(['ok' => true, 'token' => $token, 'sync_job_id' => (int) $syncJob->id]);
@@ -409,68 +434,22 @@ class WooCommerceSyncController extends BaseController
 
     /**
      * Manual "no-cron" mode:
-     * When the UI polls progress and the job is queued, run ONE queued batch inline.
-     * This makes "Sync now" work on shared hosting without a persistent queue worker.
+     * When the UI polls progress, work this sync's queued batches inline for a short
+     * budget. This makes "Sync now" finish on shared hosting without a persistent
+     * queue worker, as long as the page stays open.
      */
-    private function tickProductsQueueOnce(array $state): void
+    private function drainProductsQueue(array $state, string $token): void
     {
-        try {
-            // IMPORTANT: in "no-cron" mode we run a queue job inside this HTTP request.
-            // If PHP's max_execution_time is short, the request can be killed mid-batch and appear "stuck".
-            $tickLimit = (int) env('WOO_POLL_TICK_MAX_SECONDS', 300);
-            $tickLimit = max(30, min(1800, $tickLimit));
-            @ini_set('max_execution_time', (string) $tickLimit);
-            if (function_exists('set_time_limit')) {
-                @set_time_limit($tickLimit);
-            }
-
-            if (!Schema::hasTable('jobs')) {
-                return;
-            }
-
-            $syncJobId = (int) ($state['sync_job_id'] ?? 0);
-            if ($syncJobId <= 0) {
-                return;
-            }
-
-            $queue = self::WOO_PRODUCTS_QUEUE_PREFIX.$syncJobId;
-            $hasQueued = DB::table('jobs')->where('queue', $queue)->exists();
-            if (!$hasQueued) {
-                return;
-            }
-
-            // Prevent concurrent ticks (multiple polling requests)
-            $lockKey = 'woo_tick_queue:'.$queue;
-            $lock = null;
-            try {
-                $lock = Cache::store('file')->lock($lockKey, 120);
-                if (!$lock->get()) {
-                    return;
-                }
-            } catch (\Throwable $e) {
-                $lock = null;
-            }
-
-            try {
-                // Run a single job from this sync's dedicated queue.
-                Artisan::call('queue:work', [
-                    'connection' => 'database',
-                    '--once' => true,
-                    '--queue' => $queue,
-                    '--sleep' => 1,
-                    '--tries' => 1,
-                    '--timeout' => (int) env('QUEUE_WORKER_TIMEOUT', 1200),
-                ]);
-            } finally {
-                try {
-                    if ($lock) {
-                        $lock->release();
-                    }
-                } catch (\Throwable $e) {
-                }
-            }
-        } catch (\Throwable $e) {
+        // No DB sync job means nothing was ever enqueued for this token.
+        if ((int) ($state['sync_job_id'] ?? 0) <= 0) {
+            return;
         }
+
+        InlineQueueRunner::drain(function () use ($token) {
+            $current = $this->progressCache()->get($token, null);
+
+            return ! is_array($current) || ! empty($current['finished']);
+        });
     }
 
     public function syncStock(Request $request)
@@ -488,7 +467,7 @@ class WooCommerceSyncController extends BaseController
         // Start queued job and return a progress token
         $total = (int) Product::whereNull('deleted_at')->whereNotNull('woocommerce_id')->count();
         $token = 'woo_stock_sync_'.uniqid();
-        $queue = self::WOO_STOCK_QUEUE_PREFIX.$token;
+        $queue = SyncQueue::NAME;
         $this->progressCache()->put($token, [
             'total_products' => $total,
             'synced_products' => 0,
@@ -504,7 +483,7 @@ class WooCommerceSyncController extends BaseController
         ], 3600);
 
         WooCommerceStockSyncJob::dispatch($token)
-            ->onConnection('database')
+            ->onConnection(SyncQueue::CONNECTION)
             ->onQueue($queue);
 
         return response()->json(['ok' => true, 'token' => $token]);
@@ -538,11 +517,14 @@ class WooCommerceSyncController extends BaseController
         }
         $this->progressCache()->put($token, $state, 3600);
 
-        // Best-effort: delete queued stock jobs for this token/queue
+        // Best-effort: delete queued stock jobs for THIS token only. The queue is
+        // shared by every Woo sync, so deleting by queue name would kill unrelated runs.
         try {
             if (Schema::hasTable('jobs')) {
-                $queue = (string) ($state['queue'] ?? (self::WOO_STOCK_QUEUE_PREFIX.$token));
-                DB::table('jobs')->where('queue', $queue)->delete();
+                DB::table('jobs')
+                    ->where('payload', 'like', '%WooCommerceStockSyncJob%')
+                    ->where('payload', 'like', '%'.$token.'%')
+                    ->delete();
             }
         } catch (\Throwable $e) {
         }
@@ -550,60 +532,13 @@ class WooCommerceSyncController extends BaseController
         return response()->json(['ok' => true]);
     }
 
-    private function tickStockQueueOnce(array $state, string $token): void
+    private function drainStockQueue(string $token): void
     {
-        try {
-            $tickLimit = (int) env('WOO_POLL_TICK_MAX_SECONDS', 300);
-            $tickLimit = max(30, min(1800, $tickLimit));
-            @ini_set('max_execution_time', (string) $tickLimit);
-            if (function_exists('set_time_limit')) {
-                @set_time_limit($tickLimit);
-            }
+        InlineQueueRunner::drain(function () use ($token) {
+            $current = $this->progressCache()->get($token, null);
 
-            if (!Schema::hasTable('jobs')) {
-                return;
-            }
-
-            $queue = (string) ($state['queue'] ?? '');
-            if ($queue === '') {
-                $queue = self::WOO_STOCK_QUEUE_PREFIX.$token;
-            }
-
-            $hasQueued = DB::table('jobs')->where('queue', $queue)->exists();
-            if (!$hasQueued) {
-                return;
-            }
-
-            $lockKey = 'woo_tick_queue:'.$queue;
-            $lock = null;
-            try {
-                $lock = Cache::store('file')->lock($lockKey, 120);
-                if (!$lock->get()) {
-                    return;
-                }
-            } catch (\Throwable $e) {
-                $lock = null;
-            }
-
-            try {
-                Artisan::call('queue:work', [
-                    'connection' => 'database',
-                    '--once' => true,
-                    '--queue' => $queue,
-                    '--sleep' => 1,
-                    '--tries' => 1,
-                    '--timeout' => (int) env('QUEUE_WORKER_TIMEOUT', 1200),
-                ]);
-            } finally {
-                try {
-                    if ($lock) {
-                        $lock->release();
-                    }
-                } catch (\Throwable $e) {
-                }
-            }
-        } catch (\Throwable $e) {
-        }
+            return ! is_array($current) || ! empty($current['finished']);
+        });
     }
 
     /**
@@ -618,11 +553,11 @@ class WooCommerceSyncController extends BaseController
         }
         $state = $this->progressCache()->get($token, null);
 
-        // Manual "no-cron" mode: if queued, run one batch inline.
+        // Manual "no-cron" mode: if queued, work batches inline for a short budget.
         if (is_array($state) && empty($state['finished'])) {
             $stage = (string) ($state['stage'] ?? '');
             if ($stage !== '' && str_starts_with($stage, 'queued')) {
-                $this->tickStockQueueOnce($state, $token);
+                $this->drainStockQueue($token);
                 $state = $this->progressCache()->get($token, $state);
             }
         }
@@ -630,19 +565,19 @@ class WooCommerceSyncController extends BaseController
         // Stuck detection (same policy as products)
         if (is_array($state) && empty($state['finished'])) {
             try {
-                $stuckAfterSeconds = (int) env('WOO_SYNC_STUCK_SECONDS', 600);
+                $stuckAfterSeconds = SyncOptions::int('stuck_seconds');
                 $stuckAfterSeconds = max(60, min(3600, $stuckAfterSeconds));
 
                 $stage = (string) ($state['stage'] ?? '');
                 $effectiveStuckSeconds = $stuckAfterSeconds;
 
                 if ($stage !== '' && str_starts_with($stage, 'queued')) {
-                    $queueWait = (int) env('WOO_SYNC_QUEUE_WAIT_SECONDS', 1800);
+                    $queueWait = SyncOptions::int('queue_wait_seconds');
                     $queueWait = max(120, min(21600, $queueWait));
                     $effectiveStuckSeconds = max($effectiveStuckSeconds, $queueWait);
                 }
                 if ($stage === 'media') {
-                    $uploadTimeout = (int) env('WOO_WP_MEDIA_UPLOAD_TIMEOUT', 60);
+                    $uploadTimeout = SyncOptions::int('media_upload_timeout', 60);
                     $uploadTimeout = max(1, min(300, $uploadTimeout));
                     $effectiveStuckSeconds = max($effectiveStuckSeconds, $uploadTimeout + 60);
                 }
@@ -677,12 +612,12 @@ class WooCommerceSyncController extends BaseController
         }
         $state = $this->progressCache()->get($token, null);
 
-        // If the sync is queued and no worker is running, "tick" one batch inline.
+        // If the sync is queued and no worker is running, work batches inline.
         // This makes manual "Sync now" work without cron/supervisor (user must keep the page open).
         if (is_array($state) && empty($state['finished'])) {
             $stage = (string) ($state['stage'] ?? '');
             if ($stage !== '' && str_starts_with($stage, 'queued')) {
-                $this->tickProductsQueueOnce($state);
+                $this->drainProductsQueue($state, $token);
                 // Reload state after tick
                 $state = $this->progressCache()->get($token, $state);
             }
@@ -691,19 +626,19 @@ class WooCommerceSyncController extends BaseController
         // Stuck detection (production safety): if worker heartbeat hasn't moved, fail fast.
         if (is_array($state) && empty($state['finished'])) {
             try {
-                $stuckAfterSeconds = (int) env('WOO_SYNC_STUCK_SECONDS', 600);
+                $stuckAfterSeconds = SyncOptions::int('stuck_seconds');
                 $stuckAfterSeconds = max(60, min(3600, $stuckAfterSeconds));
 
                 $stage = (string) ($state['stage'] ?? '');
                 $effectiveStuckSeconds = $stuckAfterSeconds;
 
                 if ($stage !== '' && str_starts_with($stage, 'queued')) {
-                    $queueWait = (int) env('WOO_SYNC_QUEUE_WAIT_SECONDS', 1800);
+                    $queueWait = SyncOptions::int('queue_wait_seconds');
                     $queueWait = max(120, min(21600, $queueWait));
                     $effectiveStuckSeconds = max($effectiveStuckSeconds, $queueWait);
                 }
                 if ($stage === 'media') {
-                    $uploadTimeout = (int) env('WOO_WP_MEDIA_UPLOAD_TIMEOUT', 60);
+                    $uploadTimeout = SyncOptions::int('media_upload_timeout', 60);
                     $uploadTimeout = max(1, min(300, $uploadTimeout));
                     $effectiveStuckSeconds = max($effectiveStuckSeconds, $uploadTimeout + 60);
                 }
@@ -1105,7 +1040,7 @@ class WooCommerceSyncController extends BaseController
 
                 $page = 1;
                 $per = 100;
-                $cap = (int) env('WOO_PULL_STATS_PAGE_CAP', 200);
+                $cap = SyncOptions::int('pull_stats_page_cap', 200);
                 $cap = max(1, min(1000, $cap));
 
                 $parents = 0;
@@ -1861,7 +1796,7 @@ class WooCommerceSyncController extends BaseController
 
         $page = 1;
         $per = 100;
-        $cap = (int) env('WOO_AUTOLINK_PAGE_CAP', 200);
+        $cap = SyncOptions::int('autolink_page_cap', 200);
         $cap = max(1, min(2000, $cap));
 
         while ($page <= $cap) {

@@ -17,7 +17,10 @@ class StorePopupsController extends Controller
         $popups = StorePopup::orderBy('sort_order')->orderByDesc('id')->get()
             ->map(fn (StorePopup $p) => $this->present($p));
 
-        return response()->json(['popups' => $popups]);
+        return response()->json([
+            'popups' => $popups,
+            'locales' => store_locales(),
+        ]);
     }
 
     public function store(Request $request)
@@ -65,11 +68,17 @@ class StorePopupsController extends Controller
             $request->merge(['enabled' => (int) filter_var($request->input('enabled'), FILTER_VALIDATE_BOOLEAN)]);
         }
 
-        return $request->validate([
+        $data = $request->validate([
             'title' => ['nullable', 'string', 'max:150'],
+            'title_translations' => ['nullable', 'array'],
+            'title_translations.*' => ['nullable', 'string', 'max:150'],
             'message' => ['nullable', 'string', 'max:2000'],
+            'message_translations' => ['nullable', 'array'],
+            'message_translations.*' => ['nullable', 'string', 'max:2000'],
             'type' => ['required', Rule::in(StorePopup::TYPES)],
             'cta_label' => ['nullable', 'string', 'max:80'],
+            'cta_label_translations' => ['nullable', 'array'],
+            'cta_label_translations.*' => ['nullable', 'string', 'max:80'],
             'cta_url' => ['nullable', 'string', 'max:255'],
             'enabled' => ['nullable', 'in:0,1'],
             'trigger' => ['required', Rule::in(StorePopup::TRIGGERS)],
@@ -79,6 +88,29 @@ class StorePopupsController extends Controller
             'ends_at' => ['nullable', 'date', 'after_or_equal:starts_at'],
             'sort_order' => ['nullable', 'integer', 'min:0'],
         ]);
+
+        // Keep only locales the storefront can render, and drop blanks so the
+        // model falls back to the plain column for those languages. A field the
+        // request never mentioned is left out entirely, so partial submits
+        // (e.g. the list's enable/disable toggle) don't wipe existing copy.
+        foreach (StorePopup::TRANSLATABLE as $field) {
+            $key = $field.'_translations';
+            if (! $request->has($key)) {
+                unset($data[$key]);
+
+                continue;
+            }
+
+            $clean = [];
+            foreach ((array) $data[$key] as $locale => $value) {
+                if (isset(store_locales()[$locale]) && trim((string) $value) !== '') {
+                    $clean[$locale] = trim((string) $value);
+                }
+            }
+            $data[$key] = $clean ?: null;
+        }
+
+        return $data;
     }
 
     /**
@@ -110,7 +142,10 @@ class StorePopupsController extends Controller
         return [
             'id' => $p->id,
             'title' => $p->title,
+            'title_translations' => (object) ($p->title_translations ?? []),
             'message' => $p->message,
+            'message_translations' => (object) ($p->message_translations ?? []),
+            'cta_label_translations' => (object) ($p->cta_label_translations ?? []),
             'type' => $p->type,
             'image' => $p->image,
             'image_url' => $p->image ? asset($p->image) : null,

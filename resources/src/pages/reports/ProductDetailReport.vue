@@ -1,6 +1,11 @@
 <template>
   <div class="page">
-    <PageHeader :title="$t('product_report')" :breadcrumb="[$t('Reports'), $t('product_report')]" />
+    <PageHeader :title="$t('product_report')" :breadcrumb="[$t('Reports'), $t('product_report')]">
+      <template #actions>
+        <!-- Multi-Currency: view amounts converted (display-only) -->
+        <ViewCurrencySelect />
+      </template>
+    </PageHeader>
 
     <a-card size="small" style="margin-bottom: 16px">
       <a-space wrap :size="12">
@@ -108,6 +113,7 @@ import { useFormat } from '../../composables/useFormat';
 import { exportExcel, exportPdf, printRows } from '../../lib/exporters';
 import http from '../../lib/http';
 import DateRangePicker from '../../components/DateRangePicker.vue';
+import ViewCurrencySelect from '../../components/ViewCurrencySelect.vue';
 
 // Imported rather than relying on the global registration for these two
 // nested sub-components.

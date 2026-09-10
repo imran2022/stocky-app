@@ -2,6 +2,17 @@
   <div class="page">
     <PageHeader :title="$t('E_Wallet_Settings')" :breadcrumb="[$t('E_Wallet'), $t('E_Wallet_Settings')]" />
 
+    <a-alert
+      v-if="!isLoading && !walletMethodExists"
+      type="warning" show-icon style="margin-bottom: 16px"
+      :message="$t('Wallet_Payment_Method_Missing')"
+    >
+      <template #description>
+        {{ $t('Wallet_Payment_Method_Missing_Help') }}
+        <router-link to="/settings/payment-methods">{{ $t('Payment_Methods') }}</router-link>
+      </template>
+    </a-alert>
+
     <div v-if="isLoading" style="display: flex; justify-content: center; padding: 96px 0">
       <a-spin size="large" />
     </div>
@@ -91,6 +102,9 @@ const { t } = useI18n();
 
 const isLoading = ref(true);
 const saving = ref(false);
+// POS spends wallets through the payment method named "Wallet" — warn when
+// it is missing (e.g. renamed back after the id-8 collision).
+const walletMethodExists = ref(true);
 const form = ref({
   wallet_enabled: false,
   wallet_allow_negative: false,
@@ -102,6 +116,7 @@ const form = ref({
 onMounted(async () => {
   try {
     const r = await http.get('store/wallet/settings');
+    walletMethodExists.value = r.wallet_payment_method_exists !== false;
     form.value = {
       wallet_enabled: !!r.wallet_enabled,
       wallet_allow_negative: !!r.wallet_allow_negative,

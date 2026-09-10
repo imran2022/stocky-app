@@ -102,6 +102,11 @@ class ShopifyStoreController extends BaseController
             'price_field' => 'nullable|in:price,wholesale_price,min_price',
         ]);
 
+        // The store syncs stock for the warehouse it points at.
+        if ($request->filled('warehouse_id')) {
+            $this->abortIfWarehouseDenied($request->warehouse_id);
+        }
+
         $domain = ShopifyStore::normaliseDomain($request->shop_domain);
         if ($domain === '') {
             return response()->json(['success' => false, 'message' => 'That does not look like a Shopify domain.'], 422);
@@ -141,6 +146,11 @@ class ShopifyStoreController extends BaseController
             'warehouse_id' => 'nullable|exists:warehouses,id',
             'price_field' => 'nullable|in:price,wholesale_price,min_price',
         ]);
+
+        // The store syncs stock for the warehouse it points at.
+        if ($request->filled('warehouse_id')) {
+            $this->abortIfWarehouseDenied($request->warehouse_id);
+        }
 
         $domain = ShopifyStore::normaliseDomain($request->shop_domain);
         if ($domain === '') {
@@ -257,16 +267,27 @@ class ShopifyStoreController extends BaseController
 
         return response()->json([
             'warehouses' => $warehouses,
+            // The Sync Centre reads the warehouse, the location and every
+            // sync_* flag off these rows to decide what it may run, so they
+            // have to travel with the option — a trimmed payload reads as an
+            // unconfigured store no matter how the store is actually set up.
             'stores' => ShopifyStore::whereNull('deleted_at')->orderBy('name')
-                ->get(['id', 'name', 'shop_domain', 'status', 'warehouse_id', 'location_id'])
-                ->map(fn ($s) => [
+                ->get(array_merge(
+                    ['id', 'name', 'shop_domain', 'status', 'warehouse_id', 'location_id'],
+                    array_map(fn ($e) => 'sync_'.$e, ShopifyStore::ENTITIES)
+                ))
+                ->map(fn ($s) => array_merge([
                     'id' => $s->id,
                     'name' => $s->name,
                     'shop_domain' => $s->shop_domain,
                     'status' => $s->status,
+                    'warehouse_id' => $s->warehouse_id,
+                    'location_id' => $s->location_id,
                     'label' => $s->name.' — '.$s->shop_domain,
                     'ready' => $s->status === 'connected' && $s->warehouse_id && $s->location_id,
-                ]),
+                ], collect(ShopifyStore::ENTITIES)
+                    ->mapWithKeys(fn ($e) => ['sync_'.$e => (bool) $s->{'sync_'.$e}])
+                    ->all())),
             'entities' => ShopifyStore::ENTITIES,
             // The public URL Shopify should post webhooks to.
             'webhook_url' => url('/api/shopify/webhook'),

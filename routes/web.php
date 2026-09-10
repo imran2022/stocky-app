@@ -5,11 +5,13 @@ use App\Http\Controllers\Api\Store\AccountPagesController;
 use App\Http\Controllers\Api\Store\CheckoutController;
 use App\Http\Controllers\Api\Store\CustomerLoyaltyController;
 use App\Http\Controllers\Api\Store\CustomerReturnsController;
+use App\Http\Controllers\Api\Store\CustomerQuestionsController;
 use App\Http\Controllers\Api\Store\CustomerReviewsController;
 use App\Http\Controllers\Api\Store\CustomerWalletController;
 use App\Http\Controllers\Api\Store\QuoteRequestsController;
 use App\Http\Controllers\Api\Store\MessageController;
 use App\Http\Controllers\Api\Store\MyOrdersApiController;
+use App\Http\Controllers\Api\Store\PaymentProofController;
 use App\Http\Controllers\Api\Store\NewsletterController;
 use App\Http\Controllers\QuickBooksController;
 use App\Http\Controllers\RealEstateStoreController;
@@ -40,45 +42,17 @@ use Laravel\Passport\Passport;
 
 Route::get('password/find/{token}', 'PasswordResetController@find');
 
-// PWA manifest — generated from the configured app name (Appearance Settings)
-// so the install prompt / installed app reflects the tenant's name instead of a
-// hardcoded "Stocky". Kept at /manifest.webmanifest so existing <link> tags and
-// the service worker precache list need no changes.
-Route::get('manifest.webmanifest', function () {
-    $appName = optional(\App\Models\Setting::first())->app_name ?: 'Stocky';
-
-    // short_name must be brief for app launchers: use the part before a "|"
-    // separator if present (e.g. "Stocky | Ultimate Inventory With POS" -> "Stocky").
-    $shortName = trim(explode('|', $appName)[0]);
-    if ($shortName === '') {
-        $shortName = $appName;
-    }
-
-    $manifest = [
-        'name' => $appName,
-        'short_name' => $shortName,
-        'description' => $appName,
-        'start_url' => '/',
-        'scope' => '/',
-        'display' => 'standalone',
-        'orientation' => 'any',
-        'background_color' => '#ffffff',
-        'theme_color' => '#2f3640',
-        'lang' => 'en',
-        'dir' => 'ltr',
-        'icons' => [
-            ['src' => '/pwa_images/pwa-icon-192.png', 'sizes' => '192x192', 'type' => 'image/png', 'purpose' => 'any'],
-            ['src' => '/pwa_images/pwa-icon-512.png', 'sizes' => '512x512', 'type' => 'image/png', 'purpose' => 'any'],
-            ['src' => '/pwa_images/pwa-icon-192.png', 'sizes' => '192x192', 'type' => 'image/png', 'purpose' => 'maskable'],
-            ['src' => '/pwa_images/pwa-icon-512.png', 'sizes' => '512x512', 'type' => 'image/png', 'purpose' => 'maskable'],
-        ],
-    ];
-
-    return response()->json($manifest, 200, [
-        'Content-Type' => 'application/manifest+json',
-        'Cache-Control' => 'no-cache',
-    ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-})->name('pwa.manifest');
+// PWA manifests — generated from System Settings → PWA so the install prompt
+// and the installed app reflect the configured name, colors and launch
+// behavior instead of a hardcoded "Stocky". The admin/POS surface stays at
+// /manifest.webmanifest so existing <link> tags and the service worker
+// precache list need no changes; the other surfaces are served from /pwa/*
+// (the static public/manifest-*.webmanifest files would shadow them otherwise).
+Route::get('manifest.webmanifest', [\App\Http\Controllers\PwaManifestController::class, 'manifest'])
+    ->name('pwa.manifest');
+Route::get('pwa/{type}.webmanifest', [\App\Http\Controllers\PwaManifestController::class, 'manifest'])
+    ->where('type', 'app|store|customer-display|portal')
+    ->name('pwa.manifest.surface');
 
 // Route::middleware(['web','auth:web','Is_Active'])->group(function () {
 //     Route::get('/admin/store/settings', [AdminStoreSettings::class, 'show']);
@@ -89,17 +63,31 @@ $installed = Storage::disk('public')->exists('installed');
 
 // ------------------------------------------------------------------\\
 // ONLINE STORE ROUTES (Only if installed)
+//
+// The storefront base path is configurable (Store Settings → Store URL):
+//  - default: 'online_store' (backward compatible)
+//  - custom:  any safe path, e.g. 'shop'
+//  - root:    '' — the store is served from the domain root; reserved system
+//             prefixes (see store_reserved_paths()) keep belonging to the
+//             admin panel, and the customer auth pages move under /customer/*
+//             so they never shadow the staff /login and /logout routes.
+$storePath = store_path();
+$storeAuthPrefix = $storePath === '' ? 'customer' : '';
+
 if ($installed === true) {
 
-    Route::middleware(['web', 'request.safety', 'store.enabled'])->group(function () {
+    Route::middleware(['web', 'request.safety', 'store.enabled', 'store.locale'])->group(function () use ($storePath, $storeAuthPrefix) {
 
-        Route::prefix('online_store')->group(function () {
+        Route::prefix($storePath)->group(function () use ($storeAuthPrefix) {
 
+            // Header language switcher. This is a per-session override — it
+            // deliberately does NOT rewrite a signed-in customer's saved
+            // preference (My Account → Preferences does that).
             Route::get('/lang/{locale}', function ($locale) {
-                $supported = ['en', 'fr', 'es', 'ar'];
+                $supported = \App\Http\Middleware\SetLocale::SUPPORTED;
 
                 // Use provided locale if supported, otherwise fallback to 'en'
-                $chosen = in_array($locale, $supported, true) ? $locale : 'en';
+                $chosen = isset($supported[$locale]) ? $locale : 'en';
 
                 // Store in session
                 session(['locale' => $chosen]);
@@ -110,6 +98,14 @@ if ($installed === true) {
                 return back();
             })->name('lang.switch');
 
+            // Multi-Currency: the shopper's display currency. Validated in the
+            // service (unknown id / module off leaves the base currency).
+            Route::get('/currency/{id}', function ($id) {
+                \App\Services\StoreCurrencyService::select($id);
+
+                return back();
+            })->whereNumber('id')->name('store.currency.switch');
+
             Route::get('/', [StoreFrontController::class, 'index'])->name('store.index');
             Route::get('/shop', [StoreFrontController::class, 'shop'])->name('store.shop');
             Route::get('/flash-sales', [StoreFrontController::class, 'flashSales'])->name('store.flash_sales');
@@ -118,6 +114,11 @@ if ($installed === true) {
             // Public product reviews (approved only)
             Route::get('/products/{id}/reviews', [CustomerReviewsController::class, 'productReviews'])
                 ->name('store.product.reviews');
+
+            // Public product Q&A (published only). Asking requires a signed-in
+            // customer and lives under the auth:store group below.
+            Route::get('/products/{id}/questions', [CustomerQuestionsController::class, 'productQuestions'])
+                ->name('store.product.questions');
 
             // Quotation request (service / classified-ad products; guests allowed)
             Route::post('/quote-request', [QuoteRequestsController::class, 'store'])
@@ -170,6 +171,10 @@ if ($installed === true) {
             Route::post('/contact/send', [MessageController::class, 'store'])->name('store.contact.send');
             Route::get('/search/suggestions', [StoreFrontController::class, 'searchSuggestions'])->name('store.search.suggestions');
 
+            // Wholesale Pricing by Quantity: quantity ladders for the cart's
+            // products, so cart/checkout can re-price lines as qty changes.
+            Route::get('/wholesale-tiers', [StoreFrontController::class, 'wholesaleTiers'])->name('store.wholesale.tiers');
+
             // Account pages (require login on 'store' guard)
             Route::middleware(['web', 'auth:store'])->group(function () {
                 Route::view('/checkout', 'store.checkout')->name('checkout');
@@ -180,6 +185,8 @@ if ($installed === true) {
                 Route::put('/account', [AccountPagesController::class, 'update'])->name('account.update');
 
                 Route::put('/account/address', [AccountPagesController::class, 'updateAddress'])->name('account.address.update');
+
+                Route::put('/account/preferences', [AccountPagesController::class, 'updatePreferences'])->name('account.preferences.update');
 
                 Route::get('/account/wishlist', [StoreFrontController::class, 'wishlist'])->name('store.wishlist');
 
@@ -202,6 +209,12 @@ if ($installed === true) {
                 Route::post('/account/orders/{id}/return', [CustomerReturnsController::class, 'requestReturn'])
                     ->name('account.order.return');
 
+                // Ask About This Item — registered customers only
+                Route::post('/products/{id}/questions', [CustomerQuestionsController::class, 'ask'])
+                    ->middleware('throttle:10,1')->name('store.product.questions.ask');
+                Route::get('/account/questions', [CustomerQuestionsController::class, 'mine'])
+                    ->name('account.questions');
+
                 // Product reviews (verified purchase)
                 Route::get('/account/orders/{id}/reviewable', [CustomerReviewsController::class, 'reviewable'])
                     ->name('account.order.reviewable');
@@ -214,6 +227,12 @@ if ($installed === true) {
                 // (Optional) details endpoint if you add a “view” drawer/page:
                 Route::get('/my/orders/{id}', [MyOrdersApiController::class, 'show'])
                     ->name('my_orders.show');
+
+                // Proof of payment for offline methods (GCash / bank transfer)
+                Route::get('/my/orders/{id}/payment-proofs', [PaymentProofController::class, 'index'])
+                    ->name('my_orders.proofs.index');
+                Route::post('/my/orders/{id}/payment-proofs', [PaymentProofController::class, 'store'])
+                    ->middleware('throttle:10,1')->name('my_orders.proofs.store');
 
                 // My Returns — dedicated page listing all return/cancellation requests
                 Route::view('/account/returns', 'store.account-returns')->name('account.returns');
@@ -234,8 +253,10 @@ if ($installed === true) {
                 Route::get('/my/loyalty/redemptions', [CustomerLoyaltyController::class, 'redemptions'])->name('my_loyalty.redemptions');
             });
 
-            // Auth pages (only for guests of 'store' guard)
-            Route::middleware('guest:store')->group(function () {
+            // Auth pages (only for guests of 'store' guard). In root-domain
+            // mode these live under /customer/* so the staff /login and
+            // /logout keep working; links always come from the route names.
+            Route::prefix($storeAuthPrefix)->middleware('guest:store')->group(function () {
                 Route::get('/login', [StoreAuthController::class, 'showLogin'])->name('store.login.show');
                 Route::post('/login', [StoreAuthController::class, 'login'])->name('store.login');
 
@@ -259,14 +280,33 @@ if ($installed === true) {
                 ->middleware('throttle:4,1')->name('store.verification.resend');
 
             // Logout (must be logged in on 'store')
-            Route::post('/logout', [StoreAuthController::class, 'logout'])
+            Route::prefix($storeAuthPrefix)->post('/logout', [StoreAuthController::class, 'logout'])
                 ->middleware('auth:store')->name('store.logout');
 
         });
     });
 
+    // Backward compatibility: when the store base moved away from the default,
+    // old /online_store links (bookmarks, emails, cached pages) 301-redirect to
+    // the configured location, query string preserved.
+    if ($storePath !== 'online_store') {
+        Route::middleware('web')->any('online_store/{any?}', function ($any = null) {
+            $qs = request()->getQueryString();
+
+            // Neutralize backslashes and collapse slashes so a crafted path
+            // (e.g. /online_store/%5Cevil.com) can never yield a Location of
+            // "//host" (protocol-relative open redirect) in root-domain mode.
+            $rest = preg_replace('#/+#', '/', str_replace('\\', '/', (string) $any));
+
+            return redirect(
+                '/'.trim(store_path().'/'.$rest, '/').($qs ? '?'.$qs : ''),
+                301
+            );
+        })->where('any', '.*');
+    }
+
 } else {
-    // if not installed: redirect all /online_store requests to /setup
+    // if not installed: redirect all storefront requests to /setup
     Route::any('/online_store/{any?}', function () {
         return redirect('/setup');
     })->where('any', '.*');
@@ -359,6 +399,18 @@ Route::group(['middleware' => ['web', 'auth:web', 'Is_Active']], function () {
     Route::get('/google-calendar/connect', [\App\Http\Controllers\GoogleCalendarConnectController::class, 'connect'])->name('google_calendar.connect');
     Route::get('/google-calendar/callback', [\App\Http\Controllers\GoogleCalendarConnectController::class, 'callback'])->name('google_calendar.callback');
     Route::get('/google-calendar/disconnect', [\App\Http\Controllers\GoogleCalendarConnectController::class, 'disconnect'])->name('google_calendar.disconnect');
+
+    // Salla OAuth
+    Route::get('/salla/connect', [\App\Http\Controllers\Integrations\SallaOAuthController::class, 'connect'])->name('salla.connect');
+    Route::get('/salla/callback', [\App\Http\Controllers\Integrations\SallaOAuthController::class, 'callback'])->name('salla.callback');
+
+    // Xero OAuth
+    Route::get('/xero/connect', [\App\Http\Controllers\Integrations\XeroOAuthController::class, 'connect'])->name('xero.connect');
+    Route::get('/xero/callback', [\App\Http\Controllers\Integrations\XeroOAuthController::class, 'callback'])->name('xero.callback');
+
+    // Google Sheets OAuth
+    Route::get('/google-sheets/connect', [\App\Http\Controllers\Integrations\GoogleSheetsOAuthController::class, 'connect'])->name('google_sheets.connect');
+    Route::get('/google-sheets/callback', [\App\Http\Controllers\Integrations\GoogleSheetsOAuthController::class, 'callback'])->name('google_sheets.callback');
 });
 
 // ------------------------------------------------------------------\\
@@ -374,7 +426,7 @@ Route::get('/portal/{vue?}', function (\Illuminate\Http\Request $request, $vue =
         return redirect('/portal/login');
     }
     return view('portal');
-})->where('vue', '.*')->middleware(['web']);
+})->where('vue', '.*')->middleware(['web', 'portal.locale']);
 
 // ------------------------------------------------------------------\\
 
@@ -388,6 +440,16 @@ Route::get('csrf-token', function (\Illuminate\Http\Request $request) {
         ->header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
 })->middleware('web')->name('csrf.token');
 
+// Session keepalive: the SPA pings this while the user is active. Passing
+// through the 'web' group slides the web session forward AND makes Passport's
+// CreateFreshApiToken re-issue the laravel_token cookie the SPA authenticates
+// with — so the configured session timeout behaves as an *inactivity* timeout
+// instead of expiring a busy cashier mid-shift.
+Route::get('session/keepalive', function () {
+    return response()->noContent()
+        ->header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+})->middleware('web')->name('session.keepalive');
+
 // SEO: public sitemap + robots (registered before the admin catch-all).
 Route::get('sitemap.xml', [\App\Http\Controllers\SitemapController::class, 'index'])->name('store.sitemap');
 Route::get('robots.txt', [\App\Http\Controllers\SitemapController::class, 'robots'])->name('store.robots');
@@ -397,6 +459,17 @@ Route::group(['middleware' => ['web', 'auth:web', 'Is_Active', 'request.safety']
     // The Vue 2 admin SPA has been retired (its bundle no longer exists). Any
     // old admin URL — including "/" — now redirects into the Vue 3 app at /next,
     // whose router lands on /next/dashboard.
+    //
+    // The configured store base path is excluded dynamically so unknown store
+    // URLs 404 instead of bouncing to the admin login. In root-domain mode the
+    // store routes are registered first and win on their own; everything else
+    // keeps today's behavior.
+    $storeExclusion = '';
+    $storeFirstSegment = explode('/', store_path())[0] ?? '';
+    if ($storeFirstSegment !== '' && $storeFirstSegment !== 'online_store') {
+        $storeExclusion = preg_quote($storeFirstSegment).'|';
+    }
+
     Route::get('/{vue?}',
         function () {
             $installed = Storage::disk('public')->exists('installed');
@@ -406,7 +479,7 @@ Route::group(['middleware' => ['web', 'auth:web', 'Is_Active', 'request.safety']
             }
 
             return redirect('/next');
-        })->where('vue', '^(?!api|setup|update|password|online_store|customer-display|quickbooks|portal|recruit|api-docs|next|csrf-token|login|logout).*$');
+        })->where('vue', '^(?!'.$storeExclusion.'api|setup|update|password|online_store|customer-display|order-ready|quickbooks|salla|xero|google-sheets|portal|recruit|api-docs|next|csrf-token|login|logout).*$');
 
 });
 
@@ -442,6 +515,11 @@ Route::group(['middleware' => ['web', 'auth:web', 'Is_Active']], function () {
         'as' => 'update_lastStep', 'uses' => 'UpdateController@lastStep',
     ]);
 
+    // Standalone System Update recovery console. Deliberately NOT part of
+    // the SPA: it must keep working when the SPA assets are broken or the
+    // application is stuck in maintenance mode after an interrupted update.
+    Route::get('/system-update/recovery', 'SystemUpdateController@recoveryConsole');
+
 });
 
 // -------------------- Public Invoice View (HMAC-signed, no login required) --------------------
@@ -459,4 +537,29 @@ Route::get('/customer-display', function (HttpRequest $request) {
     }
 
     return view('customer_display');
+})->middleware(['web']);
+
+// -------------------- Public Order Ready Screen (token-guarded) --------------------
+// Customer-facing kitchen token board (Preparing / Ready). Self-contained page,
+// polls /api/kitchen/ready-screen/data with the same token.
+Route::get('/order-ready', function (HttpRequest $request) {
+    $token = $request->query('token');
+    if (! $token || $token !== cache('order_ready_token')) {
+        abort(403, 'Unauthorized display access');
+    }
+
+    // Labels come from the admin translations table in the shop's default
+    // language, with English fallbacks baked into the view.
+    $settings = \App\Models\Setting::whereNull('deleted_at')->first();
+    $locale = $settings->default_language ?? 'en';
+    $labels = \DB::table('translations')
+        ->where('locale', $locale)
+        ->whereIn('key', ['PreparingOrders', 'ReadyOrders', 'OrderReadyScreen'])
+        ->pluck('value', 'key');
+
+    return view('order_ready', [
+        'token' => $token,
+        'labels' => $labels,
+        'company' => $settings->CompanyName ?? '',
+    ]);
 })->middleware(['web']);

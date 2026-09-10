@@ -3,6 +3,14 @@
     <PageHeader :title="$t('ReturnDetail')" :breadcrumb="[$t('PurchasesReturn'), $t('ReturnDetail')]">
       <template #actions>
         <a-space wrap>
+          <!-- Multi-Currency: view this document's amounts in another currency -->
+          <a-select
+            v-if="showCurrencySelect"
+            v-model:value="currencySelectId"
+            :options="currencyOptions"
+            :title="$t('Currency')"
+            style="min-width: 92px"
+          />
           <a-button @click="$router.push('/purchase-returns')">
             <template #icon><ArrowLeftOutlined /></template>
             {{ $t('Back') }}
@@ -108,30 +116,30 @@
               </a-tag>
             </div>
           </template>
-          <template v-else-if="column.key === 'cost'">{{ money(record.cost ?? record.price) }}</template>
+          <template v-else-if="column.key === 'cost'">{{ docMoney(record.cost ?? record.price) }}</template>
           <template v-else-if="column.key === 'quantity'">
             {{ num(record.quantity) }} {{ record.unit_purchase || record.unit_sale }}
           </template>
           <!-- DiscountNet is per unit; this column is a line total like Tax below. -->
-          <template v-else-if="column.key === 'discount'">{{ money(record.DiscountNet * record.quantity) }}</template>
-          <template v-else-if="column.key === 'tax'">{{ money(record.taxe * record.quantity) }}</template>
-          <template v-else-if="column.key === 'total'">{{ money(record.total) }}</template>
+          <template v-else-if="column.key === 'discount'">{{ docMoney(record.DiscountNet * record.quantity) }}</template>
+          <template v-else-if="column.key === 'tax'">{{ docMoney(record.taxe * record.quantity) }}</template>
+          <template v-else-if="column.key === 'total'">{{ docMoney(record.total) }}</template>
         </template>
       </a-table>
 
       <div class="inv-summary">
         <!-- Summary labels hardcoded English in legacy's invoice too. -->
         <table>
-          <tr><td>Subtotal:</td><td>{{ money(subtotal) }}</td></tr>
-          <tr><td>Order Tax:</td><td>{{ money(ret.TaxNet) }}</td></tr>
+          <tr><td>Subtotal:</td><td>{{ docMoney(subtotal) }}</td></tr>
+          <tr><td>Order Tax:</td><td>{{ docMoney(ret.TaxNet) }}</td></tr>
           <tr v-if="Number(ret.discount) > 0">
             <td>Discount:</td>
-            <td class="neg">- {{ money(ret.discount) }}</td>
+            <td class="neg">- {{ docMoney(ret.discount) }}</td>
           </tr>
-          <tr v-if="Number(ret.shipping) > 0"><td>Shipping:</td><td>{{ money(ret.shipping) }}</td></tr>
-          <tr class="grand"><td>{{ $t('Total') }}:</td><td>{{ money(ret.GrandTotal) }}</td></tr>
-          <tr><td>{{ $t('Paid') }}:</td><td style="color: #52c41a">{{ money(ret.paid_amount) }}</td></tr>
-          <tr><td>{{ $t('Due') }}:</td><td style="color: #ff4d4f">{{ money(ret.due) }}</td></tr>
+          <tr v-if="Number(ret.shipping) > 0"><td>Shipping:</td><td>{{ docMoney(ret.shipping) }}</td></tr>
+          <tr class="grand"><td>{{ $t('Total') }}:</td><td>{{ docMoney(ret.GrandTotal) }}</td></tr>
+          <tr><td>{{ $t('Paid') }}:</td><td style="color: #52c41a">{{ docMoney(ret.paid_amount) }}</td></tr>
+          <tr><td>{{ $t('Due') }}:</td><td style="color: #ff4d4f">{{ docMoney(ret.due) }}</td></tr>
         </table>
       </div>
 
@@ -156,19 +164,24 @@ import {
 } from '@ant-design/icons-vue';
 import PageHeader from '../../components/PageHeader.vue';
 import { useFormat } from '../../composables/useFormat';
+import { useDetailsCurrency } from '../../composables/useDetailsCurrency';
 import { useAuthStore } from '../../stores/auth';
 import { payStatusColor } from '../../lib/statusColors';
 import { PAYMENT_STATUSES, statusKey } from '../sales/saleVocab';
 import http from '../../lib/http';
 
 const { t } = useI18n();
-const { money, date, dateTime } = useFormat();
+const { date, dateTime } = useFormat();
 const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
 
 const loading = ref(true);
 const ret = ref({});
+
+// Multi-Currency: amounts arrive converted into the document's currency;
+// the header selector re-expresses them in any other currency (view-only).
+const { docMoney, currencyOptions, currencySelectId, showCurrencySelect } = useDetailsCurrency(ret);
 const details = ref([]);
 const company = ref({});
 

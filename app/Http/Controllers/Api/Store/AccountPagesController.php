@@ -6,10 +6,13 @@ use App\Http\Controllers\Controller;
 use App\Models\Client;
 use App\Models\EcommerceClient;
 use App\Models\StoreSetting;
+use App\Services\StoreCurrencyService;
 use DB;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rule;
 
 class AccountPagesController extends Controller
 {
@@ -66,6 +69,52 @@ class AccountPagesController extends Controller
         return redirect()
             ->back()
             ->with('status', __('messages.ProfileUpdated'));
+    }
+
+    /**
+     * Save the customer's default storefront language / display currency.
+     * Both are optional — blank means "use the store default".
+     *
+     * The saved value is also pushed into the session (and the language
+     * cookie) so the change is visible immediately rather than only on the
+     * next fresh session; clearing a preference drops the override so the
+     * store default takes over right away.
+     */
+    public function updatePreferences(Request $request)
+    {
+        $user = Auth::guard('store')->user();
+        if (! $user) {
+            return redirect()->back()->withErrors(['auth' => 'You must be signed in.']);
+        }
+
+        $data = $request->validate([
+            'preferred_locale' => ['nullable', 'string', Rule::in(array_keys(store_locales()))],
+            'preferred_currency_id' => ['nullable', 'integer', 'exists:currencies,id'],
+        ]);
+
+        $locale = $data['preferred_locale'] ?? null;
+        $currencyId = $data['preferred_currency_id'] ?? null;
+
+        $user->preferred_locale = $locale;
+        $user->preferred_currency_id = $currencyId;
+        $user->save();
+
+        if ($locale) {
+            session(['locale' => $locale]);
+            Cookie::queue('locale', $locale, 60 * 24 * 365, '/');
+        } else {
+            session()->forget('locale');
+            Cookie::queue(Cookie::forget('locale', '/'));
+        }
+
+        if ($currencyId) {
+            StoreCurrencyService::select($currencyId);
+        } else {
+            session()->forget('store_currency_id');
+            StoreCurrencyService::flush();
+        }
+
+        return redirect()->back()->with('status', __('messages.PreferencesUpdated'));
     }
 
     /**

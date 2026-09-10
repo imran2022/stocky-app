@@ -4,8 +4,8 @@
 @php
   /** @var \App\Models\EcommerceClient|null $me */
   $me = Auth::guard('store')->user();
-  $updateUrl = url('/online_store/account');
-  $ordersUrl = url('/online_store/account/orders');
+  $updateUrl = route('account.update');
+  $ordersUrl = route('account.orders');
 @endphp
 
 <section class="border-b border-line-subtle"
@@ -89,6 +89,59 @@
       </div>
     </div>
 
+    {{-- Preferences: the customer's default language / display currency. --}}
+    @if($me)
+      @php
+        $prefLocales = store_locales();
+        $prefCurrencies = \App\Services\StoreCurrencyService::options();
+      @endphp
+      <div class="card" id="preferences">
+        <div class="card-body">
+          <h5 class="font-semibold mb-4 flex items-center gap-2">
+            <x-store.icon name="globe" class="w-5 h-5 text-accent-500" />{{ __('messages.Preferences') }}
+          </h5>
+          <p class="text-sm text-fg-muted -mt-2 mb-4">{{ __('messages.PreferencesHint') }}</p>
+
+          <form method="POST" action="{{ route('account.preferences.update') }}" class="space-y-4">
+            @csrf
+            @method('PUT')
+
+            <div class="grid md:grid-cols-2 gap-4">
+              <div>
+                <label class="form-label" for="pref-locale">{{ __('messages.PreferredLanguage') }}</label>
+                <select name="preferred_locale" id="pref-locale" class="input">
+                  <option value="">{{ __('messages.UseSiteDefault') }}</option>
+                  @foreach($prefLocales as $code => $label)
+                    <option value="{{ $code }}" @selected(old('preferred_locale', $me->preferred_locale) === $code)>{{ $label }}</option>
+                  @endforeach
+                </select>
+              </div>
+
+              @if($prefCurrencies->count() > 1)
+                <div>
+                  <label class="form-label" for="pref-currency">{{ __('messages.PreferredCurrency') }}</label>
+                  <select name="preferred_currency_id" id="pref-currency" class="input">
+                    <option value="">{{ __('messages.UseSiteDefault') }}</option>
+                    @foreach($prefCurrencies as $cur)
+                      <option value="{{ $cur->id }}" @selected((int) old('preferred_currency_id', $me->preferred_currency_id) === (int) $cur->id)>
+                        {{ $cur->code }} — {{ $cur->symbol }}
+                      </option>
+                    @endforeach
+                  </select>
+                </div>
+              @endif
+            </div>
+
+            <div class="flex gap-2 flex-wrap pt-2">
+              <button class="btn btn-primary" type="submit">
+                <x-store.icon name="check" class="w-4 h-4" />{{ __('messages.SaveChanges') }}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    @endif
+
     {{-- Address --}}
     @if($me)
       <div class="card" id="address">
@@ -126,8 +179,17 @@
                 <input name="zip" type="text" class="input" value="{{ old('zip', optional($client)->zip) }}">
               </div>
               <div>
-                <label class="form-label">{{ __('messages.Country') }}</label>
-                <input name="country" type="text" class="input" value="{{ old('country', optional($client)->country) }}">
+                <label class="form-label" for="acc-country">{{ __('messages.Country') }}</label>
+                @php
+                  $accCountryOptions = \App\Services\CountryService::options();
+                  $accCountryCode = \App\Services\CountryService::toCode(old('country', optional($client)->country));
+                @endphp
+                <select name="country" id="acc-country" class="input">
+                  <option value="">{{ __('messages.SelectCountry') }}</option>
+                  @foreach($accCountryOptions as $co)
+                    <option value="{{ $co['canonical'] }}" @selected($accCountryCode === $co['code'])>{{ $co['name'] }}</option>
+                  @endforeach
+                </select>
               </div>
             </div>
 

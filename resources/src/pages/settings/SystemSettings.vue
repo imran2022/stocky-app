@@ -31,7 +31,6 @@
             <a-menu-item-group :title="$t('CompanyName')">
               <a-menu-item key="general"><ShopOutlined /> {{ $t('General') }}</a-menu-item>
               <a-menu-item key="localization"><GlobalOutlined /> Localization</a-menu-item>
-              <a-menu-item key="zatca"><AuditOutlined /> ZATCA</a-menu-item>
             </a-menu-item-group>
             <a-menu-item-group :title="$t('Sales')">
               <a-menu-item key="defaults"><ControlOutlined /> Defaults</a-menu-item>
@@ -59,9 +58,12 @@
             </a-menu-item-group>
             <a-menu-item-group :title="'Integrations'">
               <a-menu-item key="appearance"><SkinOutlined /> Appearance</a-menu-item>
+              <a-menu-item key="pwa"><MobileOutlined /> PWA</a-menu-item>
+              <a-menu-item key="mobile_app"><TabletOutlined /> Mobile App</a-menu-item>
               <a-menu-item key="mail"><MailOutlined /> Mail</a-menu-item>
               <a-menu-item key="sms"><MessageOutlined /> SMS</a-menu-item>
               <a-menu-item key="payment"><CreditCardOutlined /> {{ $t('Payment_Gateway') }}</a-menu-item>
+              <a-menu-item key="zatca"><AuditOutlined /> {{ $t('Zatca_E_Invoicing') }}</a-menu-item>
               <a-menu-item key="custom_fields"><FormOutlined /> Custom Fields</a-menu-item>
               <a-menu-item key="backups"><DatabaseOutlined /> Backup archives</a-menu-item>
               <a-menu-item key="devices"><LaptopOutlined /> Login Devices</a-menu-item>
@@ -82,7 +84,7 @@
              transition fades sections in/out on tab change. -->
         <transition name="ss-fade" mode="out-in">
         <div v-if="embeddedPages[activeTab]" :key="activeTab" class="embedded">
-          <component :is="embeddedPages[activeTab]" />
+          <component :is="embeddedPages[activeTab]" @phase1-saved="onZatcaPhase1Saved" />
         </div>
 
         <a-card v-else :key="'card-' + activeTab">
@@ -257,6 +259,23 @@
               </div>
               <a-switch v-model:checked="setting.enable_kitchen_display" />
             </div>
+            <div v-if="setting.enable_kitchen_display" class="setting-row">
+              <div>
+                <div class="setting-label">{{ $t('KitchenTargetMinutes') }}</div>
+                <div class="setting-help">{{ $t('KitchenTargetMinutes_Help') }}</div>
+              </div>
+              <a-input-number
+                v-model:value="setting.kitchen_target_minutes"
+                :min="1" :max="1440" style="width: 160px"
+              />
+            </div>
+            <div v-if="setting.enable_kitchen_display" class="setting-row">
+              <div>
+                <div class="setting-label">{{ $t('KitchenAutoOnlineOrders') }}</div>
+                <div class="setting-help">{{ $t('KitchenAutoOnlineOrders_Help') }}</div>
+              </div>
+              <a-switch v-model:checked="setting.kitchen_auto_online_orders" />
+            </div>
             <div class="setting-row">
               <div>
                 <div class="setting-label">{{ $t('Show_Product_GTIN') }}</div>
@@ -294,6 +313,27 @@
                 <div class="setting-help">{{ $t('Enable_Multi_Pack_Selling_Hint') }}</div>
               </div>
               <a-switch v-model:checked="setting.enable_multi_pack_selling" />
+            </div>
+            <div class="setting-row">
+              <div>
+                <div class="setting-label">{{ $t('Enable_Wholesale_Pricing') }}</div>
+                <div class="setting-help">{{ $t('Enable_Wholesale_Pricing_Hint') }}</div>
+              </div>
+              <a-switch v-model:checked="setting.enable_wholesale_pricing" />
+            </div>
+            <div class="setting-row">
+              <div>
+                <div class="setting-label">{{ $t('Enable_Multi_Currency') }}</div>
+                <div class="setting-help">{{ $t('Enable_Multi_Currency_Hint') }}</div>
+              </div>
+              <a-switch v-model:checked="setting.enable_multi_currency" />
+            </div>
+            <div class="setting-row">
+              <div>
+                <div class="setting-label">{{ $t('Enable_Pos_Salesperson_Switch') }}</div>
+                <div class="setting-help">{{ $t('Enable_Pos_Salesperson_Switch_Hint') }}</div>
+              </div>
+              <a-switch v-model:checked="setting.enable_pos_salesperson_switch" />
             </div>
             <div class="setting-row">
               <div>
@@ -693,31 +733,6 @@
                fields (invoice_logo_width/height) have no UI anymore but stay
                in the save payload so the stored values are preserved. -->
 
-          <!-- ============================== ZATCA ============================== -->
-          <template v-else-if="activeTab === 'zatca'">
-            <div class="setting-row" style="border-top: none; padding-top: 0">
-              <div>
-                <div class="setting-label">{{ $t('Enable_ZATCA_QR_on_Sales_Receipts') }}</div>
-                <div class="setting-help">Adds the KSA e-invoicing QR code to sales receipts.</div>
-              </div>
-              <a-switch v-model:checked="setting.zatca_enabled" />
-            </div>
-            <a-form layout="vertical" style="max-width: 680px; margin-top: 12px">
-              <a-row :gutter="16">
-                <a-col :xs="24" :md="12">
-                  <a-form-item :label="$t('VAT_Number')">
-                    <a-input v-model:value="setting.vat_number" />
-                  </a-form-item>
-                </a-col>
-                <a-col :xs="24" :md="12">
-                  <a-form-item :label="$t('CompanyNameArabic')">
-                    <a-input v-model:value="setting.company_name_ar" dir="rtl" />
-                  </a-form-item>
-                </a-col>
-              </a-row>
-            </a-form>
-          </template>
-
           <!-- ============================== Pharmacy ============================== -->
           <template v-else-if="activeTab === 'pharmacy'">
             <div class="setting-row" style="border-top: none; padding-top: 0">
@@ -809,19 +824,24 @@
             <div class="setting-row" style="border-top: none; padding-top: 0">
               <div>
                 <div class="setting-label">Inactivity auto-logout</div>
-                <div class="setting-help">Sign users out after a period of inactivity.</div>
+                <div class="setting-help">
+                  Sign users out after this long without activity. "Never" disables
+                  automatic logout completely; activity on any open page keeps the
+                  session alive.
+                </div>
               </div>
               <a-space>
                 <a-radio-group v-model:value="sessionTimeoutPreset" size="small">
-                  <a-radio-button value="off">Off</a-radio-button>
-                  <a-radio-button value="15">15m</a-radio-button>
-                  <a-radio-button value="30">30m</a-radio-button>
-                  <a-radio-button value="60">60m</a-radio-button>
+                  <a-radio-button value="off">Never</a-radio-button>
+                  <a-radio-button value="240">4h</a-radio-button>
+                  <a-radio-button value="480">8h</a-radio-button>
+                  <a-radio-button value="720">12h</a-radio-button>
                   <a-radio-button value="custom">Custom</a-radio-button>
                 </a-radio-group>
                 <a-input-number
                   v-if="sessionTimeoutPreset === 'custom'"
-                  v-model:value="sessionTimeoutCustom" :min="1" size="small" style="width: 90px"
+                  v-model:value="sessionTimeoutCustom" :min="5" size="small" style="width: 110px"
+                  addon-after="min"
                   @change="v => (setting.session_timeout_minutes = v)"
                 />
               </a-space>
@@ -929,7 +949,7 @@ import {
   ShopOutlined, GlobalOutlined, AuditOutlined, ControlOutlined, ExportOutlined,
   ThunderboltOutlined, NumberOutlined, FileTextOutlined, FilePdfOutlined, MedicineBoxOutlined,
   AppstoreOutlined, AppstoreAddOutlined, SafetyOutlined, CloudUploadOutlined, ToolOutlined,
-  CalendarOutlined, SkinOutlined, MailOutlined, MessageOutlined,
+  CalendarOutlined, SkinOutlined, MobileOutlined, TabletOutlined, MailOutlined, MessageOutlined,
   CreditCardOutlined, FormOutlined, DatabaseOutlined, LaptopOutlined,
   MenuOutlined, ExperimentOutlined, TableOutlined, PrinterOutlined,
 } from '@ant-design/icons-vue';
@@ -976,12 +996,15 @@ const lazySection = loader => defineAsyncComponent({ loader, loadingComponent: S
 
 const embeddedPages = {
   appearance: lazySection(() => import('./AppearanceSettings.vue')),
+  pwa: lazySection(() => import('./PwaSettings.vue')),
+  mobile_app: lazySection(() => import('./MobileAppSettings.vue')),
   pos_settings: lazySection(() => import('./PosSettings.vue')),
   pos_receipt: lazySection(() => import('./PosReceipt.vue')),
   network_printing: lazySection(() => import('./DirectNetworkPrinting.vue')),
   mail: lazySection(() => import('./MailSettings.vue')),
   sms: lazySection(() => import('./SmsSettings.vue')),
   payment: lazySection(() => import('./PaymentGateway.vue')),
+  zatca: lazySection(() => import('./ZatcaSettings.vue')),
   custom_fields: lazySection(() => import('./CustomFields.vue')),
   backups: lazySection(() => import('./Backup.vue')),
   devices: lazySection(() => import('./LoginDevices.vue')),
@@ -990,6 +1013,16 @@ const embeddedPages = {
   invoice_pdf: lazySection(() => import('./InvoicePdfSettings.vue')),
   demo: lazySection(() => import('./DemoDataGenerator.vue')),
 };
+
+// The embedded ZATCA page writes zatca_enabled / vat_number / company_name_ar
+// straight to the settings row; mirror them here because save() always posts
+// the FULL row and would otherwise push a stale copy back.
+function onZatcaPhase1Saved(company) {
+  if (!company) return;
+  setting.value.zatca_enabled = !!company.zatca_enabled;
+  setting.value.vat_number = company.vat_number || '';
+  setting.value.company_name_ar = company.name_ar || '';
+}
 
 function onMenuClick({ key }) {
   activeTab.value = String(key);
@@ -1001,7 +1034,7 @@ function onMenuClick({ key }) {
 const currentSection = computed(() => ({
   general: { title: t('General'), desc: 'Company identity shown across the app and on printed documents.' },
   localization: { title: 'Localization', desc: 'Language, currency, time zone and number formats.' },
-  zatca: { title: 'ZATCA', desc: 'KSA e-invoicing details printed on sales receipts.' },
+  zatca: { title: t('Zatca_E_Invoicing'), desc: 'KSA e-invoicing — phase 1 (QR code on receipts) and phase 2 (Fatoora integration).' },
   defaults: { title: 'Defaults', desc: 'Preselected values for new sales, purchases and the POS.' },
   features: { title: t('Features'), desc: 'Turn optional capabilities on or off.' },
   prefixes: { title: 'Prefixes', desc: 'Reference-number prefixes for each document type.' },
@@ -1018,6 +1051,8 @@ const currentSection = computed(() => ({
   system: { title: 'Maintenance', desc: 'Debugging and maintenance tools.' },
   calendar: { title: t('Calendar'), desc: 'Sync bookings with Google Calendar.' },
   appearance: { title: 'Appearance', desc: 'Branding and login page look.' },
+  pwa: { title: t('PWA_Settings'), desc: t('PWA_Settings_Help') },
+  mobile_app: { title: t('Mobile_App_Settings'), desc: t('Mobile_App_Settings_Help') },
   pos_settings: { title: t('Pos_Settings'), desc: 'Point-of-sale behavior and hardware.' },
   pos_receipt: { title: t('POS_Receipt'), desc: 'Receipt layout and printed content.' },
   network_printing: { title: 'Direct Network Printing', desc: 'Send receipts straight to a network thermal printer (RAW / port 9100) without the OS print dialog.' },
@@ -1133,11 +1168,12 @@ function resetSectionOrder() {
 
 /* -------------------------------------------------------- session timeout */
 const sessionTimeoutCustom = ref(null);
+const SESSION_TIMEOUT_PRESETS = [240, 480, 720]; // 4h / 8h / 12h
 const sessionTimeoutPreset = computed({
   get() {
     const v = setting.value.session_timeout_minutes;
     if (v == null || v === '' || Number(v) <= 0) return 'off';
-    if ([15, 30, 60].includes(Number(v))) return String(Number(v));
+    if (SESSION_TIMEOUT_PRESETS.includes(Number(v))) return String(Number(v));
     return 'custom';
   },
   set(val) {
@@ -1146,7 +1182,7 @@ const sessionTimeoutPreset = computed({
     } else if (val === 'custom') {
       if (!sessionTimeoutCustom.value) {
         const current = Number(setting.value.session_timeout_minutes);
-        sessionTimeoutCustom.value = (!Number.isNaN(current) && current > 0) ? current : 15;
+        sessionTimeoutCustom.value = (!Number.isNaN(current) && current > 0) ? current : 240;
       }
       setting.value.session_timeout_minutes = sessionTimeoutCustom.value;
     } else {
@@ -1210,11 +1246,16 @@ async function save() {
   fd.append('offline_sync_enabled', s.offline_sync_enabled ? 1 : 0);
   fd.append('enable_3_decimal_pricing', s.enable_3_decimal_pricing ? 1 : 0);
   fd.append('enable_kitchen_display', s.enable_kitchen_display ? 1 : 0);
+  fd.append('kitchen_target_minutes', (s.kitchen_target_minutes == null) ? '' : s.kitchen_target_minutes);
+  fd.append('kitchen_auto_online_orders', s.kitchen_auto_online_orders ? 1 : 0);
   fd.append('show_product_gtin', s.show_product_gtin ? 1 : 0);
   fd.append('product_image_resize', s.product_image_resize ? 1 : 0);
   fd.append('product_image_max_size', s.product_image_max_size || 800);
   fd.append('show_serial_tracking', s.show_serial_tracking ? 1 : 0);
   fd.append('enable_multi_pack_selling', s.enable_multi_pack_selling ? 1 : 0);
+  fd.append('enable_wholesale_pricing', s.enable_wholesale_pricing ? 1 : 0);
+  fd.append('enable_multi_currency', s.enable_multi_currency ? 1 : 0);
+  fd.append('enable_pos_salesperson_switch', s.enable_pos_salesperson_switch ? 1 : 0);
   fd.append('allow_overselling', s.allow_overselling ? 1 : 0);
   fd.append('vehicle_fitment_enabled', s.vehicle_fitment_enabled ? 1 : 0);
   fd.append('auto_journal_enabled', s.auto_journal_enabled ? 1 : 0);
@@ -1369,7 +1410,7 @@ onMounted(() => {
       syncSectionOrder();
       syncExportForm();
       const stm = Number(setting.value.session_timeout_minutes);
-      if (!Number.isNaN(stm) && stm > 0 && ![15, 30, 60].includes(stm)) sessionTimeoutCustom.value = stm;
+      if (!Number.isNaN(stm) && stm > 0 && !SESSION_TIMEOUT_PRESETS.includes(stm)) sessionTimeoutCustom.value = stm;
     })
     .catch(() => message.error(t('InvalidData')));
 

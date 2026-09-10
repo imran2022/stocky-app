@@ -17,6 +17,7 @@ class EcommerceClient extends Model implements Authenticatable
         'client_id', 'username', 'email', 'status', 'password',
         'invite_code_id', 'referred_by',
         'email_verified_at', 'is_blocked', 'terms_accepted_at',
+        'preferred_locale', 'preferred_currency_id',
     ];
 
     protected $hidden = [
@@ -32,6 +33,7 @@ class EcommerceClient extends Model implements Authenticatable
         'password' => 'hashed',
         'invite_code_id' => 'integer',
         'referred_by' => 'integer',
+        'preferred_currency_id' => 'integer',
     ];
 
     public function client()

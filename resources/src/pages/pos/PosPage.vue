@@ -137,6 +137,39 @@
         <lucide-icon name="chevron-down" class="pos-cust-trigger-caret" />
       </div>
 
+      <!-- Salesperson select (Change Salesperson During Checkout feature) -->
+      <div
+        v-if="salesSwitchEnabled"
+        role="button"
+        tabindex="0"
+        class="pos-cust-trigger"
+        :class="{ 'is-active': selectedSellerId }"
+        :title="$t('Select_Salesperson') || 'Select salesperson'"
+        @click="sellerDrawerOpen = true"
+        @keydown.enter.prevent="sellerDrawerOpen = true"
+        @keydown.space.prevent="sellerDrawerOpen = true"
+      >
+        <span class="pos-cust-trigger-avatar" :style="selectedSellerId ? { background: catColor(selectedSellerId) } : {}">
+          <span v-if="selectedSellerId">{{ catInitial(selectedSellerLabel) }}</span>
+          <lucide-icon v-else name="user-check" />
+        </span>
+        <span class="pos-cust-trigger-body">
+          <span class="pos-cust-trigger-eyebrow">{{ $t('Salesperson') || 'Salesperson' }}</span>
+          <span class="pos-cust-trigger-label">{{ selectedSellerLabel }}</span>
+        </span>
+        <lucide-icon name="chevron-down" class="pos-cust-trigger-caret" />
+      </div>
+
+      <!-- Multi-Currency: active sale currency (Settings → Features) -->
+      <select
+        v-if="posMultiCurrencyEnabled && pos_currencies.length > 1"
+        v-model="pos_currency_id"
+        :title="$t('Currency') || 'Currency'"
+        style="height: 32px; padding: 0 8px; font-size: 12px; font-weight: 600; border: 1px solid #ece9fb; border-radius: 8px; background: #f5f3fd; color: #6f53d9; outline: none; cursor: pointer;"
+      >
+        <option v-for="c in pos_currencies" :key="c.id" :value="c.id">{{ c.code }}</option>
+      </select>
+
       <!-- Quick add customer -->
       <button
         v-if="isQuickAddCustomerEnabled && isOnline"
@@ -410,6 +443,10 @@
                     <option value="retail">{{ $t('Retail Price') }}</option>
                     <option value="wholesale">{{ $t('Wholesale Price') }}</option>
                   </select>
+                  <!-- Wholesale Pricing by Quantity: flags a line whose quantity
+                       reached a configured break, so the cashier can see why the
+                       unit price dropped. -->
+                  <span v-if="isWholesaleTierApplied(item)" :title="$t('Wholesale_Tier_Applied')" style="height: 24px; display: inline-flex; align-items: center; padding: 0 6px; font-size: 10px; font-weight: 600; border-radius: 5px; background: #e8f5ee; color: #1c7c4a; white-space: nowrap; flex-shrink: 0;">{{ $t('Wholesale') }}</span>
                   <!-- Multi-Pack Selling: per-line pack picker (only when packs exist) -->
                   <select v-if="item.packs && item.packs.length" v-model="item.product_pack_id" @change="onChangePack(item)" :title="$t('Pack')" style="height: 24px; padding: 0 6px; font-size: 11px; font-weight: 500; border: 1px solid #d8d8e0; border-radius: 5px; background: #ffffff; color: #1f1f2c; outline: none; cursor: pointer; flex-shrink: 0;">
                     <option v-for="pack in item.packs" :key="'pk-'+item.detail_id+'-'+pack.id" :value="pack.id" :disabled="!isOversellingAllowed && item.product_type !== 'is_service' && Number(pack.multiplier) > 1 && Number(pack.multiplier) > Number(item.current)">{{ pack.name }} (×{{ pack.multiplier }})<template v-if="!isOversellingAllowed && item.product_type !== 'is_service' && Number(pack.multiplier) > 1 && Number(pack.multiplier) > Number(item.current)"> — {{ $t('Out_of_Stock') || 'out of stock' }}</template></option>
@@ -860,7 +897,7 @@
         <span>{{ $t('pos.Reset') }}</span>
       </button>
 
-      <button v-if="isOnline" @click="Show_Draft_Sales" :title="$t('pos.Drafts_list')" class="pos-shell-action-btn" style="height: 36px; padding: 0 14px; background: transparent; color: #1f1f2c; border: 1px solid #e6e6ec; border-radius: 8px; font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; transition: all 120ms ease;">
+      <button @click="Show_Draft_Sales" :title="$t('pos.Drafts_list')" class="pos-shell-action-btn" style="height: 36px; padding: 0 14px; background: transparent; color: #1f1f2c; border: 1px solid #e6e6ec; border-radius: 8px; font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; transition: all 120ms ease;">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;">
           <rect x="3" y="4" width="18" height="14" rx="2" ry="2"></rect>
           <path d="M7 8h10M7 12h8"></path>
@@ -1097,8 +1134,11 @@
     :accounts="accounts"
     :default-account-id="default_account_id"
     :default-payment-method-id="default_payment_method_id"
-    :currency="currentUser.currency"
+    :currency="posCurrencySymbol"
+    :currency-rate="posRate"
+    :currency-id="posIsBaseCurrency ? null : pos_currency_id"
     :client-id="selectedClientId"
+    :seller-id="salesSwitchEnabled ? selectedSellerId : null"
     :warehouse-id="sale.warehouse_id"
     :sale="sale"
     :details="details"
@@ -1247,17 +1287,17 @@
                     </td>
                   </tr>
 
-                  <tr v-if="Number(invoice_pos.sale.previous_dues) > 0">
+                  <tr v-if="showPreviousDuesRow">
                     <td colspan="3" class="total">{{$t('Previous_Dues')}}</td>
                     <td style="text-align:right;" class="total">
-                      {{ formatPriceWithSymbol(invoice_pos.symbol, invoice_pos.sale.previous_dues, 2) }}
+                      {{ formatPriceWithSymbol(invoice_pos.symbol, invoicePreviousDues, 2) }}
                     </td>
                   </tr>
 
-                  <tr v-if="Number(invoice_pos.sale.previous_dues) > 0">
+                  <tr v-if="showNetBalanceRow">
                     <td colspan="3" class="total">{{$t('Net_Balance')}}</td>
                     <td style="text-align:right;" class="total">
-                      {{ formatPriceWithSymbol(invoice_pos.symbol, Number(invoice_pos.sale.previous_dues) + (invoice_pos.sale.GrandTotal - invoice_pos.sale.paid_amount), 2) }}
+                      {{ formatPriceWithSymbol(invoice_pos.symbol, invoiceNetBalance, 2) }}
                     </td>
                   </tr>
                 </tbody>
@@ -1464,16 +1504,16 @@
                       {{ formatPriceWithSymbol(invoice_pos.symbol, (invoice_pos.sale.GrandTotal - invoice_pos.sale.paid_amount), 2) }}
                     </td>
                   </tr>
-                  <tr v-if="Number(invoice_pos.sale.previous_dues) > 0">
+                  <tr v-if="showPreviousDuesRow">
                     <td class="total">{{$t('Previous_Dues')}}</td>
                     <td style="text-align:right" class="total">
-                      {{ formatPriceWithSymbol(invoice_pos.symbol, invoice_pos.sale.previous_dues, 2) }}
+                      {{ formatPriceWithSymbol(invoice_pos.symbol, invoicePreviousDues, 2) }}
                     </td>
                   </tr>
-                  <tr v-if="Number(invoice_pos.sale.previous_dues) > 0">
+                  <tr v-if="showNetBalanceRow">
                     <td class="total">{{$t('Net_Balance')}}</td>
                     <td style="text-align:right" class="total">
-                      {{ formatPriceWithSymbol(invoice_pos.symbol, Number(invoice_pos.sale.previous_dues) + (invoice_pos.sale.GrandTotal - invoice_pos.sale.paid_amount), 2) }}
+                      {{ formatPriceWithSymbol(invoice_pos.symbol, invoiceNetBalance, 2) }}
                     </td>
                   </tr>
                 </tbody>
@@ -1660,16 +1700,16 @@
                       {{ formatPriceWithSymbol(invoice_pos.symbol, (invoice_pos.sale.GrandTotal - invoice_pos.sale.paid_amount), 2) }}
                     </td>
                   </tr>
-                  <tr v-if="Number(invoice_pos.sale.previous_dues) > 0">
+                  <tr v-if="showPreviousDuesRow">
                     <td class="total">{{$t('Previous_Dues')}}</td>
                     <td style="text-align:right;" class="total">
-                      {{ formatPriceWithSymbol(invoice_pos.symbol, invoice_pos.sale.previous_dues, 2) }}
+                      {{ formatPriceWithSymbol(invoice_pos.symbol, invoicePreviousDues, 2) }}
                     </td>
                   </tr>
-                  <tr v-if="Number(invoice_pos.sale.previous_dues) > 0">
+                  <tr v-if="showNetBalanceRow">
                     <td class="total">{{$t('Net_Balance')}}</td>
                     <td style="text-align:right;" class="total">
-                      {{ formatPriceWithSymbol(invoice_pos.symbol, Number(invoice_pos.sale.previous_dues) + (invoice_pos.sale.GrandTotal - invoice_pos.sale.paid_amount), 2) }}
+                      {{ formatPriceWithSymbol(invoice_pos.symbol, invoiceNetBalance, 2) }}
                     </td>
                   </tr>
                 </tbody>
@@ -1731,102 +1771,94 @@
 
             <!-- Layout 4 - Bilingual (Arabic + English) -->
             <div v-else-if="currentReceiptLayout === 4" class="receipt-layout-4">
-              <div class="info text-center">
-                <div class="invoice_logo mb-2" v-show="pos_settings.show_logo !== 0">
+              <div class="info text-center bl4-header">
+                <div class="invoice_logo mb-1" v-show="pos_settings.show_logo !== 0">
                   <img :src="'/images/'+invoice_pos.setting.logo" alt :width="pos_settings.logo_size || 60" :height="pos_settings.logo_size || 60">
                 </div>
-                <div>
-                  <strong style="font-size:13px;">{{invoice_pos.setting.company_name_ar}}</strong><br>
-                  <strong style="font-size:12px;">{{invoice_pos.setting.CompanyName}}</strong>
-                </div>
-                <div v-if="invoice_pos.setting.CompanyAdress" style="font-size:10px;margin-top:2px;">{{invoice_pos.setting.CompanyAdress}}</div>
-                <div v-if="invoice_pos.setting.CompanyPhone" style="font-size:10px;">{{invoice_pos.setting.CompanyPhone}}</div>
-                <div v-if="invoice_pos.setting.email" v-show="pos_settings.show_email" style="font-size:10px;">{{invoice_pos.setting.email}}</div>
-                <div v-if="invoice_pos.setting.vat_number" style="font-size:11px;font-weight:bold;margin-top:4px;">
+                <div class="bl4-company-ar" v-if="invoice_pos.setting.company_name_ar">{{invoice_pos.setting.company_name_ar}}</div>
+                <div class="bl4-company-en">{{invoice_pos.setting.CompanyName}}</div>
+                <div class="bl4-contact" v-if="invoice_pos.setting.CompanyAdress">{{invoice_pos.setting.CompanyAdress}}</div>
+                <div class="bl4-contact" v-if="invoice_pos.setting.CompanyPhone">{{invoice_pos.setting.CompanyPhone}}</div>
+                <div class="bl4-contact" v-if="invoice_pos.setting.email" v-show="pos_settings.show_email">{{invoice_pos.setting.email}}</div>
+                <div v-if="invoice_pos.setting.vat_number" class="bl4-trn">
                   الرقم الضريبي / TRN : {{invoice_pos.setting.vat_number}}
                 </div>
-                <div class="mt-2 mb-2" style="border-top:1px dashed #000;border-bottom:1px dashed #000;padding:4px 0;">
-                  <strong>فاتورة ضريبية مبسطة</strong><br>
-                  <strong>Simplified Tax Invoice</strong>
+                <div class="bl4-title">
+                  <div class="bl4-title-ar">فاتورة ضريبية مبسطة</div>
+                  <div class="bl4-title-en">SIMPLIFIED TAX INVOICE</div>
                 </div>
               </div>
 
-              <div style="font-size:10px;">
-                <div v-if="invoice_pos.sale && invoice_pos.sale.Ref && pos_settings.show_reference !== 0" style="display:flex;justify-content:space-between;">
-                  <span>Invoice No</span>
-                  <span>{{invoice_pos.sale.Ref}}</span>
-                  <span>رقم الفاتورة</span>
+              <div class="bl4-meta">
+                <div v-if="invoice_pos.sale && invoice_pos.sale.Ref && pos_settings.show_reference !== 0" class="bl4-meta-row">
+                  <span class="bl4-meta-en">Invoice No</span>
+                  <span class="bl4-meta-val">{{invoice_pos.sale.Ref}}</span>
+                  <span class="bl4-meta-ar">رقم الفاتورة</span>
                 </div>
-                <div v-show="pos_settings.show_date !== 0" style="display:flex;justify-content:space-between;">
-                  <span>Date</span>
-                  <span>{{invoice_pos.sale.date}}</span>
-                  <span>تاريخ</span>
+                <div v-show="pos_settings.show_date !== 0" class="bl4-meta-row">
+                  <span class="bl4-meta-en">Date</span>
+                  <span class="bl4-meta-val">{{invoice_pos.sale.date}}</span>
+                  <span class="bl4-meta-ar">التاريخ</span>
                 </div>
-                <div v-show="pos_settings.show_seller !== 0" style="display:flex;justify-content:space-between;">
-                  <span>Seller</span>
-                  <span>{{invoice_pos.sale.seller_name}}</span>
-                  <span>البائع</span>
+                <div v-show="pos_settings.show_seller !== 0" class="bl4-meta-row">
+                  <span class="bl4-meta-en">Seller</span>
+                  <span class="bl4-meta-val">{{invoice_pos.sale.seller_name}}</span>
+                  <span class="bl4-meta-ar">البائع</span>
                 </div>
-                <div v-show="pos_settings.show_customer" style="display:flex;justify-content:space-between;">
-                  <span>Customer</span>
-                  <span>{{invoice_pos.sale.client_name}}</span>
-                  <span>العميل</span>
+                <div v-show="pos_settings.show_customer" class="bl4-meta-row">
+                  <span class="bl4-meta-en">Customer</span>
+                  <span class="bl4-meta-val">{{invoice_pos.sale.client_name}}</span>
+                  <span class="bl4-meta-ar">العميل</span>
                 </div>
-                <div v-show="pos_settings.show_Warehouse" style="display:flex;justify-content:space-between;">
-                  <span>Warehouse</span>
-                  <span>{{invoice_pos.sale.warehouse_name}}</span>
-                  <span>المستودع</span>
+                <div v-show="pos_settings.show_Warehouse" class="bl4-meta-row">
+                  <span class="bl4-meta-en">Warehouse</span>
+                  <span class="bl4-meta-val">{{invoice_pos.sale.warehouse_name}}</span>
+                  <span class="bl4-meta-ar">المستودع</span>
                 </div>
               </div>
 
-              <table style="width:100%;margin-top:8px;font-size:10px;border-top:1px dashed #000;">
+              <table class="bl4-items">
+                <colgroup><col style="width:44%"><col style="width:14%"><col style="width:20%"><col style="width:22%"></colgroup>
                 <thead>
                   <tr>
-                    <th style="text-align:left;padding:4px 0;">Product<br>المنتج</th>
-                    <th style="text-align:center;padding:4px 0;">Qty<br>كمية</th>
-                    <th style="text-align:center;padding:4px 0;">Rate<br>معدل</th>
-                    <th style="text-align:right;padding:4px 0;">Amount<br>مجموع</th>
+                    <th class="bl4-th-left">Product<br>المنتج</th>
+                    <th class="bl4-th-center">Qty<br>الكمية</th>
+                    <th class="bl4-th-right">Rate<br>السعر</th>
+                    <th class="bl4-th-right">Amount<br>الإجمالي</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="detail_invoice in invoice_pos.details" style="border-bottom:1px dashed #eee;">
+                  <tr v-for="detail_invoice in invoice_pos.details" class="bl4-item-row">
                     <td>
-                      {{detail_invoice.name}}
-                      <br v-if="Number(detail_invoice.tax_percent || detail_invoice.tax_rate || 0) > 0">
-                      <small v-if="Number(detail_invoice.tax_percent || detail_invoice.tax_rate || 0) > 0">VAT @ {{ formatNumber(Number(detail_invoice.tax_percent || detail_invoice.tax_rate || 0),2) }}% ({{ formatPriceDisplay(detail_invoice.total * Number(detail_invoice.tax_percent || detail_invoice.tax_rate || 0) / 100, 2) }})</small>
-                      <br v-if="pos_settings.show_product_discount !== 0 && Number(detail_invoice.DiscountNet || 0) > 0">
-                      <small v-if="pos_settings.show_product_discount !== 0 && Number(detail_invoice.DiscountNet || 0) > 0" style="color:#666;font-style:italic;">Discount / تخفيض: -{{ formatPriceDisplay(Number(detail_invoice.DiscountNet) * Number(detail_invoice.quantity), 2) }}</small>
-                      <br v-show="detail_invoice.is_imei && detail_invoice.imei_number !==null">
-                      <span v-show="detail_invoice.is_imei && detail_invoice.imei_number !==null ">IMEI/SN الرقم التسلسلي : {{detail_invoice.imei_number}}</span>
-                      <br v-if="detail_invoice.pack_name && Number(detail_invoice.pack_multiplier) > 1">
-                      <small v-if="detail_invoice.pack_name && Number(detail_invoice.pack_multiplier) > 1" style="color:#666;">(×{{ detail_invoice.pack_multiplier }}) = {{ formatNumber(detail_invoice.quantity * detail_invoice.pack_multiplier, 2) }} {{ detail_invoice.unit_sale || ($t('Pcs') || 'pcs') }}</small>
+                      <div class="bl4-item-name">{{detail_invoice.name}}</div>
+                      <div class="bl4-item-sub" v-if="Number(detail_invoice.tax_percent || detail_invoice.tax_rate || 0) > 0">VAT @ {{ formatNumber(Number(detail_invoice.tax_percent || detail_invoice.tax_rate || 0),2) }}% ({{ formatPriceDisplay(detail_invoice.total * Number(detail_invoice.tax_percent || detail_invoice.tax_rate || 0) / 100, 2) }})</div>
+                      <div class="bl4-item-sub" v-if="pos_settings.show_product_discount !== 0 && Number(detail_invoice.DiscountNet || 0) > 0">Discount / خصم: -{{ formatPriceDisplay(Number(detail_invoice.DiscountNet) * Number(detail_invoice.quantity), 2) }}</div>
+                      <div class="bl4-item-sub" v-show="detail_invoice.is_imei && detail_invoice.imei_number !==null">IMEI/SN الرقم التسلسلي : {{detail_invoice.imei_number}}</div>
+                      <div class="bl4-item-sub" v-if="detail_invoice.pack_name && Number(detail_invoice.pack_multiplier) > 1">(×{{ detail_invoice.pack_multiplier }}) = {{ formatNumber(detail_invoice.quantity * detail_invoice.pack_multiplier, 2) }} {{ detail_invoice.unit_sale || ($t('Pcs') || 'pcs') }}</div>
                     </td>
-                    <td style="text-align:center">{{formatNumber(detail_invoice.quantity,2)}} {{ packLineUnit(detail_invoice) }}</td>
-                    <td style="text-align:center">{{ formatPriceDisplay(detail_invoice.total/detail_invoice.quantity,2) }}</td>
-                    <td style="text-align:right">{{ formatPriceDisplay(detail_invoice.total,2) }}</td>
+                    <td class="bl4-td-center">{{formatNumber(detail_invoice.quantity,2)}} {{ packLineUnit(detail_invoice) }}</td>
+                    <td class="bl4-td-right">{{ formatPriceDisplay(detail_invoice.total/detail_invoice.quantity,2) }}</td>
+                    <td class="bl4-td-right">{{ formatPriceDisplay(detail_invoice.total,2) }}</td>
                   </tr>
                 </tbody>
               </table>
 
-              <table style="width:100%;font-size:10px;border-top:1px dashed #000;margin-top:4px;">
-                <colgroup><col style="width:35%"><col style="width:5%"><col style="width:25%"><col style="width:35%"></colgroup>
+              <table class="bl4-totals">
+                <colgroup><col style="width:32%"><col style="width:36%"><col style="width:32%"></colgroup>
                 <tbody>
                   <tr>
-                    <td style="text-align:left" class="total">Sub Total</td>
-                    <td class="total">:</td>
-                    <td style="text-align:center" class="total">{{ formatPriceWithSymbol(invoice_pos.symbol, pos_settings.show_items_tax != 0 ? (invoiceSubtotal - invoiceDetailsTaxTotal) : invoiceSubtotal, 2) }}</td>
-                    <td style="text-align:right" class="total">المجموع الفرعي</td>
+                    <td class="bl4-t-en">Sub Total</td>
+                    <td class="bl4-t-val">{{ formatPriceWithSymbol(invoice_pos.symbol, pos_settings.show_items_tax != 0 ? (invoiceSubtotal - invoiceDetailsTaxTotal) : invoiceSubtotal, 2) }}</td>
+                    <td class="bl4-t-ar">المجموع الفرعي</td>
                   </tr>
                   <tr v-show="pos_settings.show_items_tax != 0 && Number(invoiceDetailsTaxTotal) > 0">
-                    <td style="text-align:left" class="total">Total Items Tax</td>
-                    <td class="total">:</td>
-                    <td style="text-align:center" class="total">{{ formatPriceWithSymbol(invoice_pos.symbol, invoiceDetailsTaxTotal, 2) }}</td>
-                    <td style="text-align:right" class="total">إجمالي ضريبة العناصر</td>
+                    <td class="bl4-t-en">Total Items Tax</td>
+                    <td class="bl4-t-val">{{ formatPriceWithSymbol(invoice_pos.symbol, invoiceDetailsTaxTotal, 2) }}</td>
+                    <td class="bl4-t-ar">إجمالي ضريبة الأصناف</td>
                   </tr>
                   <tr v-show="pos_settings.show_discount">
-                    <td style="text-align:left" class="total">Discount</td>
-                    <td class="total">:</td>
-                    <td style="text-align:center" class="total">
+                    <td class="bl4-t-en">Discount</td>
+                    <td class="bl4-t-val">
                       <template v-if="String(invoice_pos.sale.discount_Method || '2') === '1'">
                         {{ formatNumber(invoice_pos.sale.discount, 2) }}% ({{ formatPriceWithSymbol(invoice_pos.symbol, calculatedManualDiscountAmount ,2) }})
                       </template>
@@ -1834,102 +1866,92 @@
                         {{ formatPriceWithSymbol(invoice_pos.symbol, calculatedManualDiscountAmount ,2) }}
                       </template>
                     </td>
-                    <td style="text-align:right" class="total">تخفيض</td>
+                    <td class="bl4-t-ar">الخصم</td>
                   </tr>
                   <tr v-show="pos_settings.show_discount && invoice_pos.sale.discount_from_points && Number(invoice_pos.sale.discount_from_points) > 0">
-                    <td style="text-align:left" class="total">Discount from Points</td>
-                    <td class="total">:</td>
-                    <td style="text-align:center" class="total">{{ formatPriceWithSymbol(invoice_pos.symbol, invoice_pos.sale.discount_from_points ,2) }}</td>
-                    <td style="text-align:right" class="total">خصم من النقاط</td>
+                    <td class="bl4-t-en">Discount from Points</td>
+                    <td class="bl4-t-val">{{ formatPriceWithSymbol(invoice_pos.symbol, invoice_pos.sale.discount_from_points ,2) }}</td>
+                    <td class="bl4-t-ar">خصم من النقاط</td>
                   </tr>
                   <template v-if="invoicePromotions.length > 0">
                     <tr v-for="(promo, idx) in invoicePromotions" :key="'promo-d-' + idx + '-' + promo.id">
-                      <td style="text-align:left" class="total">Promotion — {{ promo.name }}<span v-if="promo.code"> ({{ promo.code }})</span></td>
-                      <td class="total">:</td>
-                      <td style="text-align:center" class="total">−{{ formatPriceWithSymbol(invoice_pos.symbol, promo.amount, 2) }}</td>
-                      <td style="text-align:right" class="total">العروض</td>
+                      <td class="bl4-t-en">Promotion — {{ promo.name }}<span v-if="promo.code"> ({{ promo.code }})</span></td>
+                      <td class="bl4-t-val">−{{ formatPriceWithSymbol(invoice_pos.symbol, promo.amount, 2) }}</td>
+                      <td class="bl4-t-ar">العروض</td>
                     </tr>
                   </template>
                   <tr v-else-if="Number(invoice_pos.sale.promotion_discount || 0) > 0">
-                    <td style="text-align:left" class="total">Promotion<span v-if="invoice_pos.sale.promotion_code"> ({{ invoice_pos.sale.promotion_code }})</span></td>
-                    <td class="total">:</td>
-                    <td style="text-align:center" class="total">−{{ formatPriceWithSymbol(invoice_pos.symbol, invoice_pos.sale.promotion_discount, 2) }}</td>
-                    <td style="text-align:right" class="total">العروض</td>
+                    <td class="bl4-t-en">Promotion<span v-if="invoice_pos.sale.promotion_code"> ({{ invoice_pos.sale.promotion_code }})</span></td>
+                    <td class="bl4-t-val">−{{ formatPriceWithSymbol(invoice_pos.symbol, invoice_pos.sale.promotion_discount, 2) }}</td>
+                    <td class="bl4-t-ar">العروض</td>
                   </tr>
                   <tr v-show="pos_settings.show_tax && Number(invoice_pos.sale.taxe || 0) > 0">
-                    <td style="text-align:left" class="total">VAT @ Total</td>
-                    <td class="total">:</td>
-                    <td style="text-align:center" class="total">{{ formatPriceWithSymbol(invoice_pos.symbol, invoice_pos.sale.taxe ,2) }}</td>
-                    <td style="text-align:right" class="total">قيمة الضريبة</td>
+                    <td class="bl4-t-en">VAT</td>
+                    <td class="bl4-t-val">{{ formatPriceWithSymbol(invoice_pos.symbol, invoice_pos.sale.taxe ,2) }}</td>
+                    <td class="bl4-t-ar">ضريبة القيمة المضافة</td>
                   </tr>
                   <tr v-show="pos_settings.show_shipping">
-                    <td style="text-align:left" class="total">Shipping</td>
-                    <td class="total">:</td>
-                    <td style="text-align:center" class="total">{{ formatPriceWithSymbol(invoice_pos.symbol, invoice_pos.sale.shipping ,2) }}</td>
-                    <td style="text-align:right" class="total">الشحن</td>
+                    <td class="bl4-t-en">Shipping</td>
+                    <td class="bl4-t-val">{{ formatPriceWithSymbol(invoice_pos.symbol, invoice_pos.sale.shipping ,2) }}</td>
+                    <td class="bl4-t-ar">الشحن</td>
                   </tr>
                 </tbody>
               </table>
 
-              <table style="width:100%;font-size:10px;font-weight:bold;border-top:1px dashed #000;border-bottom:1px dashed #000;margin-top:4px;padding:4px 0;">
-                <colgroup><col style="width:35%"><col style="width:5%"><col style="width:25%"><col style="width:35%"></colgroup>
+              <table class="bl4-grand">
+                <colgroup><col style="width:32%"><col style="width:36%"><col style="width:32%"></colgroup>
                 <tbody>
                   <tr>
-                    <td style="text-align:left">Grand Total</td>
-                    <td>:</td>
-                    <td style="text-align:center">{{ formatPriceWithSymbol(invoice_pos.symbol, invoice_pos.sale.GrandTotal ,2) }}</td>
-                    <td style="text-align:right">المبلغ الإجمالي</td>
+                    <td class="bl4-t-en">Grand Total</td>
+                    <td class="bl4-t-val">{{ formatPriceWithSymbol(invoice_pos.symbol, invoice_pos.sale.GrandTotal ,2) }}</td>
+                    <td class="bl4-t-ar">المبلغ الإجمالي</td>
                   </tr>
                 </tbody>
               </table>
 
-              <table style="width:100%;font-size:10px;margin-top:4px;">
-                <colgroup><col style="width:35%"><col style="width:5%"><col style="width:25%"><col style="width:35%"></colgroup>
+              <table class="bl4-pays">
+                <colgroup><col style="width:32%"><col style="width:36%"><col style="width:32%"></colgroup>
                 <tbody>
                   <tr v-show="pos_settings.show_paid !== 0">
-                    <td style="text-align:left"><strong>Paid Amount</strong></td>
-                    <td><strong>:</strong></td>
-                    <td style="text-align:center">{{ formatPriceWithSymbol(invoice_pos.symbol, invoice_pos.sale.paid_amount ,2) }}</td>
-                    <td style="text-align:right"><strong>المبلغ المدفوع</strong></td>
+                    <td class="bl4-t-en">Paid Amount</td>
+                    <td class="bl4-t-val">{{ formatPriceWithSymbol(invoice_pos.symbol, invoice_pos.sale.paid_amount ,2) }}</td>
+                    <td class="bl4-t-ar">المبلغ المدفوع</td>
                   </tr>
                   <tr v-show="pos_settings.show_due !== 0">
-                    <td style="text-align:left"><strong>Balance</strong></td>
-                    <td><strong>:</strong></td>
-                    <td style="text-align:center">{{ formatPriceWithSymbol(invoice_pos.symbol, (invoice_pos.sale.GrandTotal - invoice_pos.sale.paid_amount), 2) }}</td>
-                    <td style="text-align:right"><strong>الرصيد</strong></td>
+                    <td class="bl4-t-en">Balance Due</td>
+                    <td class="bl4-t-val">{{ formatPriceWithSymbol(invoice_pos.symbol, (invoice_pos.sale.GrandTotal - invoice_pos.sale.paid_amount), 2) }}</td>
+                    <td class="bl4-t-ar">المبلغ المتبقي</td>
                   </tr>
-                  <tr v-if="Number(invoice_pos.sale.previous_dues) > 0">
-                    <td style="text-align:left"><strong>Previous Dues</strong></td>
-                    <td><strong>:</strong></td>
-                    <td style="text-align:center">{{ formatPriceWithSymbol(invoice_pos.symbol, invoice_pos.sale.previous_dues, 2) }}</td>
-                    <td style="text-align:right"><strong>المستحقات السابقة</strong></td>
+                  <tr v-if="showPreviousDuesRow">
+                    <td class="bl4-t-en">Previous Dues</td>
+                    <td class="bl4-t-val">{{ formatPriceWithSymbol(invoice_pos.symbol, invoicePreviousDues, 2) }}</td>
+                    <td class="bl4-t-ar">المستحقات السابقة</td>
                   </tr>
-                  <tr v-if="Number(invoice_pos.sale.previous_dues) > 0">
-                    <td style="text-align:left"><strong>Net Balance</strong></td>
-                    <td><strong>:</strong></td>
-                    <td style="text-align:center">{{ formatPriceWithSymbol(invoice_pos.symbol, Number(invoice_pos.sale.previous_dues) + (invoice_pos.sale.GrandTotal - invoice_pos.sale.paid_amount), 2) }}</td>
-                    <td style="text-align:right"><strong>الرصيد الصافي</strong></td>
+                  <tr v-if="showNetBalanceRow">
+                    <td class="bl4-t-en">Net Balance</td>
+                    <td class="bl4-t-val">{{ formatPriceWithSymbol(invoice_pos.symbol, invoiceNetBalance, 2) }}</td>
+                    <td class="bl4-t-ar">الرصيد الصافي</td>
                   </tr>
                 </tbody>
               </table>
 
-              <table class="change mt-3" style="font-size:10px;width:100%;" v-show="pos_settings.show_payments !== 0 && invoice_pos.sale.paid_amount > 0">
+              <table class="bl4-payments" v-show="pos_settings.show_payments !== 0 && invoice_pos.sale.paid_amount > 0">
                 <thead>
-                  <tr style="background:#eee;">
-                    <th style="text-align:left;" colspan="1">Paid By / طريقة الدفع:</th>
-                    <th style="text-align:center;" colspan="2">Amount / المبلغ:</th>
-                    <th style="text-align:right;" colspan="1">Change / الباقي:</th>
+                  <tr>
+                    <th class="bl4-th-left">Paid By<br>طريقة الدفع</th>
+                    <th class="bl4-th-center">Amount<br>المبلغ</th>
+                    <th class="bl4-th-right">Change<br>الباقي</th>
                   </tr>
                 </thead>
                 <tbody>
                   <template v-for="payment_pos in payments" :key="'pay-' + payment_pos.id">
                     <tr>
-                      <td style="text-align:left;" colspan="1">{{payment_pos.payment_method?payment_pos.payment_method.name:'---'}}</td>
-                      <td style="text-align:center;" colspan="2">{{ formatPriceDisplay(payment_pos.montant ,2) }}</td>
-                      <td style="text-align:right;" colspan="1">{{ formatPriceDisplay(payment_pos.change ,2) }}</td>
+                      <td class="bl4-td-left">{{payment_pos.payment_method?payment_pos.payment_method.name:'---'}}</td>
+                      <td class="bl4-td-center">{{ formatPriceDisplay(payment_pos.montant ,2) }}</td>
+                      <td class="bl4-td-right">{{ formatPriceDisplay(payment_pos.change ,2) }}</td>
                     </tr>
                     <tr v-if="payment_pos.notes" :key="'pay4-note-' + payment_pos.id">
-                      <td colspan="4" style="font-size:9px;font-style:italic;padding-bottom:4px;white-space:pre-line;">
+                      <td colspan="3" class="bl4-pay-note">
                         {{$t('Payment_note')}} / ملاحظة الدفع: {{payment_pos.notes}}
                       </td>
                     </tr>
@@ -1937,12 +1959,19 @@
                 </tbody>
               </table>
 
-              <div id="legalcopy" class="ml-2">
-                <div v-if="invoice_pos.sale && invoice_pos.sale.notes" style="font-size:9px;font-style:italic;padding-bottom:4px;white-space:pre-line;">
+              <div id="legalcopy" class="bl4-footer">
+                <div v-if="invoice_pos.sale && invoice_pos.sale.notes" class="bl4-sale-note">
                   {{$t('sale_note')}} / ملاحظة البيع: {{invoice_pos.sale.notes}}
                 </div>
-                <div v-show="pos_settings.show_note && pos_settings.note_customer" class="mt-3" style="border-top:1px dashed #000;padding-top:6px;font-size:9px;line-height:1.5;text-align:center;white-space:pre-line;">
-                  <strong>{{pos_settings.note_customer}}</strong>
+                <div class="bl4-thanks">
+                  <div class="bl4-thanks-ar">شكراً لتسوقكم معنا</div>
+                  <div class="bl4-thanks-en">Thank You For Shopping With Us!</div>
+                </div>
+                <div v-show="pos_settings.show_note && pos_settings.note_customer" class="bl4-policy">{{pos_settings.note_customer}}</div>
+                <div class="bl4-footer-contact" v-if="invoice_pos.setting.CompanyPhone || invoice_pos.setting.email">
+                  <span v-if="invoice_pos.setting.CompanyPhone">{{invoice_pos.setting.CompanyPhone}}</span>
+                  <span v-if="invoice_pos.setting.CompanyPhone && invoice_pos.setting.email"> &middot; </span>
+                  <span v-if="invoice_pos.setting.email">{{invoice_pos.setting.email}}</span>
                 </div>
                 <!-- Receipt QR codes (ZATCA + Invoice URL) -->
                 <div v-if="(invoice_pos.setting && invoice_pos.setting.zatca_enabled && invoice_pos.zatca_qr && pos_settings.show_zatca_qr !== 0) || (pos_settings.show_barcode !== 0 && invoice_pos.sale && invoice_pos.sale.Ref)" class="receipt-qr-row mt-2">
@@ -2067,13 +2096,13 @@
                     <td>{{$t('Due')}}</td>
                     <td>{{ formatPriceWithSymbol(invoice_pos.symbol, (invoice_pos.sale.GrandTotal - invoice_pos.sale.paid_amount), 2) }}</td>
                   </tr>
-                  <tr v-if="Number(invoice_pos.sale.previous_dues) > 0">
+                  <tr v-if="showPreviousDuesRow">
                     <td>{{$t('Previous_Dues')}}</td>
-                    <td>{{ formatPriceWithSymbol(invoice_pos.symbol, invoice_pos.sale.previous_dues, 2) }}</td>
+                    <td>{{ formatPriceWithSymbol(invoice_pos.symbol, invoicePreviousDues, 2) }}</td>
                   </tr>
-                  <tr v-if="Number(invoice_pos.sale.previous_dues) > 0">
+                  <tr v-if="showNetBalanceRow">
                     <td>{{$t('Net_Balance')}}</td>
-                    <td>{{ formatPriceWithSymbol(invoice_pos.symbol, Number(invoice_pos.sale.previous_dues) + (invoice_pos.sale.GrandTotal - invoice_pos.sale.paid_amount), 2) }}</td>
+                    <td>{{ formatPriceWithSymbol(invoice_pos.symbol, invoiceNetBalance, 2) }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -2398,139 +2427,174 @@
 
   <!-- Quick Add Customer Modal -->
   <validation-observer ref="Quick_Add_Customer_Form">
-    <b-modal hide-footer size="lg" id="Quick_Add_Customer" :title="$t('Quick_Add_Customer')">
-      <b-form @submit.prevent="Submit_Quick_Add_Customer" class="quick-add-customer-form">
-        <b-row>
-          <!-- Customer Name -->
-          <b-col md="6" sm="12">
-            <validation-provider
-              name="Name Customer"
-              :rules="{ required: true}"
-              v-slot="validationContext"
-            >
-              <b-form-group :label="$t('CustomerName') + ' ' + '*'">
-                <b-form-input
-                  :state="getValidationState(validationContext)"
-                  aria-describedby="name-feedback"
-                  label="name"
-                  :placeholder="$t('CustomerName')"
-                  v-model="client.name"
-                ></b-form-input>
-                <b-form-invalid-feedback id="name-feedback">{{ validationContext.errors[0] }}</b-form-invalid-feedback>
-              </b-form-group>
+    <b-modal
+      hide-footer
+      hide-header
+      id="Quick_Add_Customer"
+      modal-class="qac-modal"
+      dialog-class="qac-dialog"
+      body-class="qac-body"
+      :title="$t('Quick_Add_Customer')"
+      @shown="focusQuickAddName"
+    >
+      <b-form @submit.prevent="Submit_Quick_Add_Customer" class="qac-form" novalidate>
+        <header class="qac-header">
+          <button
+            type="button"
+            class="qac-close"
+            :aria-label="$t('Close')"
+            @click="$bvModal.hide('Quick_Add_Customer')"
+          >
+            <lucide-icon name="x" />
+          </button>
+          <div class="qac-avatar" :class="{ 'has-name': quickAddNameTrimmed }">
+            <span v-if="quickAddNameTrimmed">{{ catInitial(quickAddNameTrimmed) }}</span>
+            <lucide-icon v-else name="user-plus" />
+          </div>
+          <div class="qac-header-text">
+            <div class="qac-eyebrow">{{ $t('Quick_Add_Customer') }}</div>
+            <div class="qac-title">{{ quickAddNameTrimmed || ($t('New_Customer') || 'New customer') }}</div>
+            <div class="qac-sub">
+              <lucide-icon name="check" />
+              <span>{{ $t('Selected_for_this_sale') || 'Selected for this sale once saved' }}</span>
+            </div>
+          </div>
+        </header>
+
+        <div class="qac-scroll">
+          <!-- Essentials: the two fields a cashier actually needs at the counter -->
+          <section class="qac-essentials">
+            <validation-provider name="Name Customer" :rules="{ required: true }" v-slot="validationContext">
+              <label class="qac-field" :class="{ 'is-invalid': validationContext.errors[0] }">
+                <span class="qac-label">{{ $t('CustomerName') }} <i>*</i></span>
+                <span class="qac-control">
+                  <lucide-icon name="user" />
+                  <input
+                    ref="quickAddNameInput"
+                    type="text"
+                    v-model="client.name"
+                    :placeholder="$t('CustomerName')"
+                    autocomplete="off"
+                  />
+                </span>
+                <span v-if="validationContext.errors[0]" class="qac-error">{{ validationContext.errors[0] }}</span>
+              </label>
             </validation-provider>
-          </b-col>
-          
-          <!-- Customer Email -->
-          <b-col md="6" sm="12">
-            <b-form-group :label="$t('Email')">
-              <b-form-input
-                label="email"
-                v-model="client.email"
-                :placeholder="$t('Email')"
-              ></b-form-input>
-            </b-form-group>
-          </b-col>
 
-          <!-- Customer Phone -->
-          <b-col md="6" sm="12">
-            <validation-provider
-              name="Phone"
-              :rules="{ required: true}"
-              v-slot="validationContext"
-            >
-              <b-form-group :label="$t('Phone') + ' ' + '*'">
-                <b-form-input
-                  :state="getValidationState(validationContext)"
-                  aria-describedby="phone-feedback"
-                  label="Phone"
-                  v-model="client.phone"
-                  @input="onPhoneChanged"
-                  :placeholder="$t('Phone')"
-                ></b-form-input>
-                <b-form-invalid-feedback id="phone-feedback">{{ validationContext.errors[0] }}</b-form-invalid-feedback>
-                <b-alert
-                  show
-                  variant="warning"
-                  class="mt-1 py-1 px-2"
-                  v-if="phone_duplicate"
-                >{{ $t('Phone_Already_Registered') }}</b-alert>
-              </b-form-group>
+            <validation-provider name="Phone" :rules="{ required: true }" v-slot="validationContext">
+              <label class="qac-field" :class="{ 'is-invalid': validationContext.errors[0] || phone_duplicate }">
+                <span class="qac-label">
+                  {{ $t('Phone') }} <i>*</i>
+                  <span v-if="phone_check_state" class="qac-phone-state" :class="'is-' + phone_check_state">
+                    <span v-if="phone_check_state === 'checking'" class="qac-dot"></span>
+                    <lucide-icon v-else-if="phone_check_state === 'ok'" name="check" />
+                    <lucide-icon v-else name="alert-circle" />
+                    <span>{{ quickAddPhoneStateLabel }}</span>
+                  </span>
+                </span>
+                <span class="qac-control qac-control-mono">
+                  <lucide-icon name="phone" />
+                  <input
+                    type="tel"
+                    inputmode="tel"
+                    v-model="client.phone"
+                    @input="onPhoneChanged"
+                    :placeholder="$t('Phone')"
+                    autocomplete="off"
+                  />
+                </span>
+                <span v-if="validationContext.errors[0]" class="qac-error">{{ validationContext.errors[0] }}</span>
+              </label>
             </validation-provider>
-          </b-col>
+          </section>
 
-          <!-- Customer Country -->
-          <b-col md="6" sm="12">
-            <b-form-group :label="$t('Country')">
-              <b-form-input
-                label="Country"
-                v-model="client.country"
-                :placeholder="$t('Country')"
-              ></b-form-input>
-            </b-form-group>
-          </b-col>
+          <!-- Everything else is optional and folded away by default -->
+          <button
+            type="button"
+            class="qac-more-toggle"
+            :aria-expanded="quickAddMore ? 'true' : 'false'"
+            @click="quickAddMore = !quickAddMore"
+          >
+            <span class="qac-more-line"></span>
+            <span class="qac-more-label">
+              <lucide-icon name="chevron-down" :class="{ 'is-open': quickAddMore }" />
+              <span>{{ quickAddMore ? ($t('Fewer_details') || 'Fewer details') : ($t('More_details') || 'More details') }}</span>
+              <em>{{ $t('Optional') || 'Optional' }}</em>
+            </span>
+            <span class="qac-more-line"></span>
+          </button>
 
-          <!-- Customer City -->
-          <b-col md="6" sm="12">
-            <b-form-group :label="$t('City')">
-              <b-form-input
-                label="City"
-                v-model="client.city"
-                :placeholder="$t('City')"
-              ></b-form-input>
-            </b-form-group>
-          </b-col>
-
-          <!-- Customer Tax Number -->
-          <b-col md="6" sm="12">
-            <b-form-group :label="$t('Tax_Number')">
-              <b-form-input
-                label="Tax Number"
-                v-model="client.tax_number"
-                :placeholder="$t('Tax_Number')"
-              ></b-form-input>
-            </b-form-group>
-          </b-col>
-
-          <!-- Customer Address -->
-          <b-col md="12" sm="12">
-            <b-form-group :label="$t('Adress')">
-              <textarea
-                label="Adress"
-                class="form-control"
-                rows="4"
-                v-model="client.adresse"
-                :placeholder="$t('Adress')"
-              ></textarea>
-            </b-form-group>
-          </b-col>
-
-          <b-col md="6" sm="12" class="mt-4 mb-4">
-            <div class="psx-form-check">
-              <input type="checkbox" v-model="client.is_royalty_eligible" class="psx-checkbox psx-form-check-input" id="is_royalty_eligible">
-              <label class="psx-form-check-label" for="is_royalty_eligible">
-                <h5>{{ $t('Is_Royalty_Eligible') }}</h5>
+          <section v-show="quickAddMore" class="qac-details">
+            <div class="qac-grid">
+              <label class="qac-field">
+                <span class="qac-label">{{ $t('Email') }}</span>
+                <span class="qac-control">
+                  <lucide-icon name="mail" />
+                  <input type="email" inputmode="email" v-model="client.email" :placeholder="$t('Email')" autocomplete="off" />
+                </span>
+              </label>
+              <label class="qac-field">
+                <span class="qac-label">{{ $t('Tax_Number') }}</span>
+                <span class="qac-control qac-control-mono">
+                  <lucide-icon name="file-text" />
+                  <input type="text" v-model="client.tax_number" :placeholder="$t('Tax_Number')" autocomplete="off" />
+                </span>
+              </label>
+              <label class="qac-field">
+                <span class="qac-label">{{ $t('Country') }}</span>
+                <span class="qac-control">
+                  <lucide-icon name="globe" />
+                  <input type="text" v-model="client.country" :placeholder="$t('Country')" autocomplete="off" />
+                </span>
+              </label>
+              <label class="qac-field">
+                <span class="qac-label">{{ $t('City') }}</span>
+                <span class="qac-control">
+                  <lucide-icon name="map-pin" />
+                  <input type="text" v-model="client.city" :placeholder="$t('City')" autocomplete="off" />
+                </span>
+              </label>
+              <label class="qac-field qac-span-2">
+                <span class="qac-label">{{ $t('Adress') }}</span>
+                <span class="qac-control qac-control-area">
+                  <lucide-icon name="home" />
+                  <textarea rows="2" v-model="client.adresse" :placeholder="$t('Adress')"></textarea>
+                </span>
               </label>
             </div>
-          </b-col>
+
+            <label class="qac-loyalty" for="qac_is_royalty_eligible">
+              <span class="qac-loyalty-icon"><lucide-icon name="star" /></span>
+              <span class="qac-loyalty-text">
+                <span class="qac-loyalty-title">{{ $t('Is_Royalty_Eligible') }}</span>
+                <span class="qac-loyalty-help">{{ $t('Earns_loyalty_points') || 'Earns points on every purchase' }}</span>
+              </span>
+              <span class="ps-switch">
+                <input type="checkbox" v-model="client.is_royalty_eligible" id="qac_is_royalty_eligible">
+                <span class="ps-switch-slider"></span>
+              </span>
+            </label>
+          </section>
 
           <!-- Custom Fields (same as CreateCustomer.vue, but for quick add) -->
-          <b-col md="12" sm="12" class="mt-3">
+          <section class="qac-custom">
             <CustomFieldsForm
               entity-type="client"
               v-model="quickAddCustomFieldValues"
             />
-          </b-col>
+          </section>
+        </div>
 
-          <b-col md="12" class="mt-3">
-            <b-button variant="secondary" class="mr-2" @click="$bvModal.hide('Quick_Add_Customer')">{{ $t('Cancel') }}</b-button>
-            <b-button variant="primary" type="submit" :disabled="SubmitProcessing">{{$t('submit')}}</b-button>
-            <div v-once class="typo__p" v-if="SubmitProcessing">
-              <div class="spinner sm spinner-primary mt-3"></div>
-            </div>
-          </b-col>
-
-        </b-row>
+        <footer class="qac-footer">
+          <button type="button" class="qac-btn qac-btn-ghost" @click="$bvModal.hide('Quick_Add_Customer')">
+            {{ $t('Cancel') }}
+          </button>
+          <button type="submit" class="qac-btn qac-btn-primary" :disabled="SubmitProcessing || phone_duplicate">
+            <span v-if="SubmitProcessing" class="qac-spinner"></span>
+            <lucide-icon v-else name="user-plus" />
+            <span>{{ $t('Save_Customer') || 'Save customer' }}</span>
+          </button>
+        </footer>
       </b-form>
     </b-modal>
   </validation-observer>
@@ -2584,7 +2648,7 @@
         <div class="ts-hero-amount-wrap">
           <div class="ts-hero-label">{{ $t('Total_Sales') }}</div>
           <div class="ts-hero-amount">
-            {{ formatPriceWithCurrentCurrency(today_sales.total_sales_amount || 0, 2) }}
+            {{ formatPriceBaseCurrency(today_sales.total_sales_amount || 0, 2) }}
           </div>
         </div>
 
@@ -2594,7 +2658,7 @@
             <div class="ts-hero-stat-info">
               <div class="ts-hero-stat-label">{{ $t('Total_Amount_Paid') }}</div>
               <div class="ts-hero-stat-val">
-                {{ formatPriceWithCurrentCurrency(today_sales.total_amount_paid || 0, 2) }}
+                {{ formatPriceBaseCurrency(today_sales.total_amount_paid || 0, 2) }}
               </div>
             </div>
           </div>
@@ -2604,7 +2668,7 @@
             <div class="ts-hero-stat-info">
               <div class="ts-hero-stat-label">{{ $t('Due') || 'Due' }}</div>
               <div class="ts-hero-stat-val">
-                {{ formatPriceWithCurrentCurrency(Math.max(0, (Number(today_sales.total_sales_amount) || 0) - (Number(today_sales.total_amount_paid) || 0)), 2) }}
+                {{ formatPriceBaseCurrency(Math.max(0, (Number(today_sales.total_sales_amount) || 0) - (Number(today_sales.total_amount_paid) || 0)), 2) }}
               </div>
             </div>
           </div>
@@ -2619,7 +2683,7 @@
             <span>{{ $t('Payment_Methods') || 'Payment Methods' }}</span>
           </div>
           <div class="ts-section-sub">
-            {{ formatPriceWithCurrentCurrency(today_sales.total_amount_paid || 0, 2) }}
+            {{ formatPriceBaseCurrency(today_sales.total_amount_paid || 0, 2) }}
           </div>
         </div>
 
@@ -2634,7 +2698,7 @@
               <div class="ts-method-row">
                 <div class="ts-method-name">{{ method.name }}</div>
                 <div class="ts-method-amount">
-                  {{ formatPriceWithCurrentCurrency(method.total || 0, 2) }}
+                  {{ formatPriceBaseCurrency(method.total || 0, 2) }}
                 </div>
               </div>
               <div class="ts-method-bar-wrap">
@@ -2707,6 +2771,17 @@
                 </div>
                 <span class="ps-switch">
                   <input type="checkbox" v-model="pos_settings.quick_add_customer">
+                  <span class="ps-switch-slider"></span>
+                </span>
+              </label>
+
+              <label class="ps-toggle">
+                <div class="ps-toggle-info">
+                  <div class="ps-toggle-label">{{$t('Show_Customer_Purchase_History_in_POS') || 'Customer purchase history'}}</div>
+                  <div class="ps-toggle-help">{{$t('Enable_customer_purchase_history_panel_in_POS') || 'Show a History button next to the selected customer'}}</div>
+                </div>
+                <span class="ps-switch">
+                  <input type="checkbox" v-model="pos_settings.show_customer_history">
                   <span class="ps-switch-slider"></span>
                 </span>
               </label>
@@ -2886,6 +2961,34 @@
               />
               <small class="ps-field-help d-block mt-1">{{ $t('Invoice_Format_help') }}</small>
             </div>
+          </div>
+
+          <!-- Keyboard shortcuts section. The preference lives in
+               localStorage (per device), so it is saved the moment the switch
+               is flipped and is deliberately NOT part of the pos_settings
+               payload sent by Save. -->
+          <div class="ps-section">
+            <div class="ps-section-title">
+              <lucide-icon name="keyboard" />
+              <span>{{ $t('POS_Keyboard_Shortcuts') }}</span>
+            </div>
+            <div class="ps-help-banner">{{ $t('Enable_Keyboard_Shortcuts_Help') }}</div>
+            <div class="ps-grid">
+              <label class="ps-toggle">
+                <div class="ps-toggle-info">
+                  <div class="ps-toggle-label">{{ $t('Enable_Keyboard_Shortcuts') }}</div>
+                  <div class="ps-toggle-help">{{ $t('Keyboard_Shortcuts_Device_Only') || 'This device only — saved as soon as you switch it.' }}</div>
+                </div>
+                <span class="ps-switch">
+                  <input type="checkbox" v-model="pos_shortcuts_enabled" @change="onTogglePosShortcuts">
+                  <span class="ps-switch-slider"></span>
+                </span>
+              </label>
+            </div>
+            <button type="button" class="ps-link" @click="show_shortcuts_guide">
+              <lucide-icon name="list" />
+              <span>{{ $t('View_Shortcuts') }}</span>
+            </button>
           </div>
 
           <!-- Footer -->
@@ -3408,6 +3511,17 @@
                   <span>{{ c.phone }}</span>
                 </span>
               </span>
+              <span
+                v-if="showCustomerHistoryEnabled"
+                role="button"
+                tabindex="0"
+                class="cust-drawer-card-history"
+                :title="$t('Purchase_History') || 'Purchase history'"
+                @click.stop="openCustomerHistory(c.value)"
+                @keydown.enter.stop.prevent="openCustomerHistory(c.value)"
+              >
+                <lucide-icon name="history" />
+              </span>
               <span v-if="selectedClientId === c.value" class="cust-drawer-card-check">
                 <lucide-icon name="check" />
               </span>
@@ -3418,6 +3532,261 @@
               <div class="cust-drawer-empty-text">
                 {{ custDrawerSearch ? ($t('No_results') || 'No results') : ($t('No_Customers') || 'No customers') }}
               </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </transition>
+
+    <!-- ============ Customer purchase history (reuses the customer modal theme) ============ -->
+    <transition name="cust-drawer">
+      <div
+        v-if="custHistoryOpen"
+        class="cust-drawer-backdrop"
+        @click.self="closeCustomerHistory"
+        @keydown.esc="closeCustomerHistory"
+      >
+        <section class="cust-drawer cust-hist" role="dialog" :aria-label="$t('Purchase_History') || 'Purchase history'">
+          <button type="button" class="cust-drawer-close" :aria-label="$t('Close')" @click="closeCustomerHistory">
+            <lucide-icon name="x" />
+          </button>
+
+          <header class="cust-drawer-header">
+            <div class="cust-drawer-hero-icon">
+              <lucide-icon name="history" />
+            </div>
+            <div class="cust-drawer-hero-text">
+              <div class="cust-drawer-hero-eyebrow">{{ $t('Purchase_History') || 'Purchase history' }}</div>
+              <div class="cust-drawer-hero-title">{{ custHistory.client.name || custHistoryClientLabel }}</div>
+              <div class="cust-drawer-hero-sub">
+                <span v-if="custHistory.client.phone"><lucide-icon name="phone" /> {{ custHistory.client.phone }}</span>
+                <span v-if="custHistory.client.phone && custHistory.client.email"> · </span>
+                <span v-if="custHistory.client.email">{{ custHistory.client.email }}</span>
+              </div>
+            </div>
+            <button
+              v-if="custHistoryClientId && selectedClientId !== custHistoryClientId"
+              type="button"
+              class="cust-drawer-quick-add"
+              @click="selectCustomerFromHistory"
+            >
+              <lucide-icon name="user-check" />
+              <span>{{ $t('Select_Customer') || 'Select customer' }}</span>
+            </button>
+          </header>
+
+          <div class="cust-hist-stats">
+            <div class="cust-hist-stat">
+              <span class="cust-hist-stat-label">{{ $t('Total_Spent') || 'Total spent' }}</span>
+              <span class="cust-hist-stat-value">{{ formatPriceWithSymbol(currentUser.currency, custHistory.summary.total_spent || 0, 2) }}</span>
+            </div>
+            <div class="cust-hist-stat">
+              <span class="cust-hist-stat-label">{{ $t('Orders') || 'Orders' }}</span>
+              <span class="cust-hist-stat-value">{{ custHistory.summary.orders_count || 0 }}</span>
+            </div>
+            <div class="cust-hist-stat">
+              <span class="cust-hist-stat-label">{{ $t('Average_Order') || 'Average order' }}</span>
+              <span class="cust-hist-stat-value">{{ formatPriceWithSymbol(currentUser.currency, custHistory.summary.average_order || 0, 2) }}</span>
+            </div>
+            <div class="cust-hist-stat">
+              <span class="cust-hist-stat-label">{{ $t('Last_Purchase') || 'Last purchase' }}</span>
+              <span class="cust-hist-stat-value cust-hist-stat-value-sm">{{ custHistory.summary.last_purchase_date || '—' }}</span>
+            </div>
+            <div class="cust-hist-stat" :class="{ 'is-due': Number(custHistory.summary.total_due) > 0 }">
+              <span class="cust-hist-stat-label">{{ $t('Due') || 'Due' }}</span>
+              <span class="cust-hist-stat-value">{{ formatPriceWithSymbol(currentUser.currency, custHistory.summary.total_due || 0, 2) }}</span>
+            </div>
+          </div>
+
+          <div class="cust-drawer-search">
+            <lucide-icon name="search" />
+            <input
+              v-model="custHistorySearch"
+              type="text"
+              :placeholder="$t('Search_purchase_history') || 'Search by reference, date or product…'"
+              ref="custHistorySearchInput"
+              @input="onCustomerHistorySearch"
+            />
+            <button
+              v-if="custHistorySearch"
+              type="button"
+              class="cust-drawer-search-clear"
+              @click="custHistorySearch = ''; onCustomerHistorySearch()"
+              :aria-label="$t('Clear')"
+            >
+              <lucide-icon name="x" />
+            </button>
+          </div>
+
+          <div class="cust-drawer-list cust-hist-list">
+            <div v-if="custHistoryLoading && !custHistory.sales.length" class="cust-drawer-empty">
+              <div class="cust-drawer-empty-icon"><span class="spinner spinner-primary"></span></div>
+              <div class="cust-drawer-empty-text">{{ $t('Loading') || 'Loading' }}…</div>
+            </div>
+
+            <div v-else-if="!custHistory.sales.length" class="cust-drawer-empty">
+              <div class="cust-drawer-empty-icon"><lucide-icon name="shopping-bag" /></div>
+              <div class="cust-drawer-empty-text">
+                {{ custHistorySearch ? ($t('No_results') || 'No results') : ($t('No_purchases_yet') || 'No purchases yet') }}
+              </div>
+            </div>
+
+            <div
+              v-for="sale in custHistory.sales"
+              :key="sale.id"
+              class="cust-hist-sale"
+              :class="{ 'is-open': custHistoryExpanded[sale.id] }"
+            >
+              <button type="button" class="cust-hist-sale-head" @click="toggleHistorySale(sale)">
+                <span class="cust-hist-sale-icon">
+                  <lucide-icon name="receipt" />
+                </span>
+                <span class="cust-hist-sale-body">
+                  <span class="cust-hist-sale-top">
+                    <span class="cust-hist-sale-ref">{{ sale.Ref }}</span>
+                    <span class="cust-hist-badge" :class="'is-' + (sale.payment_status || 'unpaid')">{{ historyPaymentLabel(sale.payment_status) }}</span>
+                    <span v-if="sale.statut && sale.statut !== 'completed'" class="cust-hist-badge is-status">{{ historyStatusLabel(sale.statut) }}</span>
+                  </span>
+                  <span class="cust-hist-sale-meta">
+                    <span>{{ sale.date }}</span>
+                    <span v-if="sale.warehouse_name"> · {{ sale.warehouse_name }}</span>
+                    <span> · {{ sale.items_count }} {{ $t('Items') || 'items' }}</span>
+                  </span>
+                </span>
+                <span class="cust-hist-sale-amounts">
+                  <span class="cust-hist-sale-total">{{ formatPriceWithSymbol(currentUser.currency, sale.GrandTotal, 2) }}</span>
+                  <span v-if="Number(sale.due) > 0" class="cust-hist-sale-due">{{ $t('Due') || 'Due' }} {{ formatPriceWithSymbol(currentUser.currency, sale.due, 2) }}</span>
+                  <span v-else class="cust-hist-sale-paid">{{ $t('Paid') || 'Paid' }}</span>
+                </span>
+                <lucide-icon name="chevron-down" class="cust-hist-sale-caret" />
+              </button>
+
+              <div v-if="custHistoryExpanded[sale.id]" class="cust-hist-items">
+                <div v-if="custHistoryExpanded[sale.id].loading" class="cust-hist-items-loading">
+                  <span class="spinner spinner-primary"></span>
+                </div>
+                <template v-else>
+                  <div
+                    v-for="item in custHistoryExpanded[sale.id].items"
+                    :key="item.id"
+                    class="cust-hist-item"
+                    :class="{ 'is-disabled': !item.reorderable }"
+                  >
+                    <span class="cust-hist-item-thumb">
+                      <img v-if="item.image" :src="item.image" :alt="item.name" @error="$event.target.style.display = 'none'" />
+                      <lucide-icon v-else name="package" />
+                    </span>
+                    <span class="cust-hist-item-body">
+                      <span class="cust-hist-item-name">{{ item.name }}</span>
+                      <span class="cust-hist-item-meta">
+                        <span>{{ formatNumber(item.quantity, 2) }}<template v-if="item.unit"> {{ item.unit }}</template><template v-if="item.pack_name"> · {{ item.pack_name }}</template></span>
+                        <span> × {{ formatPriceWithSymbol(currentUser.currency, item.price, 2) }}</span>
+                      </span>
+                    </span>
+                    <span class="cust-hist-item-total">{{ formatPriceWithSymbol(currentUser.currency, item.total, 2) }}</span>
+                    <button
+                      type="button"
+                      class="cust-hist-item-add"
+                      :disabled="!item.reorderable || custHistoryReordering"
+                      :title="item.reorderable ? ($t('Add_to_cart') || 'Add to cart') : ($t('Product_not_available') || 'Product not available')"
+                      @click="reorderHistoryItem(item)"
+                    >
+                      <lucide-icon name="plus" />
+                    </button>
+                  </div>
+                  <div v-if="!custHistoryExpanded[sale.id].items.length" class="cust-hist-items-empty">
+                    {{ $t('No_results') || 'No results' }}
+                  </div>
+                  <div v-else class="cust-hist-items-foot">
+                    <button
+                      type="button"
+                      class="cust-hist-reorder-all"
+                      :disabled="custHistoryReordering || !custHistoryExpanded[sale.id].items.some(i => i.reorderable)"
+                      @click="reorderHistorySale(sale)"
+                    >
+                      <span v-if="custHistoryReordering" class="spinner spinner-sm"></span>
+                      <lucide-icon v-else name="shopping-cart" />
+                      <span>{{ $t('Reorder_All') || 'Reorder all' }}</span>
+                    </button>
+                  </div>
+                </template>
+              </div>
+            </div>
+
+            <div v-if="custHistoryTotalPages > 1" class="cust-hist-pager">
+              <button type="button" :disabled="custHistoryPage <= 1 || custHistoryLoading" @click="goCustomerHistoryPage(custHistoryPage - 1)">
+                <lucide-icon name="chevron-left" />
+              </button>
+              <span>{{ custHistoryPage }} / {{ custHistoryTotalPages }}</span>
+              <button type="button" :disabled="custHistoryPage >= custHistoryTotalPages || custHistoryLoading" @click="goCustomerHistoryPage(custHistoryPage + 1)">
+                <lucide-icon name="chevron-right" />
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </transition>
+
+    <!-- ============ Salesperson picker (reuses the customer modal theme) ============ -->
+    <transition name="cust-drawer">
+      <div
+        v-if="sellerDrawerOpen"
+        class="cust-drawer-backdrop"
+        @click.self="sellerDrawerOpen = false"
+        @keydown.esc="sellerDrawerOpen = false"
+      >
+        <section class="cust-drawer" role="dialog" :aria-label="$t('Select_Salesperson') || 'Select salesperson'">
+          <button
+            type="button"
+            class="cust-drawer-close"
+            :aria-label="$t('Close')"
+            @click="sellerDrawerOpen = false"
+          >
+            <lucide-icon name="x" />
+          </button>
+
+          <header class="cust-drawer-header">
+            <div class="cust-drawer-hero-icon">
+              <lucide-icon name="user-check" />
+            </div>
+            <div class="cust-drawer-hero-text">
+              <div class="cust-drawer-hero-eyebrow">{{ $t('Salesperson') || 'Salesperson' }}</div>
+              <div class="cust-drawer-hero-title">{{ $t('Select_Salesperson') || 'Select Salesperson' }}</div>
+              <div class="cust-drawer-hero-sub">
+                {{ (salespeople || []).length }}
+              </div>
+            </div>
+          </header>
+
+          <div class="cust-drawer-list">
+            <button
+              type="button"
+              class="cust-drawer-card"
+              :class="{ active: String(selectedSellerId) === String(s.id) }"
+              v-for="s in salespeople"
+              :key="'seller-' + s.id"
+              @click="selectSeller(s.id)"
+            >
+              <span class="cust-drawer-card-avatar" :style="{ background: catColor(s.id) }">
+                {{ catInitial(s.name || s.username) }}
+              </span>
+              <span class="cust-drawer-card-body">
+                <span class="cust-drawer-card-name">
+                  {{ s.name || s.username }}
+                  <template v-if="currentUser && String(s.id) === String(currentUser.id)"> ({{ $t('You') || 'You' }})</template>
+                </span>
+                <span class="cust-drawer-card-meta" v-if="s.username && s.username !== (s.name || s.username)">
+                  <span>{{ s.username }}</span>
+                </span>
+              </span>
+              <span v-if="String(selectedSellerId) === String(s.id)" class="cust-drawer-card-check">
+                <lucide-icon name="check" />
+              </span>
+            </button>
+
+            <div class="cust-drawer-empty" v-if="!(salespeople || []).length">
+              <div class="cust-drawer-empty-icon"><lucide-icon name="users" /></div>
+              <div class="cust-drawer-empty-text">{{ $t('No_results') || 'No results' }}</div>
             </div>
           </div>
         </section>
@@ -3442,7 +3811,11 @@ import Util from "../../pos-compat/util";
 import { formatPriceDisplay, getPriceFormatSetting, getPriceDecimals } from "../../pos-compat/priceFormat";
 import { openCashDrawer } from "../../pos-compat/cashDrawerQz";
 import { receiptFontHeadTags, whenPrintFontsReady } from "../../lib/receiptFont";
-import posKeyboardShortcutsMixin, { POS_SHORTCUTS } from "../../pos-compat/posKeyboardShortcuts";
+import posKeyboardShortcutsMixin, {
+  POS_SHORTCUTS,
+  posShortcutsEnabled,
+  setPosShortcutsEnabled,
+} from "../../pos-compat/posKeyboardShortcuts";
 import posCompatMixin from "../../pos-compat/posCompatMixin";
 import { posCompatComponents } from "../../pos-compat/components";
 import { ValidationObserver, ValidationProvider } from "../../pos-compat/vee";
@@ -3510,6 +3883,11 @@ export default {
       limit: "10",
           draft_sale_id: '',
       openingDraftId: null,
+
+      // Multi-Currency (POS): available currencies + the active sale currency.
+      // null / the default currency id = base currency (feature inactive).
+      pos_currencies: [],
+      pos_currency_id: null,
 
       serverParams: {
         sort: {
@@ -3586,6 +3964,7 @@ export default {
         enable_customer_points: true,
         show_categories: true,
         show_brands: true,
+        show_customer_history: true,
         allow_overselling: false,
         receipt_paper_size: 80,
         direct_network_printing: false,
@@ -3594,6 +3973,9 @@ export default {
       },
       ps_loading: false,
       ps_saving: false,
+      // Per-device keyboard-shortcuts preference (localStorage, no backend
+      // field). Mirrored by the same toggle on the POS Settings page.
+      pos_shortcuts_enabled: posShortcutsEnabled(),
       ps_invoiceFormatOptions: [
         { value: "thermal", textKey: "Invoice_Thermal" },
         { value: "a4", textKey: "Invoice_A4" },
@@ -3606,6 +3988,20 @@ export default {
       whDrawerSearch: "",
       custDrawerOpen: false,
       custDrawerSearch: "",
+      // Quick Add Customer modal
+      quickAddMore: false,          // optional fields disclosure
+      phone_check_state: "",        // '' | 'checking' | 'ok' | 'dup'
+      // Customer purchase history panel
+      custHistoryOpen: false,
+      custHistoryClientId: null,
+      custHistoryLoading: false,
+      custHistorySearch: "",
+      custHistoryPage: 1,
+      custHistoryPerPage: 10,
+      custHistorySearchTimer: null,
+      custHistory: { client: {}, summary: {}, sales: [], totalRows: 0 },
+      custHistoryExpanded: {},
+      custHistoryReordering: false,
       product_currentPage: 1,
       paginated_Products: [],
       product_perPage: 10,
@@ -3735,6 +4131,7 @@ export default {
         Unit_price: "",
         Unit_price_wholesale: "",
         wholesale_Net_price: "",
+        wholesale_tiers: [],
         min_price: 0,
         price_type: 'retail',
         retail_unit_price: "",
@@ -3767,6 +4164,11 @@ export default {
       cashMove: { type: 'in', amount: 0, notes: '' },
       warehouseOptions: [],
       selectedClientId: "",
+      // Change Salesperson During Checkout (System Settings → Features)
+      salesSwitchEnabled: false,
+      salespeople: [],
+      selectedSellerId: null,
+      sellerDrawerOpen: false,
       productsReady: false,
       uiLoadingProductId: null,
       detailLoading: false,
@@ -3920,6 +4322,30 @@ export default {
       return [1, 2, 3, 4, 5].includes(n) ? n : 1;
     },
 
+    // Outstanding balance carried by the customer before this sale. Shared by
+    // the Previous Dues / Net Balance rows of every receipt layout.
+    invoicePreviousDues() {
+      const sale = this.invoice_pos && this.invoice_pos.sale ? this.invoice_pos.sale : null;
+      const dues = Number(sale && sale.previous_dues);
+      return Number.isFinite(dues) ? dues : 0;
+    },
+
+    // Both rows only make sense when there IS a previous balance, and each one
+    // can be hidden from Settings > POS Receipt (default ON).
+    showPreviousDuesRow() {
+      return this.invoicePreviousDues > 0 && this.pos_settings.show_previous_dues !== 0;
+    },
+
+    showNetBalanceRow() {
+      return this.invoicePreviousDues > 0 && this.pos_settings.show_net_balance !== 0;
+    },
+
+    // Previous dues + what is still owed on this sale.
+    invoiceNetBalance() {
+      const sale = this.invoice_pos && this.invoice_pos.sale ? this.invoice_pos.sale : {};
+      return this.invoicePreviousDues + (Number(sale.GrandTotal || 0) - Number(sale.paid_amount || 0));
+    },
+
     // Normalize receipt paper size (58mm, 80mm, 88mm)
     currentReceiptPaperSize() {
       const raw = this.pos_settings && this.pos_settings.receipt_paper_size != null
@@ -4035,6 +4461,37 @@ export default {
       return c ? c.name : (this.$t('Select_Customer') || 'Select customer');
     },
 
+    // Label shown on the salesperson trigger button (falls back to the cashier)
+    selectedSellerLabel() {
+      const s = (this.salespeople || []).find(x => String(x.id) === String(this.selectedSellerId));
+      if (s) return s.name || s.username;
+      if (this.currentUser) return this.currentUser.name || this.currentUser.username || '';
+      return this.$t('Select_Salesperson') || 'Select salesperson';
+    },
+
+    quickAddNameTrimmed() {
+      return String(this.client && this.client.name ? this.client.name : '').trim();
+    },
+    quickAddPhoneStateLabel() {
+      if (this.phone_check_state === 'checking') return this.$t('Checking') || 'Checking';
+      if (this.phone_check_state === 'ok') return this.$t('Phone_available') || 'Available';
+      if (this.phone_check_state === 'dup') return this.$t('Phone_Already_Registered') || 'Already registered';
+      return '';
+    },
+    // Customer purchase history: gated by the POS setting and needs the server.
+    showCustomerHistoryEnabled() {
+      const v = this.pos_settings.show_customer_history;
+      const on = v === undefined || v === null ? true : (v === true || v === 1 || v === '1' || v === 'true');
+      return on && this.isOnline;
+    },
+    custHistoryClientLabel() {
+      const c = (this.clients || []).find(x => x.id === this.custHistoryClientId);
+      return c ? c.name : '';
+    },
+    custHistoryTotalPages() {
+      const total = Number(this.custHistory.totalRows) || 0;
+      return Math.max(1, Math.ceil(total / this.custHistoryPerPage));
+    },
     // Customers filtered by the drawer's search box (matches name OR phone)
     filteredCustomers() {
       const q = (this.custDrawerSearch || '').trim().toLowerCase();
@@ -4081,6 +4538,41 @@ export default {
 
     anyCreditCardUsed() {
       return this.paymentLines.some(p => p.payment_method_id === '1' || p.payment_method_id === 1);
+    },
+
+    // ---- Multi-Currency (POS) ----
+    // Cart math stays in the BASE currency throughout; only what the cashier
+    // sees (and the tender amounts they type) is in the selected currency.
+    posMultiCurrencyEnabled() {
+      // Module toggle AND the 'multi_currency' permission — cashiers without
+      // it never see the picker and sell in the base currency.
+      return !!(this.currentUser && this.currentUser.enable_multi_currency)
+        && this.currentUserPermissions.includes('multi_currency');
+    },
+    posActiveCurrency() {
+      return this.pos_currencies.find(c => Number(c.id) === Number(this.pos_currency_id)) || null;
+    },
+    posIsBaseCurrency() {
+      const def = this.currentUser && this.currentUser.default_currency_id;
+      return !this.posMultiCurrencyEnabled
+        || !this.pos_currency_id
+        || Number(this.pos_currency_id) === Number(def);
+    },
+    // rate = units of the selected currency per 1 base unit (base = 1)
+    posRate() {
+      if (this.posIsBaseCurrency) return 1;
+      return Number(this.posActiveCurrency && this.posActiveCurrency.exchange_rate) || 1;
+    },
+    posCurrencySymbol() {
+      if (this.posIsBaseCurrency) {
+        return (this.currentUser && this.currentUser.currency) ? this.currentUser.currency : '';
+      }
+      return (this.posActiveCurrency && this.posActiveCurrency.symbol) || '';
+    },
+    // The grand total expressed in the POS-selected currency — tender amounts
+    // are typed in that currency, so every paid-vs-total comparison uses this.
+    docGrandTotal() {
+      return (Number(this.GrandTotal) || 0) * this.posRate;
     },
 
      // Sum of all entered payment lines
@@ -4147,14 +4639,15 @@ export default {
         return 0;
       }
     },
-    // What's still due (never negative)
+    // What's still due (never negative) — in the POS-selected currency, like
+    // the typed tender amounts it is compared with.
     balance() {
-      const b = this.GrandTotal - this.totalPaid;
+      const b = this.docGrandTotal - this.totalPaid;
       return (b > 0 ? b : 0).toFixed(this.priceDecimals);
     },
     // How much to return if over-paid
     changeReturn() {
-      const c = this.totalPaid - this.GrandTotal;
+      const c = this.totalPaid - this.docGrandTotal;
       return (c > 0 ? c : 0).toFixed(this.priceDecimals);
     },
 
@@ -4281,7 +4774,7 @@ export default {
       // checkout has been cleared.
       try {
         this._cd_emit && this._cd_emit({
-          currency: (this.currentUser && this.currentUser.currency) || '',
+          currency: this.posCurrencySymbol || '',
           details: [],
           discount: 0,
           TaxNet: 0,
@@ -4306,6 +4799,7 @@ export default {
     this.changeSidebarProperties();
     this.paginate_products(this.product_perPage, 0);
     this.loadVehicleLookup();
+    this.loadPosCurrencies();
     // Marker class so the global :fullscreen rules at the bottom of this
     // file only fire while POS is the active page. Without it, clicking
     // the topnav fullscreen button on a non-POS page applies POS-only
@@ -4338,13 +4832,28 @@ export default {
         } catch (e) { /* ignore scroll errors */ }
       });
     },
+    // True when the request never reached the server (connection dropped, or
+    // the backend is unreachable while the browser still reports online), as
+    // opposed to a response the server actually returned. The POS `axios` is
+    // the fetch-based shim: it always attaches an `error.response` object, and
+    // a genuine fetch failure carries no status and a browser-specific message
+    // ("Failed to fetch" / "NetworkError when attempting to fetch a
+    // resource"), never axios' "Network Error" — so the status is what tells
+    // the two cases apart.
+    isNetworkFailure(error) {
+      if (!error || !error.response) return true;
+      if (!error.response.status) return true;
+      return /network|failed to fetch/i.test(String(error.message || ''));
+    },
     async pingBackend() {
       // De-dupe concurrent pings.
       if (this._posPingInFlight) return this._posPingInFlight;
       this._posPingInFlight = (async () => {
         try {
           const res = await axios.get('/ping', { timeout: 2000 });
-          const ok = !!(res && res.status === 200 && res.data && res.data.ok === true);
+          // Any resolved response means the backend answered; the shim throws
+          // on non-2xx, so don't gate this on a status code.
+          const ok = !!(res && res.data && res.data.ok === true);
           this.backendReachable = ok;
           return ok;
         } catch (e) {
@@ -4407,19 +4916,24 @@ export default {
     _cd_queue_broadcast() {
       if (this._cd_broadcast_timer) clearTimeout(this._cd_broadcast_timer);
       this._cd_broadcast_timer = setTimeout(() => {
+        // Multi-Currency: the customer display mirrors what the cashier sees,
+        // so amounts are converted into the POS-selected currency (rate 1 base).
+        const cdRate = this.posRate || 1;
         const payload = {
-          currency: (this.currentUser && this.currentUser.currency) || '',
-          discount: this.sale && this.sale.discount ? this.sale.discount : 0,
-          TaxNet: this.sale && this.sale.TaxNet ? this.sale.TaxNet : 0,
-            shipping: this.sale && this.sale.shipping ? this.sale.shipping : 0,
-          GrandTotal: this.GrandTotal || 0,
+          currency: this.posCurrencySymbol || '',
+          discount: (this.sale && String(this.sale.discount_Method || '2') === '1')
+            ? (this.sale.discount || 0)
+            : ((this.sale && this.sale.discount ? this.sale.discount : 0) * cdRate),
+          TaxNet: (this.sale && this.sale.TaxNet ? this.sale.TaxNet : 0) * cdRate,
+            shipping: (this.sale && this.sale.shipping ? this.sale.shipping : 0) * cdRate,
+          GrandTotal: (this.GrandTotal || 0) * cdRate,
           details: (this.details || []).map(d => ({
             name: d.name,
             quantity: d.quantity,
               // Back-compat: keep total, but also send unit_price and line_total explicitly
-              total: (d.total != null ? d.total : (d.Net_price || 0)),
-              unit_price: (d.Net_price != null ? d.Net_price : (d.Unit_price != null ? d.Unit_price : (d.price != null ? d.price : 0))),
-              line_total: (d.total != null ? d.total : ((d.Net_price || 0) * (d.quantity || 0))),
+              total: (d.total != null ? d.total : (d.Net_price || 0)) * cdRate,
+              unit_price: (d.Net_price != null ? d.Net_price : (d.Unit_price != null ? d.Unit_price : (d.price != null ? d.price : 0))) * cdRate,
+              line_total: (d.total != null ? d.total : ((d.Net_price || 0) * (d.quantity || 0))) * cdRate,
           }))
         };
         this._cd_emit(payload);
@@ -4495,7 +5009,9 @@ export default {
           this.product.code = result.code;
           this.product.current = result.qte_sale;
           this.product.fix_stock = result.qte;
-          this.product.quantity = result.qte_sale < 1 ? result.qte_sale : 1;
+          // Overselling: never seed the line with the (zero/negative) stock —
+          // always start at 1 so the product can actually be sold.
+          this.product.quantity = (!this.isOversellingAllowed && result.qte_sale < 1) ? result.qte_sale : 1;
         }
 
         this.product.product_variant_id = result.product_variant_id;
@@ -4535,6 +5051,32 @@ export default {
       this.search_input = code;
       this.search();
       this.$bvModal.hide('open_scan');
+    },
+
+    // Multi-Currency: fetch the currency list once when the feature is on.
+    async loadPosCurrencies() {
+      if (!this.posMultiCurrencyEnabled) return;
+      try {
+        const { data } = await axios.get('currencies_list');
+        this.pos_currencies = (data && data.currencies) || [];
+        if (!this.pos_currency_id) {
+          this.pos_currency_id = (data && data.default_currency_id)
+            || (this.currentUser && this.currentUser.default_currency_id)
+            || null;
+        }
+      } catch (e) {
+        this.pos_currencies = [];
+      }
+    },
+
+    // Tender lines are typed in the POS-selected currency; the server stores
+    // base-currency amounts, so convert at the submit boundary.
+    paymentLinesForSubmit(lines) {
+      const rate = this.posRate || 1;
+      return (lines || this.paymentLines).map(p => ({
+        ...p,
+        amount: Number(p.amount || 0) / rate,
+      }));
     },
 
     addPaymentLine() {
@@ -4873,20 +5415,34 @@ export default {
       NProgress.start();
       NProgress.set(0.1);
       this.DraftProcessing = true;
+      const isLocalDraft = this.draft_sale_id && Util.offlinePos.isLocalId(this.draft_sale_id);
+      const payload = {
+        // A local draft id must never reach the server (CreateDraft does a
+        // findOrFail on it); updating a local draft rewrites the local record.
+        draft_sale_id: (this.draft_sale_id && !isLocalDraft) ? this.draft_sale_id : undefined,
+        client_id: this.selectedClientId,
+        warehouse_id: this.sale.warehouse_id,
+        tax_rate: this.sale.tax_rate?this.sale.tax_rate:0,
+        TaxNet: this.sale.TaxNet?this.sale.TaxNet:0,
+        discount: this.sale.discount?this.sale.discount:0,
+        discount_Method: String(this.sale.discount_Method || '2'), // Ensure it's always a string: '1' for percentage, '2' for fixed
+        shipping: this.sale.shipping?this.sale.shipping:0,
+        notes: this.sale.notes,
+        details: this.buildSubmitDetails(),
+        GrandTotal: this.GrandTotal,
+        // Multi-Currency: held orders resume in the same currency.
+        currency_id: this.posIsBaseCurrency ? null : this.pos_currency_id,
+        exchange_rate: this.posIsBaseCurrency ? null : this.posRate,
+      };
+      // Offline (or re-holding a draft that only exists locally, or holding a
+      // sale for a customer that only exists locally): keep it local and let
+      // the sync flush it. A local client_id would fail server validation.
+      if (this.isReallyOffline() || isLocalDraft || Util.offlinePos.isLocalId(this.selectedClientId)) {
+        this.saveDraftOffline(payload, isLocalDraft ? this.draft_sale_id : null);
+        return;
+      }
       axios
-        .post("pos/create_draft", {
-          draft_sale_id: this.draft_sale_id || undefined,
-          client_id: this.selectedClientId,
-          warehouse_id: this.sale.warehouse_id,
-          tax_rate: this.sale.tax_rate?this.sale.tax_rate:0,
-          TaxNet: this.sale.TaxNet?this.sale.TaxNet:0,
-          discount: this.sale.discount?this.sale.discount:0,
-          discount_Method: String(this.sale.discount_Method || '2'), // Ensure it's always a string: '1' for percentage, '2' for fixed
-          shipping: this.sale.shipping?this.sale.shipping:0,
-          notes: this.sale.notes,
-          details: this.buildSubmitDetails(),
-          GrandTotal: this.GrandTotal,
-        })
+        .post("pos/create_draft", payload)
         .then(response => {
           if (response.data.success === true) {
             this.makeToast(
@@ -4900,10 +5456,68 @@ export default {
           }
         })
         .catch(error => {
+          // Network failure while the browser still thinks it's online —
+          // fall back to the offline draft store instead of losing the hold.
+          const isNetworkError = this.isNetworkFailure(error);
+          if (isNetworkError) {
+            this.saveDraftOffline(payload, null);
+            return;
+          }
           NProgress.done();
           this.DraftProcessing = false;
           this.makeToast("danger", this.$t("InvalidData"), this.$t("Failed"));
         });
+    },
+
+    // Store a hold/draft locally: the create_draft payload (for the eventual
+    // server sync) plus a full cart snapshot (so it can be reopened offline).
+    saveDraftOffline(payload, existingLocalDraftId) {
+      try {
+        const cart = this.buildCartStateSnapshot();
+        let warehouseName = '';
+        try {
+          const w = (this.warehouses || []).find(x => String(x.id) === String(this.sale.warehouse_id));
+          if (w && w.name) warehouseName = w.name;
+        } catch (e) {}
+        const meta = {
+          client_name: this.client_name || '',
+          warehouse_name: warehouseName,
+          GrandTotal: this.GrandTotal || 0,
+          date: new Date().toISOString().slice(0, 16).replace('T', ' ')
+        };
+        if (existingLocalDraftId) {
+          // If this local record was itself an offline update of a SERVER
+          // draft, keep that server draft_sale_id so the sync updates it
+          // instead of creating a duplicate.
+          try {
+            const prev = (Util.offlinePos.getOfflineDrafts() || []).find(d => d && d.id === existingLocalDraftId);
+            if (prev && prev.payload && prev.payload.draft_sale_id && payload.draft_sale_id === undefined) {
+              payload.draft_sale_id = prev.payload.draft_sale_id;
+            }
+          } catch (e) {}
+          Util.offlinePos.updateOfflineDraft(existingLocalDraftId, payload, cart, meta);
+        } else {
+          Util.offlinePos.addOfflineDraft(payload, cart, meta);
+        }
+        this.makeToast(
+          'success',
+          this.$t ? (this.$t('pos.Draft_Saved_Offline') || 'Draft saved offline. It will sync when you are back online.') : 'Draft saved offline. It will sync when you are back online.',
+          this.$t ? this.$t('Success') : 'Success'
+        );
+      } catch (e) {
+        this.makeToast('danger', this.$t('InvalidData'), this.$t('Failed'));
+      } finally {
+        NProgress.done();
+        this.DraftProcessing = false;
+      }
+      this.Reset_Pos();
+    },
+
+    // Shared "are we effectively offline" check (same expression the offline
+    // cache/queue paths use inline throughout this file).
+    isReallyOffline() {
+      return this.offlineSyncEnabled
+        && ((!this.isOnline) || (typeof window !== 'undefined' && window.navigator && window.navigator.onLine === false));
     },
 
     // ==================== PAYMENT METHODS ====================
@@ -4911,8 +5525,9 @@ export default {
       NProgress.start();
       NProgress.set(0.1);
 
+      // Tender amounts are typed in the POS-selected currency.
       const total    = parseFloat(this.totalPaid);
-      const due      = parseFloat(this.GrandTotal.toFixed(this.priceDecimals));
+      const due      = parseFloat(this.docGrandTotal.toFixed(this.priceDecimals));
       const multi    = this.paymentLines.length > 1;
 
       if (multi && total > due) {
@@ -4928,10 +5543,36 @@ export default {
       this.CreatePOS();
     },
 
+    // Stable idempotency key for the current legacy-modal checkout, mirroring
+    // ModernPaymentModal.ensureSaleUuid(): generated once per sale and reused
+    // across submit retries so a network hiccup + retry cannot create the same
+    // sale twice (the backend short-circuits on a known sale_uuid). Cleared in
+    // Reset_Pos().
+    ensureLegacySaleUuid() {
+      if (this._legacySaleUuid) return this._legacySaleUuid;
+      let uuid = null;
+      try {
+        if (typeof window !== 'undefined' && window.crypto && typeof window.crypto.randomUUID === 'function') {
+          uuid = window.crypto.randomUUID();
+        }
+      } catch (e) {
+        uuid = null;
+      }
+      if (!uuid) {
+        uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+          const r = Math.random() * 16 | 0;
+          const v = c === 'x' ? r : (r & 0x3 | 0x8);
+          return v.toString(16);
+        });
+      }
+      this._legacySaleUuid = uuid;
+      return uuid;
+    },
+
     CreatePOS() {
       NProgress.start();
       NProgress.set(0.1);
-      if (this.paymentLines.length > 1 && this.totalPaid > this.GrandTotal) {
+      if (this.paymentLines.length > 1 && this.totalPaid > this.docGrandTotal) {
         this.makeToast(
           "warning",
           this.$t("TotalPaidExceedsGrandTotalForMultiPayment"),
@@ -4944,7 +5585,8 @@ export default {
       // Credit Limit Validation (0 means no limit)
       // Only applies when this sale is adding new credit (paid amount < sale total)
       if (this.selectedClientId && this.selectedClientCreditLimit > 0) {
-        const total = parseFloat(this.totalPaid);
+        // Credit limits live in the base currency — convert the typed tender.
+        const total = parseFloat(this.totalPaid) / (this.posRate || 1);
         const due = parseFloat(this.GrandTotal.toFixed(this.priceDecimals));
 
         if (total < due) {
@@ -4958,10 +5600,10 @@ export default {
             const exceededAmount = newTotalDue - this.selectedClientCreditLimit;
             this.makeToast(
               "danger",
-              this.$t("Credit_Limit_Exceeded") + ": " + 
-              this.formatPriceWithCurrentCurrency(exceededAmount, 2) + " " + 
-              this.$t("exceeds_credit_limit_of") + " " + 
-              this.formatPriceWithCurrentCurrency(this.selectedClientCreditLimit, 2),
+              this.$t("Credit_Limit_Exceeded") + ": " +
+              this.formatPriceBaseCurrency(exceededAmount, 2) + " " +
+              this.$t("exceeds_credit_limit_of") + " " +
+              this.formatPriceBaseCurrency(this.selectedClientCreditLimit, 2),
               this.$t("Warning")
             );
             return;
@@ -4990,6 +5632,7 @@ export default {
           .post("pos/create_pos", {
             client_id: this.selectedClientId,
             warehouse_id: this.sale.warehouse_id,
+            seller_id: this.salesSwitchEnabled ? (this.selectedSellerId || undefined) : undefined,
             tax_rate: this.sale.tax_rate?this.sale.tax_rate:0,
             TaxNet: this.sale.TaxNet?this.sale.TaxNet:0,
             discount: this.sale.discount?this.sale.discount:0,
@@ -4998,7 +5641,10 @@ export default {
             notes: this.sale.notes,
             details: this.buildSubmitDetails(),
             GrandTotal: this.GrandTotal,
-            payments: this.paymentLines,
+            payments: this.paymentLinesForSubmit(),
+            // Multi-Currency snapshot (server ignores it when the module is off)
+            currency_id: this.posIsBaseCurrency ? null : this.pos_currency_id,
+            exchange_rate: this.posIsBaseCurrency ? null : this.posRate,
             send_email: this.sendEmail,
             send_sms: this.sendSMS,
             account_id: this.selectedAccount,
@@ -5008,7 +5654,9 @@ export default {
             card_id: this.card_id,
             discount_from_points: this.discount_from_points,
             used_points: this.used_points,
-            draft_sale_id: this.draft_sale_id || undefined,
+            // Local (offline-held) draft ids never go to the server; their
+            // records are deleted locally after the sale succeeds.
+            draft_sale_id: (this.draft_sale_id && !Util.offlinePos.isLocalId(this.draft_sale_id)) ? this.draft_sale_id : undefined,
             // Cart context for server-side promotion re-evaluation; the backend
             // recomputes the discount itself and records promotion_usages rows.
             promotion_code: this.promotionCode || null,
@@ -5016,6 +5664,7 @@ export default {
             promotion_item_count: this.details.reduce((n, d) => n + Number(d.quantity || 0), 0),
             promotion_product_ids: this.details.map(d => Number(d.product_id)).filter(Boolean),
             promotion_product_subtotals: this.buildPromotionProductSubtotals(),
+            sale_uuid: this.ensureLegacySaleUuid(),
           })
           .then(response => {
             if (response.data.success === true) {
@@ -5035,7 +5684,12 @@ export default {
                 this.$bvModal.hide("Add_Payment");
                 this.Reset_Pos();
               };
-              if (draftId) {
+              if (draftId && Util.offlinePos.isLocalId(draftId)) {
+                try { Util.offlinePos.removeOfflineDraft(draftId); } catch (e) {}
+                try { Fire.$emit("event_delete_draft_sale"); } catch (e) {}
+                this.draft_sale_id = '';
+                afterCleanup();
+              } else if (draftId) {
                 axios.delete("remove_draft_sale/" + draftId)
                   .then(() => { try { Fire.$emit("event_delete_draft_sale"); } catch(e) {} })
                   .catch(() => {})
@@ -5084,6 +5738,7 @@ export default {
           .post("pos/create_pos", {
             client_id: this.selectedClientId,
             warehouse_id: this.sale.warehouse_id,
+            seller_id: this.salesSwitchEnabled ? (this.selectedSellerId || undefined) : undefined,
             tax_rate: this.sale.tax_rate ? this.sale.tax_rate : 0,
             TaxNet: this.sale.TaxNet ? this.sale.TaxNet : 0,
             discount: this.sale.discount ? this.sale.discount : 0,
@@ -5091,7 +5746,10 @@ export default {
             details: this.buildSubmitDetails(),
             GrandTotal: this.GrandTotal,
             notes: this.sale.notes,
-            payments: paymentsWithMethod,
+            payments: this.paymentLinesForSubmit(paymentsWithMethod),
+            // Multi-Currency snapshot (server ignores it when the module is off)
+            currency_id: this.posIsBaseCurrency ? null : this.pos_currency_id,
+            exchange_rate: this.posIsBaseCurrency ? null : this.posRate,
             send_email: this.sendEmail,
             send_sms: this.sendSMS,
             account_id: this.selectedAccount,
@@ -5101,12 +5759,13 @@ export default {
             card_id: this.card_id,
             discount_from_points: this.discount_from_points,
             used_points: this.used_points,
-            draft_sale_id: this.draft_sale_id || undefined,
+            draft_sale_id: (this.draft_sale_id && !Util.offlinePos.isLocalId(this.draft_sale_id)) ? this.draft_sale_id : undefined,
             promotion_code: this.promotionCode || null,
             promotion_subtotal: Number(this.total || 0),
             promotion_item_count: this.details.reduce((n, d) => n + Number(d.quantity || 0), 0),
             promotion_product_ids: this.details.map(d => Number(d.product_id)).filter(Boolean),
             promotion_product_subtotals: this.buildPromotionProductSubtotals(),
+            sale_uuid: this.ensureLegacySaleUuid(),
           })
           .then(response => {
             this.paymentProcessing = false;
@@ -5123,7 +5782,12 @@ export default {
                 this.$bvModal.hide("Add_Payment");
                 this.Reset_Pos();
               };
-              if (draftId) {
+              if (draftId && Util.offlinePos.isLocalId(draftId)) {
+                try { Util.offlinePos.removeOfflineDraft(draftId); } catch (e) {}
+                try { Fire.$emit("event_delete_draft_sale"); } catch (e) {}
+                this.draft_sale_id = "";
+                afterCleanup();
+              } else if (draftId) {
                 axios
                   .delete("remove_draft_sale/" + draftId)
                   .then(() => {
@@ -5191,6 +5855,16 @@ export default {
     },
 
     formatPriceWithCurrentCurrency(number, dec) {
+      // Multi-Currency: base amounts render converted into the POS-selected
+      // currency (rate 1 / base symbol when the feature is off — legacy exact).
+      const symbol = this.posCurrencySymbol;
+      const value = this.formatPriceDisplay((Number(number) || 0) * this.posRate, dec);
+      return symbol ? `${symbol} ${value}` : value;
+    },
+
+    // Always-base formatter for register aggregates (today's sales, credit
+    // limits) that must not follow the POS currency switch.
+    formatPriceBaseCurrency(number, dec) {
       const symbol = (this.currentUser && this.currentUser.currency) ? this.currentUser.currency : '';
       const value = this.formatPriceDisplay(number, dec);
       return symbol ? `${symbol} ${value}` : value;
@@ -5212,6 +5886,12 @@ export default {
 
     CalculTotal() {
       this.total = 0;
+      // Wholesale Pricing by Quantity: quantities may have just changed, so the
+      // bracket each line falls in is re-resolved before anything is summed.
+      // No-op for lines without a ladder, so ordinary lines are untouched.
+      for (var w = 0; w < this.details.length; w++) {
+        this.applyWholesaleTier(this.details[w]);
+      }
       for (var i = 0; i < this.details.length; i++) {
         var tax = this.details[i].taxe * this.details[i].quantity;
         this.details[i].subtotal = parseFloat(
@@ -5507,6 +6187,9 @@ export default {
         // Multi-Pack Selling: carry packs + pre-select the default pack so the
         // cart line (cloned from this.product) can render the pack picker.
         this.product.packs              = Array.isArray(data.packs) ? data.packs : [];
+        // Wholesale Pricing by Quantity: the product's quantity ladder, prices
+        // already in sale units. Empty when the feature is off / no tiers.
+        this.product.wholesale_tiers    = Array.isArray(data.wholesale_tiers) ? data.wholesale_tiers : [];
         const _defPack                  = this.product.packs.find(p => p.is_default) || null;
         this.product.product_pack_id    = _defPack ? _defPack.id : null;
         this.product.pack_multiplier    = 1;
@@ -5520,7 +6203,8 @@ export default {
         if (this.product.product_type === 'is_service') {
           this.product.quantity = 1;
         } else if (this.product.quantity === undefined || this.product.quantity === null || this.product.quantity <= 0) {
-          this.product.quantity = this.product.current < 1 ? this.product.current : 1;
+          // Overselling: fall back to 1 even when the warehouse stock is 0/negative.
+          this.product.quantity = (!this.isOversellingAllowed && this.product.current < 1) ? this.product.current : 1;
         }
 
         this.add_product(data.code);
@@ -5570,6 +6254,9 @@ export default {
           image: p.image,
           // Multi-Pack Selling: available packs + selection (defaults = base unit).
           packs: Array.isArray(p.packs) ? p.packs : [],
+          // Wholesale Pricing by Quantity: every POS tile carries its ladder,
+          // so quantity breaks keep working with no network.
+          wholesale_tiers: Array.isArray(p.wholesale_tiers) ? p.wholesale_tiers : [],
           product_pack_id: null,
           pack_multiplier: 1,
           pack_name: null,
@@ -5664,6 +6351,11 @@ export default {
         if (!loaded) {
           this.makeToast("danger", this.$t("InvalidData"), this.$t("Failed"));
           NProgress.done();
+          // The callers (search / scan) set load_product = false before calling
+          // us and only add_product() sets it back. When the detail never loads
+          // the POS would stay locked ("Please wait until the product is
+          // loaded") until a page refresh — release it here instead.
+          this.load_product = true;
         }
         return Promise.resolve();
       }
@@ -5700,6 +6392,9 @@ export default {
         .catch(() => {
           this.makeToast("danger", this.$t("InvalidData"), this.$t("Failed"));
           NProgress.done();
+          // Same as the offline branch: never leave the POS locked because a
+          // single product detail failed to load.
+          this.load_product = true;
         });
     },
 
@@ -6033,6 +6728,12 @@ export default {
           }
 
           // 4) Persist values to the row
+          // Wholesale Pricing by Quantity: a hand-typed price pins the line so
+          // the quantity ladder stops re-pricing it from here on.
+          const currentUnitPrice = parseFloat(String(this.details[i].Unit_price).replace(/,/g, '')) || 0;
+          if (currentUnitPrice !== unitPriceNum) {
+            this.$set(this.details[i], 'price_manually_set', true);
+          }
           this.details[i].Unit_price = proposedUnitPrice;
           // update baseline for the NEWLY selected price type
           if (this.detail.price_type === 'wholesale') {
@@ -6134,6 +6835,53 @@ export default {
       this.CalculTotal();
     },
 
+    //------------------- Wholesale Pricing by Quantity ------------------\\
+    // Swap the line's unit price for the tier its quantity falls in. The
+    // ladder is admin-configured pricing, so it applies on its own — the
+    // cashier never picks a wholesale price by hand. Anything that pins the
+    // price (a hand-typed price, the Wholesale price type, a real pack) wins,
+    // and below the first bracket the retail price stands.
+    // Is this line currently priced from a quantity break rather than retail?
+    isWholesaleTierApplied(detail){
+      if (!detail || !Array.isArray(detail.wholesale_tiers) || !detail.wholesale_tiers.length) return false;
+      if (detail.price_manually_set || detail.price_type === 'wholesale') return false;
+      const pack = this.getSelectedPack(detail);
+      if (pack && !pack.is_default) return false;
+      const retail = parseFloat(detail.retail_unit_price);
+      if (!isFinite(retail)) return false;
+      return parseFloat(Number(detail.Unit_price).toFixed(this.priceDecimals))
+        !== parseFloat(retail.toFixed(this.priceDecimals));
+    },
+
+    applyWholesaleTier(detail){
+      if (!detail || !Array.isArray(detail.wholesale_tiers) || !detail.wholesale_tiers.length) return false;
+      if (detail.price_manually_set) return false;
+      if (detail.price_type === 'wholesale') return false;
+      const pack = this.getSelectedPack(detail);
+      if (pack && !pack.is_default) return false;
+
+      const retail = parseFloat(detail.retail_unit_price);
+      if (!isFinite(retail)) return false;
+
+      const qty = Number(detail.quantity) || 0;
+      let price = retail;
+      let bestMin = -1;
+      for (const tier of detail.wholesale_tiers) {
+        const min = Number(tier.min_qty) || 0;
+        const max = (tier.max_qty === null || tier.max_qty === undefined || tier.max_qty === '')
+          ? Infinity : Number(tier.max_qty);
+        if (qty + 1e-9 < min || qty > max + 1e-9) continue;
+        if (min >= bestMin) { bestMin = min; price = Number(tier.price) || 0; }
+      }
+
+      const next = parseFloat(price.toFixed(this.priceDecimals));
+      if (parseFloat(Number(detail.Unit_price).toFixed(this.priceDecimals)) === next) return false;
+
+      detail.Unit_price = next;
+      this.recomputePosLine(detail);
+      return true;
+    },
+
     //--------------------------- Multi-Pack Selling helpers ---------------------------\\
     getSelectedPack(detail){
       if (!detail || !detail.packs || !detail.product_pack_id) return null;
@@ -6214,6 +6962,12 @@ export default {
 
     // ==================== RESET METHOD ====================
     async Reset_Pos() {
+      // The sale is over (completed, drafted, or manually cleared) — drop the
+      // persisted cart snapshot so the next boot starts with a clean slate,
+      // and retire the idempotency key so the next sale gets a fresh one.
+      this.clearPersistedCart();
+      this._legacySaleUuid = null;
+
       // Track whether a category/brand filter was active BEFORE the reset so
       // we can decide whether a full product refetch is needed. The common
       // case (no filter) stays fast; only a filtered view requires a reload
@@ -6223,6 +6977,14 @@ export default {
       this.details = [];
       this.product = {};
       this.draft_sale_id = '';
+
+      // A finished sale is a clean slate: release the "a product is being
+      // loaded" latch and the per-tile spinner. Without this, anything that
+      // left load_product = false (a detail fetch that never completed, a scan
+      // interrupted by the payment modal) kept rejecting every later add with
+      // "Please wait until the product is loaded" until the page was refreshed.
+      this.load_product = true;
+      this.uiLoadingProductId = null;
       this.paymentLines = [
         {
           amount: 0,
@@ -6426,7 +7188,8 @@ export default {
           if (weight !== null) {
             this.product.quantity = weight;
           } else {
-            this.product.quantity = product.qte_sale < 1 ? product.qte_sale : 1;
+            // Overselling: start at 1 instead of the zero/negative stock value.
+            this.product.quantity = (!this.isOversellingAllowed && product.qte_sale < 1) ? product.qte_sale : 1;
           }
 
         }
@@ -6481,9 +7244,26 @@ export default {
       this.get_Draft_Sales(page);
     },
 
+    // Rows for drafts held offline, in the same shape the server list uses.
+    localDraftRows() {
+      try {
+        return (Util.offlinePos.getOfflineDrafts() || []).map(d => ({
+          id: d.id,
+          date: (d.meta && d.meta.date) || '',
+          Ref: (this.$t ? this.$t('pos.Offline_Mode') : 'Offline'),
+          client_name: (d.meta && d.meta.client_name) || '',
+          GrandTotal: (d.meta && d.meta.GrandTotal) || 0,
+          _local: true
+        }));
+      } catch (e) {
+        return [];
+      }
+    },
+
     get_Draft_Sales(page) {
       NProgress.start();
       NProgress.set(0.1);
+      const localRows = this.localDraftRows();
       axios
         .get(
           "get_draft_sales?page=" +
@@ -6492,19 +7272,24 @@ export default {
             this.limit
         )
         .then(response => {
-          this.draft_sales = response.data.draft_sales;
-          this.totalRows_draft_sales = response.data.totalRows;
-          
+          // Offline-held drafts are shown on top of page 1 until they sync.
+          const serverRows = response.data.draft_sales || [];
+          this.draft_sales = page === 1 ? [...localRows, ...serverRows] : serverRows;
+          this.totalRows_draft_sales = (Number(response.data.totalRows) || 0) + localRows.length;
+
           // If current page is empty but we have data and we're not on page 1, go to previous page
           if (this.draft_sales.length === 0 && this.totalRows_draft_sales > 0 && page > 1) {
             this.draft_sales_page = page - 1;
             this.get_Draft_Sales(this.draft_sales_page);
             return;
           }
-          
+
           NProgress.done();
         })
         .catch(() => {
+          // Offline: the server list is unreachable — show local drafts only.
+          this.draft_sales = localRows;
+          this.totalRows_draft_sales = localRows.length;
           NProgress.done();
         });
     },
@@ -6514,6 +7299,22 @@ export default {
       this.openingDraftId = id;
       // If this draft is already loaded, do nothing (do not update on open)
       if (this.draft_sale_id && String(this.draft_sale_id) === String(id)) {
+        this.openingDraftId = null;
+        return;
+      }
+
+      // Offline-held draft: rebuild the cart from its stored snapshot, no
+      // server round-trip needed.
+      if (Util.offlinePos.isLocalId(id)) {
+        try {
+          const rec = (Util.offlinePos.getOfflineDrafts() || []).find(d => d && d.id === id);
+          if (rec && rec.cart) {
+            this.applyCartSnapshot(rec.cart);
+            this.draft_sale_id = id;
+            if (this.sale.warehouse_id) this.getProducts();
+            try { this.$bvModal.hide('show_draft_sales'); } catch (e) {}
+          }
+        } catch (e) {}
         this.openingDraftId = null;
         return;
       }
@@ -6557,6 +7358,8 @@ export default {
           this.sale.discount_Method = saleData.discount_Method || '2';
           this.sale.shipping = saleData.shipping || 0;
           this.sale.notes = saleData.notes || '';
+          // Multi-Currency: restore the currency the order was held in.
+          this.pos_currency_id = saleData.currency_id || null;
 
           // Map draft details to POS details shape (ensuring fields required by POS)
           const incoming = Array.isArray(data.details) ? data.details : [];
@@ -6632,6 +7435,20 @@ export default {
         confirmButtonText: this.$t("Delete_confirmButtonText")
       }).then(result => {
         if (result.value) {
+          // Offline-held draft: delete the local record, no server call.
+          if (Util.offlinePos.isLocalId(id)) {
+            try { Util.offlinePos.removeOfflineDraft(id); } catch (e) {}
+            if (this.draft_sale_id && String(this.draft_sale_id) === String(id)) {
+              this.draft_sale_id = '';
+            }
+            this.$swal(
+              this.$t("Delete_Deleted"),
+              this.$t("Deleted_in_successfully"),
+              "success"
+            );
+            Fire.$emit("event_delete_draft_sale");
+            return;
+          }
           NProgress.start();
           NProgress.set(0.1);
           axios
@@ -8036,17 +8853,22 @@ export default {
       });
     },
     Create_Client() {
+      const payload = {
+        name: this.client.name,
+        email: this.client.email,
+        phone: this.client.phone,
+        tax_number: this.client.tax_number,
+        country: this.client.country,
+        city: this.client.city,
+        adresse: this.client.adresse,
+        is_royalty_eligible: this.client.is_royalty_eligible
+      };
+      if (this.isReallyOffline()) {
+        this.createClientOffline(payload, null, 'New_Customer');
+        return;
+      }
       axios
-        .post("clients", {
-          name: this.client.name,
-          email: this.client.email,
-          phone: this.client.phone,
-          tax_number: this.client.tax_number,
-          country: this.client.country,
-          city: this.client.city,
-          adresse: this.client.adresse,
-          is_royalty_eligible: this.client.is_royalty_eligible
-        })
+        .post("clients", payload)
         .then(response => {
           NProgress.done();
           const newClient = response.data;
@@ -8065,10 +8887,66 @@ export default {
           this.Get_Client_Without_Paginate();
           this.$bvModal.hide("New_Customer");
         })
-        .catch(() => {
+        .catch((error) => {
+          const isNetworkError = this.isNetworkFailure(error);
+          if (isNetworkError) {
+            this.createClientOffline(payload, null, 'New_Customer');
+            return;
+          }
           NProgress.done();
           this.makeToast("danger", this.$t("InvalidData"), this.$t("Failed"));
         });
+    },
+
+    // Create a customer locally while offline: a temporary local id is used
+    // in the POS immediately (sales/drafts queued against it are remapped to
+    // the real server id when the sync creates the client).
+    createClientOffline(payload, customFieldValues, modalId) {
+      try {
+        const rec = Util.offlinePos.addOfflineClient(payload, customFieldValues);
+        this.clients.push({
+          id: rec.id,
+          name: payload.name,
+          phone: payload.phone || ''
+        });
+        this.selectedClientId = rec.id;
+        this.client_name = payload.name;
+        // Same post-create hook as the online path: resets loyalty state and
+        // sets the name; its points fetch fails silently while offline.
+        try { this.onClientSelected(rec.id); } catch (e) {}
+        this.makeToast(
+          'success',
+          this.$t ? (this.$t('pos.Client_Saved_Offline') || 'Customer saved offline. They will sync when you are back online.') : 'Customer saved offline. They will sync when you are back online.',
+          this.$t ? this.$t('Success') : 'Success'
+        );
+        if (modalId) {
+          try { this.$bvModal.hide(modalId); } catch (e) {}
+        }
+      } catch (e) {
+        this.makeToast('danger', this.$t('InvalidData'), this.$t('Failed'));
+      } finally {
+        NProgress.done();
+        this.SubmitProcessing = false;
+      }
+    },
+
+    // Merge customers created offline (still unsynced) into the pickable
+    // clients list — after a reload the server/cached list won't have them.
+    mergeOfflineClientsIntoList() {
+      try {
+        const pending = Util.offlinePos.getOfflineClients() || [];
+        pending.forEach((rec) => {
+          if (!rec || !rec.id || !rec.payload) return;
+          const exists = (this.clients || []).some(c => c && String(c.id) === String(rec.id));
+          if (!exists) {
+            this.clients.push({
+              id: rec.id,
+              name: rec.payload.name || '',
+              phone: rec.payload.phone || ''
+            });
+          }
+        });
+      } catch (e) {}
     },
     Submit_Quick_Add_Customer() {
       NProgress.start();
@@ -8093,6 +8971,30 @@ export default {
             this.$t("Phone_Already_Registered"),
             this.$t("Failed")
           );
+          return;
+        }
+        if (this.isReallyOffline()) {
+          // Offline: save the customer locally (custom fields included — they
+          // are posted right after the client syncs). The duplicate-phone
+          // check could not run; the server still validates at sync time.
+          this.createClientOffline(
+            {
+              name: this.client.name,
+              email: this.client.email || '',
+              phone: this.client.phone || '',
+              tax_number: this.client.tax_number || '',
+              country: this.client.country || '',
+              city: this.client.city || '',
+              adresse: this.client.adresse || '',
+              is_royalty_eligible: this.client.is_royalty_eligible || false
+            },
+            this.quickAddCustomFieldValues && Object.keys(this.quickAddCustomFieldValues).length
+              ? { ...this.quickAddCustomFieldValues }
+              : null,
+            'Quick_Add_Customer'
+          );
+          this.reset_Form_client();
+          this.quickAddCustomFieldValues = {};
           return;
         }
         axios
@@ -8145,7 +9047,31 @@ export default {
               afterCustoms();
             }
           })
-          .catch(() => {
+          .catch((error) => {
+            // Network failure while the browser still thinks it's online —
+            // save the customer locally instead of dropping the input.
+            const isNetworkError = this.isNetworkFailure(error);
+            if (isNetworkError) {
+              this.createClientOffline(
+                {
+                  name: this.client.name,
+                  email: this.client.email || '',
+                  phone: this.client.phone || '',
+                  tax_number: this.client.tax_number || '',
+                  country: this.client.country || '',
+                  city: this.client.city || '',
+                  adresse: this.client.adresse || '',
+                  is_royalty_eligible: this.client.is_royalty_eligible || false
+                },
+                this.quickAddCustomFieldValues && Object.keys(this.quickAddCustomFieldValues).length
+                  ? { ...this.quickAddCustomFieldValues }
+                  : null,
+                'Quick_Add_Customer'
+              );
+              this.reset_Form_client();
+              this.quickAddCustomFieldValues = {};
+              return;
+            }
             NProgress.done();
             this.SubmitProcessing = false;
             this.makeToast("danger", this.$t("InvalidData"), this.$t("Failed"));
@@ -8158,10 +9084,18 @@ export default {
     },
     Quick_Add_Client() {
       this.reset_Form_client();
+      this.quickAddMore = false;
       this.$bvModal.show("Quick_Add_Customer");
+    },
+    focusQuickAddName() {
+      this.$nextTick(() => {
+        const el = this.$refs.quickAddNameInput;
+        if (el && el.focus) el.focus();
+      });
     },
     reset_Form_client() {
       this.phone_duplicate = false;
+      this.phone_check_state = "";
       if (this.phone_check_timer) {
         clearTimeout(this.phone_check_timer);
         this.phone_check_timer = null;
@@ -8187,18 +9121,24 @@ export default {
       const phone = (this.client.phone || "").trim();
       if (!phone) {
         this.phone_duplicate = false;
+        this.phone_check_state = "";
         return;
       }
+      this.phone_check_state = "checking";
       this.phone_check_timer = setTimeout(() => {
         axios
           .get("check_phone_duplicate", {
             params: { phone, type: "client" }
           })
           .then(response => {
+            // Ignore a late answer for a number the cashier already replaced.
+            if ((this.client.phone || "").trim() !== phone) return;
             this.phone_duplicate = !!response.data.exists;
+            this.phone_check_state = this.phone_duplicate ? "dup" : "ok";
           })
           .catch(() => {
             this.phone_duplicate = false;
+            this.phone_check_state = "";
           });
       }, 400);
     },
@@ -8227,7 +9167,8 @@ export default {
     // Print a compact receipt-style summary of today's sales.
     print_today_sales() {
       const ts = this.today_sales || {};
-      const fmt = (v) => this.formatPriceWithCurrentCurrency(Number(v) || 0, 2);
+      // Register aggregates are base-currency — don't follow the POS switch.
+      const fmt = (v) => this.formatPriceBaseCurrency(Number(v) || 0, 2);
       const esc = (s) =>
         String(s == null ? "" : s)
           .replace(/&/g, "&amp;")
@@ -8324,6 +9265,183 @@ export default {
       this.custDrawerSearch = '';
       this.onClientSelected(this.selectedClientId);
     },
+
+    // ---------- Customer purchase history ----------
+    openCustomerHistory(clientId) {
+      if (!clientId || !this.showCustomerHistoryEnabled) return;
+      this.custHistoryClientId = clientId;
+      this.custHistorySearch = '';
+      this.custHistoryPage = 1;
+      this.custHistoryExpanded = {};
+      this.custHistory = { client: {}, summary: {}, sales: [], totalRows: 0 };
+      this.custHistoryOpen = true;
+      this.custDrawerOpen = false;
+      this.loadCustomerHistory();
+      this.$nextTick(() => {
+        const el = this.$refs.custHistorySearchInput;
+        if (el && el.focus) el.focus();
+      });
+    },
+    closeCustomerHistory() {
+      this.custHistoryOpen = false;
+      if (this.custHistorySearchTimer) {
+        clearTimeout(this.custHistorySearchTimer);
+        this.custHistorySearchTimer = null;
+      }
+    },
+    loadCustomerHistory() {
+      const clientId = this.custHistoryClientId;
+      if (!clientId) return;
+      this.custHistoryLoading = true;
+      const params = {
+        page: this.custHistoryPage,
+        limit: this.custHistoryPerPage,
+        search: this.custHistorySearch || undefined,
+      };
+      return axios.get('pos/client-history/' + clientId, { params })
+        .then(({ data }) => {
+          // Ignore late responses after the cashier switched customer.
+          if (this.custHistoryClientId !== clientId) return;
+          this.custHistory = {
+            client: data.client || {},
+            summary: data.summary || {},
+            sales: Array.isArray(data.sales) ? data.sales : [],
+            totalRows: Number(data.totalRows) || 0,
+          };
+        })
+        .catch(() => {
+          this.makeToast('danger', this.$t('Failed_to_load_data') || 'Failed to load data', this.$t('Failed') || 'Failed');
+        })
+        .finally(() => {
+          if (this.custHistoryClientId === clientId) this.custHistoryLoading = false;
+        });
+    },
+    onCustomerHistorySearch() {
+      if (this.custHistorySearchTimer) clearTimeout(this.custHistorySearchTimer);
+      this.custHistorySearchTimer = setTimeout(() => {
+        this.custHistoryPage = 1;
+        this.custHistoryExpanded = {};
+        this.loadCustomerHistory();
+      }, 300);
+    },
+    goCustomerHistoryPage(page) {
+      if (page < 1 || page > this.custHistoryTotalPages) return;
+      this.custHistoryPage = page;
+      this.custHistoryExpanded = {};
+      this.loadCustomerHistory();
+    },
+    selectCustomerFromHistory() {
+      if (!this.custHistoryClientId) return;
+      this.selectCustomer(this.custHistoryClientId);
+      this.custHistoryOpen = true; // selectCustomer() closes the picker, keep history open
+    },
+    toggleHistorySale(sale) {
+      const current = this.custHistoryExpanded[sale.id];
+      if (current) {
+        const next = { ...this.custHistoryExpanded };
+        delete next[sale.id];
+        this.custHistoryExpanded = next;
+        return;
+      }
+      this.custHistoryExpanded = { ...this.custHistoryExpanded, [sale.id]: { loading: true, items: [] } };
+      axios.get('pos/client-history/sale/' + sale.id)
+        .then(({ data }) => {
+          if (!this.custHistoryExpanded[sale.id]) return;
+          this.custHistoryExpanded = {
+            ...this.custHistoryExpanded,
+            [sale.id]: { loading: false, items: Array.isArray(data.items) ? data.items : [] },
+          };
+        })
+        .catch(() => {
+          const next = { ...this.custHistoryExpanded };
+          delete next[sale.id];
+          this.custHistoryExpanded = next;
+          this.makeToast('danger', this.$t('Failed_to_load_data') || 'Failed to load data', this.$t('Failed') || 'Failed');
+        });
+    },
+    historyPaymentLabel(status) {
+      const map = { paid: 'Paid', unpaid: 'Unpaid', partial: 'Partial' };
+      const key = map[status] || 'Unpaid';
+      return this.$t(key) || key;
+    },
+    historyStatusLabel(status) {
+      const map = { completed: 'Completed', pending: 'Pending', ordered: 'Ordered' };
+      const key = map[status] || status;
+      return this.$t(key) || key;
+    },
+    // Re-add one past line through the normal product-detail loader so stock
+    // guards, packs, wholesale tiers and promotions apply exactly as if the
+    // cashier tapped the product in the grid.
+    async reorderHistoryItem(item, { silent = false } = {}) {
+      if (!item || !item.reorderable) return false;
+      if (!this.sale.warehouse_id) {
+        this.makeToast('warning', this.$t('Please_select_warehouse'), this.$t('Warning'));
+        return false;
+      }
+      this.custHistoryReordering = true;
+      try {
+        const qty = Number(item.quantity) > 0 ? Number(item.quantity) : 1;
+        // Same staging as SearchProduct(): start from a clean product so no
+        // field from the previous line leaks into this one.
+        this.product = {};
+        this.product.quantity = qty;
+        this.product.product_variant_id = item.product_variant_id || null;
+        await this.Get_Product_Details(item.product_id, item.product_variant_id || null, null);
+        // Don't let the reordered quantity leak into the next grid tap.
+        this.product.quantity = 1;
+        if (!silent) {
+          this.makeToast('success', (this.$t('Added_to_cart') || 'Added to cart') + ': ' + item.name, this.$t('Success'));
+        }
+        return true;
+      } catch (e) {
+        if (!silent) {
+          this.makeToast('warning', (this.$t('Product_not_available') || 'Product not available') + ': ' + item.name, this.$t('Warning'));
+        }
+        return false;
+      } finally {
+        this.custHistoryReordering = false;
+      }
+    },
+    async reorderHistorySale(sale) {
+      const entry = this.custHistoryExpanded[sale.id];
+      if (!entry || entry.loading) return;
+      const items = (entry.items || []).filter(i => i.reorderable);
+      if (!items.length) return;
+      let added = 0;
+      for (const item of items) {
+        // eslint-disable-next-line no-await-in-loop
+        const ok = await this.reorderHistoryItem(item, { silent: true });
+        if (ok) added += 1;
+      }
+      if (added > 0) {
+        this.makeToast('success', (this.$t('Added_to_cart') || 'Added to cart') + ': ' + added + ' / ' + items.length, this.$t('Success'));
+        this.closeCustomerHistory();
+      } else {
+        this.makeToast('warning', this.$t('Product_not_available') || 'Product not available', this.$t('Warning'));
+      }
+    },
+    // Change Salesperson During Checkout: remember the pick across sales (and
+    // page reloads) so two employees sharing one POS only switch when handing
+    // over — not on every invoice.
+    selectSeller(id) {
+      this.selectedSellerId = id != null ? id : null;
+      this.sellerDrawerOpen = false;
+    },
+    // Default the salesperson to the authenticated user (the cashier) whenever
+    // the POS loads; a mid-session pick lasts only until the page reloads.
+    // (Earlier builds persisted the pick in localStorage across reloads — that
+    // was reverted on request: each login/refresh starts credited to yourself.)
+    restoreSelectedSeller() {
+      if (!this.salesSwitchEnabled) {
+        this.selectedSellerId = null;
+        return;
+      }
+      const inList = (id) => id != null && (this.salespeople || []).some(s => String(s.id) === String(id));
+      this.selectedSellerId = this.currentUser && inList(this.currentUser.id)
+        ? Number(this.currentUser.id)
+        : null;
+      try { localStorage.removeItem('pos_selected_seller_id'); } catch (e) {}
+    },
     catInitial(name) {
       const s = (name || '?').trim();
       return s ? s.charAt(0).toUpperCase() : '?';
@@ -8345,9 +9463,29 @@ export default {
     },
 
     // ==================== POS SETTINGS MODAL ====================
+    // Persist the per-device shortcuts preference immediately — it is not
+    // part of the pos_settings PUT payload, so waiting for Save would be a
+    // trap (Cancel would still have "saved" it, and vice versa).
+    onTogglePosShortcuts() {
+      setPosShortcutsEnabled(this.pos_shortcuts_enabled);
+      this.makeToast(
+        'success',
+        this.$t('Successfully_Updated') || 'Successfully Updated',
+        this.$t('Success') || 'Success'
+      );
+    },
+
+    // Opens the same reference table the Shift + ? shortcut shows. It renders
+    // after this modal in the template, so it stacks on top of it.
+    show_shortcuts_guide() {
+      this.$bvModal.show('pos-keyboard-shortcuts-help');
+    },
+
     open_pos_settings_modal() {
       this.ps_loading = true;
       this.$bvModal.show("modal_pos_settings");
+      // Another tab or the POS Settings page may have changed it since load.
+      this.pos_shortcuts_enabled = posShortcutsEnabled();
       // Refresh from server so the modal always shows authoritative state
       // (and so we have the row id needed for the PUT request).
       axios.get("get_pos_Settings_api")
@@ -8361,7 +9499,7 @@ export default {
             const boolKeys = [
               'quick_add_customer','barcode_scanning_sound','show_product_images',
               'show_stock_quantity','enable_hold_sales','enable_customer_points',
-              'show_categories','show_brands','allow_overselling','cash_drawer_auto_open',
+              'show_categories','show_brands','show_customer_history','allow_overselling','cash_drawer_auto_open',
             ];
             boolKeys.forEach(k => {
               if (typeof this.pos_settings[k] === 'number') {
@@ -8438,6 +9576,7 @@ export default {
           enable_customer_points: this.pos_settings.enable_customer_points,
           show_categories: this.pos_settings.show_categories,
           show_brands: this.pos_settings.show_brands,
+          show_customer_history: this.pos_settings.show_customer_history,
           allow_overselling: this.pos_settings.allow_overselling ? 1 : 0,
           cash_drawer_auto_open: this.pos_settings.cash_drawer_auto_open ? 1 : 0,
           cash_drawer_printer_name: this.pos_settings.cash_drawer_printer_name || null,
@@ -8472,7 +9611,8 @@ export default {
           this.product.code = result.code;
           this.product.current = result.qte_sale;
           this.product.fix_stock = result.qte;
-          if (result.qte_sale < 1) {
+          // Overselling: keep 1 as the default even at zero/negative stock.
+          if (!this.isOversellingAllowed && result.qte_sale < 1) {
             this.product.quantity = result.qte_sale;
           } else {
             this.product.quantity = 1;
@@ -8827,6 +9967,9 @@ export default {
           this.categories = response.data.categories;
           this.brands = response.data.brands;
           this.payment_methods = response.data.payment_methods;
+          this.salesSwitchEnabled = response.data.enable_pos_salesperson_switch === true;
+          this.salespeople = Array.isArray(response.data.salespeople) ? response.data.salespeople : [];
+          this.restoreSelectedSeller();
           this.default_account_id = response.data.default_account_id ?? null;
           this.default_payment_method_id = response.data.default_payment_method_id ?? null;
           this.sale.warehouse_id = response.data.defaultWarehouse;
@@ -8875,7 +10018,7 @@ export default {
 
           // Ensure we always have a currency symbol fallback for receipts
           try {
-            const sym = (this.currentUser && this.currentUser.currency) ? this.currentUser.currency : '';
+            const sym = this.posCurrencySymbol || '';
             if (!this.invoice_pos.symbol) {
               try { this.$set(this.invoice_pos, 'symbol', sym); } catch (e) { this.invoice_pos.symbol = sym; }
             }
@@ -8909,15 +10052,54 @@ export default {
             if (typeof this.pos_settings.show_brands === 'number') {
               this.pos_settings.show_brands = this.pos_settings.show_brands === 1;
             }
+            if (typeof this.pos_settings.show_customer_history === 'number') {
+              this.pos_settings.show_customer_history = this.pos_settings.show_customer_history === 1;
+            }
+            // Overselling comes from the global settings row; older cached
+            // bootstrap payloads may still carry it as 0/1.
+            if (typeof this.pos_settings.allow_overselling === 'number') {
+              this.pos_settings.allow_overselling = this.pos_settings.allow_overselling === 1;
+            }
           }
           this.getProducts();
           this.paginate_Brands(this.brand_perPage, 0);
           this.paginate_Category(this.category_perPage, 0);
           this.stripe_key = response.data.stripe_key;
+          // The server is confirmed reachable: NOW it is safe to drop the stale
+          // offline caches (product details, old warehouse snapshots) and
+          // rebuild them from this fresh payload. Doing this earlier (created())
+          // destroyed the only copy of the data when the server was down.
+          try {
+            if (Util && Util.offlinePos && Util.offlinePos.clearCache) {
+              Util.offlinePos.clearCache();
+            }
+          } catch (e) {}
+          // Re-cache the receipt/company setting clearCache just removed.
+          try {
+            if (response.data && response.data.setting) {
+              const merged = { ...(this.invoice_pos && this.invoice_pos.setting ? this.invoice_pos.setting : {}), ...response.data.setting };
+              localStorage.setItem('pos_receipt_company_setting', JSON.stringify(merged));
+            }
+          } catch (e) {}
           // Cache bootstrap payload for offline usage
           try {
             if (Util && Util.offlinePos && Util.offlinePos.cacheBootstrap) {
               Util.offlinePos.cacheBootstrap(response.data);
+            }
+          } catch (e) {}
+          // Customers created offline that haven't synced yet won't be in the
+          // server list — keep them pickable.
+          try { this.mergeOfflineClientsIntoList(); } catch (e) {}
+          // Bring back any in-progress cart that a refresh interrupted (must
+          // run after the defaults above so the saved warehouse/client win).
+          try { this.restoreCartState(); } catch (e) {}
+          // The bootstrap succeeded, so the server is reachable: flush any
+          // leftover offline queues (sales/drafts/customers from a session
+          // that ended before reconnect). Delayed so boot requests settle
+          // first; the in-progress guard prevents overlap with other triggers.
+          try {
+            if (this.hasPendingOfflineWork()) {
+              setTimeout(() => { try { this.trySyncOfflineSales(); } catch (e) {} }, 3000);
             }
           } catch (e) {}
           this.isLoading = false;
@@ -8936,6 +10118,9 @@ export default {
               this.categories = cached.categories || [];
               this.brands = cached.brands || [];
               this.payment_methods = cached.payment_methods || [];
+              this.salesSwitchEnabled = cached.enable_pos_salesperson_switch === true;
+              this.salespeople = Array.isArray(cached.salespeople) ? cached.salespeople : [];
+              this.restoreSelectedSeller();
               this.default_account_id = cached.default_account_id ?? null;
               this.default_payment_method_id = cached.default_payment_method_id ?? null;
 
@@ -8993,9 +10178,18 @@ export default {
 
               // Ensure receipt symbol exists offline too
               try {
-                const sym = (this.currentUser && this.currentUser.currency) ? this.currentUser.currency : '';
+                const sym = this.posCurrencySymbol || '';
                 if (!this.invoice_pos.symbol) {
                   try { this.$set(this.invoice_pos, 'symbol', sym); } catch (e) { this.invoice_pos.symbol = sym; }
+                }
+              } catch (e) {}
+
+              // POS settings drive hold sales, quick-add customer, grid options
+              // etc. — hydrate them from the cached bootstrap so an offline
+              // reload keeps the same feature set as the online session.
+              try {
+                if (cached.pos_settings && typeof cached.pos_settings === 'object') {
+                  this.pos_settings = { ...this.pos_settings, ...cached.pos_settings };
                 }
               } catch (e) {}
 
@@ -9014,6 +10208,11 @@ export default {
           } catch (e) {
             this.productsReady = true;
           }
+          // Customers created offline that haven't synced yet won't be in the
+          // cached list — keep them pickable.
+          try { this.mergeOfflineClientsIntoList(); } catch (e) {}
+          // Bring back any in-progress cart that an offline refresh interrupted.
+          try { this.restoreCartState(); } catch (e) {}
           this.isLoading = false;
         });
     },
@@ -9043,6 +10242,17 @@ export default {
     },
 
     onModernPaymentSuccess(evt) {
+      // If the finished sale came from an offline-held (local) draft, its id
+      // never reached the server — delete the local record here. (Server
+      // drafts are deleted server-side via the payload's draft_sale_id.)
+      try {
+        if (this.draft_sale_id && Util.offlinePos.isLocalId(this.draft_sale_id)) {
+          Util.offlinePos.removeOfflineDraft(this.draft_sale_id);
+          this.draft_sale_id = '';
+          try { Fire.$emit("event_delete_draft_sale"); } catch (e) {}
+        }
+      } catch (e) {}
+
       // For ONLINE sales through ModernPaymentModal, the sale response carries
       // authoritative stock for the items just sold. Patch it into the grid
       // immediately so the cashier sees correct quantities without waiting
@@ -9077,10 +10287,18 @@ export default {
             if (w && w.name) warehouseName = w.name;
           } catch (e2) {}
 
-          // Resolve seller name from current user (prefer name, then username, then email)
+          // Resolve seller name: prefer the salesperson picked at checkout
+          // (payload.seller_id, Change Salesperson feature), then fall back to
+          // the current user (prefer name, then username, then email).
           let sellerName = '';
           try {
-            if (this.currentUser) {
+            const sellerId = payload.seller_id != null ? payload.seller_id : (this.salesSwitchEnabled ? this.selectedSellerId : null);
+            const sp = sellerId != null
+              ? (this.salespeople || []).find(x => String(x.id) === String(sellerId))
+              : null;
+            if (sp) {
+              sellerName = sp.name || sp.username || '';
+            } else if (this.currentUser) {
               sellerName =
                 this.currentUser.name ||
                 this.currentUser.username ||
@@ -9089,17 +10307,28 @@ export default {
             }
           } catch (e2) {}
 
+          // Multi-Currency: the queued payload stores base amounts plus the
+          // sale's currency snapshot — convert the offline receipt exactly
+          // like the online invoice endpoint would (rate 1 when base).
+          const offRate = Number(payload.exchange_rate) || 1;
+          const offCurrency = payload.currency_id
+            ? (this.pos_currencies || []).find(c => String(c.id) === String(payload.currency_id))
+            : null;
+
           const sale = {
             // Do not set Ref so offline receipts have no "Ref: ..." line
             client_name: clientName,
             warehouse_name: warehouseName,
-            discount: payload.discount || 0,
-            taxe: payload.TaxNet || 0,
+            // Percentage discounts are unit-less; fixed ones convert.
+            discount: String(payload.discount_Method || '2') === '1'
+              ? (payload.discount || 0)
+              : (Number(payload.discount || 0) * offRate),
+            taxe: Number(payload.TaxNet || 0) * offRate,
             tax_rate: payload.tax_rate || 0,
-            shipping: payload.shipping || 0,
-            GrandTotal: payload.GrandTotal || 0,
+            shipping: Number(payload.shipping || 0) * offRate,
+            GrandTotal: Number(payload.GrandTotal || 0) * offRate,
             paid_amount: (Array.isArray(payload.payments)
-              ? payload.payments.reduce((s, p) => s + Number(p.amount || 0), 0)
+              ? payload.payments.reduce((s, p) => s + Number(p.amount || 0), 0) * offRate
               : 0),
             date: saleDate,
             seller_name: sellerName
@@ -9110,7 +10339,7 @@ export default {
             name: d.name,
             quantity: d.quantity,
             unit_sale: d.unitSale || d.unit_sale || '',
-            total: d.subtotal != null ? d.subtotal : (d.total != null ? d.total : (d.Net_price || 0) * (d.quantity || 0)),
+            total: (d.subtotal != null ? d.subtotal : (d.total != null ? d.total : (d.Net_price || 0) * (d.quantity || 0))) * offRate,
             is_imei: d.is_imei,
             imei_number: d.imei_number,
             pack_name: d.pack_name || null,
@@ -9122,13 +10351,15 @@ export default {
             const method = (this.payment_methods || []).find(m => String(m.id) === String(p.payment_method_id));
             return {
               payment_method: method ? { name: method.name } : null,
-              montant: Number(p.amount || 0),
+              montant: Number(p.amount || 0) * offRate,
               change: 0
             };
           }) : [];
 
           // Fallback settings & POS print options (reuse latest online invoice/pos settings when available)
-          const symbol = this.currentUser && this.currentUser.currency ? this.currentUser.currency : '';
+          const symbol = offCurrency
+            ? (offCurrency.code || offCurrency.symbol || '')
+            : (this.currentUser && this.currentUser.currency ? this.currentUser.currency : '');
 
           // Prefer full setting object from last loaded invoice (online), else fall back to currentUser logo
           const baseSetting = (this.invoice_pos && this.invoice_pos.setting &&
@@ -9231,6 +10462,7 @@ export default {
       // Poll navigator.onLine and trigger the same handlers on state changes.
       try {
         if (!this._posOnlineSignalPollTimer) {
+          this._posReconnectRetryTick = 0;
           this._posOnlineSignalPollTimer = setInterval(() => {
             try {
               const browserOnline = !window.navigator || window.navigator.onLine !== false;
@@ -9240,6 +10472,29 @@ export default {
                 try { this.handleOnline(); } catch (e) {}
               } else if (!browserOnline && this.isOnline) {
                 try { this.handleOffline(); } catch (e) { this.isOnline = false; }
+              } else if (browserOnline && this.isOnline) {
+                // Reconnect retry: the browser regained connectivity but the
+                // confirmation ping in handleOnline() failed (server still
+                // warming up / briefly unreachable) — without this, nothing
+                // would ever retry and queued work stayed unsynced until a
+                // manual click or another offline/online cycle. Re-probe
+                // every 5th tick (~15s) while the last ping failed and
+                // offline work is still waiting; handleOnline() dedupes via
+                // _posOnlineProbeInProgress and stops the loop by setting
+                // backendReachable=true on success.
+                if (
+                  this.backendReachable === false &&
+                  !this.offlineSyncInProgress &&
+                  this.hasPendingOfflineWork()
+                ) {
+                  this._posReconnectRetryTick = (this._posReconnectRetryTick || 0) + 1;
+                  if (this._posReconnectRetryTick >= 5) {
+                    this._posReconnectRetryTick = 0;
+                    try { this.handleOnline(); } catch (e) {}
+                  }
+                } else {
+                  this._posReconnectRetryTick = 0;
+                }
               }
             } catch (e) {}
           }, 3000);
@@ -9274,7 +10529,6 @@ export default {
       }
       // When the cart is empty, we auto-sync offline sales in the background and
       // then reload the page afterwards (even if there were no pending sales).
-      // We still let the global offline sync handler perform the actual API work.
       if (!hadActiveCart) {
         try {
           if (Util && Util.offlinePos && Util.offlinePos.getOfflineSales) {
@@ -9282,13 +10536,23 @@ export default {
             const pendingCount = queue.filter(
               s => s && (s.status === 'pending' || s.status === 'syncing')
             ).length;
-            if (pendingCount > 0) {
-              const msg = pendingCount === 1 
+            // Queued customers/drafts also need the sync pass, even with no
+            // pending sales.
+            if (pendingCount > 0 || this.hasPendingOfflineWork()) {
+              const msg = pendingCount === 1
                 ? (this.$t ? this.$t('pos.Syncing_offline_sales') : 'Syncing offline sales')
                 : (this.$t ? `${this.$t('pos.Syncing_offline_sales')} (${pendingCount})` : `Syncing ${pendingCount} offline sales...`);
               this.makeToast && this.makeToast('info', msg, this.$t ? this.$t('Notice') : 'Notice');
-              // Ask POS to reload after global offline sync completes successfully.
+              // Reload after the sync finishes successfully
+              // (handleAutoOfflineSyncResult performs the reload).
               this.reloadAfterOfflineSync = true;
+              // Run the sync directly. A former Vue 2 "globalOfflineSync"
+              // module used to own this; it was never ported, so waiting for
+              // it meant queued sales only synced when the cashier clicked
+              // the sync button. trySyncOfflineSales() is re-entrancy-guarded
+              // (offlineSyncInProgress + per-record 'syncing' status), so a
+              // concurrent trigger cannot double-submit.
+              try { this.trySyncOfflineSales(); } catch (e) {}
             } else {
               // No pending offline sales: nothing to sync, so reload immediately.
               this.reloadAfterOfflineSync = false;
@@ -9301,13 +10565,16 @@ export default {
       }
       // If there is an active checkout when the connection is restored, show a
       // non-blocking confirmation modal offering to reload now or after
-      // completing the current sale.
+      // completing the current sale — and sync any queued sales in the
+      // background right away (the cart itself is untouched by the sync).
       if (hadActiveCart) {
         this.onlineReloadModalVisible = true;
         this.onlineReloadAfterSale = false;
+        try {
+          // Not just sales: queued customers/drafts must flush too.
+          if (this.hasPendingOfflineWork()) this.trySyncOfflineSales();
+        } catch (e) {}
       }
-      // Do NOT call this.trySyncOfflineSales() here; globalOfflineSync will run
-      // the sync once per online event, which prevents duplicate submissions.
     },
     handleOffline() {
       // Respect the System Settings → Offline Sync toggle: when disabled, keep
@@ -9349,6 +10616,141 @@ export default {
       } catch (e) {
         this.offlineSalesCount = 0;
       }
+    },
+    // ==================== CART PERSISTENCE (refresh survival) ====================
+    // The whole in-progress sale lives in this component's data(); before these
+    // helpers a page refresh — accidental or offline — silently destroyed the
+    // cart. A snapshot is saved (debounced) on every cart mutation and restored
+    // once the bootstrap (online or cached) has hydrated the page.
+    buildCartStateSnapshot() {
+      return {
+        details: this.details,
+        sale: {
+          warehouse_id: this.sale.warehouse_id,
+          tax_rate: this.sale.tax_rate,
+          TaxNet: this.sale.TaxNet,
+          discount: this.sale.discount,
+          discount_Method: this.sale.discount_Method,
+          shipping: this.sale.shipping,
+          notes: this.sale.notes
+        },
+        selectedClientId: this.selectedClientId,
+        client_name: this.client_name,
+        clientIsEligible: this.clientIsEligible === true,
+        selectedClientPoints: this.selectedClientPoints || 0,
+        selectedClientCreditLimit: this.selectedClientCreditLimit || 0,
+        selectedClientNetBalance: this.selectedClientNetBalance || 0,
+        draft_sale_id: this.draft_sale_id || '',
+        promotionCode: this.promotionCode || '',
+        promotionDiscount: this.promotionDiscount || 0,
+        appliedPromotions: this.appliedPromotions || [],
+        used_points: this.used_points || 0,
+        discount_from_points: this.discount_from_points || 0,
+        points_to_convert: this.points_to_convert || 0,
+        pointsConverted: this.pointsConverted === true
+      };
+    },
+    persistCartState() {
+      if (this._restoringCart) return;
+      try {
+        if (this._persistCartTimer) clearTimeout(this._persistCartTimer);
+      } catch (e) {}
+      this._persistCartTimer = setTimeout(() => {
+        try {
+          if (!Util || !Util.offlinePos) return;
+          if (!this.details || !this.details.length) {
+            // Cart emptied (sale finished or lines removed) — drop the snapshot
+            // so the next boot starts clean.
+            Util.offlinePos.clearCartState && Util.offlinePos.clearCartState();
+            return;
+          }
+          Util.offlinePos.saveCartState && Util.offlinePos.saveCartState(this.buildCartStateSnapshot());
+        } catch (e) {}
+      }, 400);
+    },
+    // Synchronous, non-debounced write — used on pagehide/beforeunload where a
+    // pending debounce timer would never fire.
+    flushCartState() {
+      try {
+        if (this._persistCartTimer) {
+          clearTimeout(this._persistCartTimer);
+          this._persistCartTimer = null;
+        }
+      } catch (e) {}
+      if (this._restoringCart) return;
+      try {
+        if (!Util || !Util.offlinePos) return;
+        if (!this.details || !this.details.length) {
+          Util.offlinePos.clearCartState && Util.offlinePos.clearCartState();
+          return;
+        }
+        Util.offlinePos.saveCartState && Util.offlinePos.saveCartState(this.buildCartStateSnapshot());
+      } catch (e) {}
+    },
+    // Hydrate the whole POS sale state from a cart snapshot (the shape
+    // buildCartStateSnapshot produces). Shared by refresh-survival restore
+    // and by reopening offline-held drafts.
+    applyCartSnapshot(saved) {
+      this._restoringCart = true;
+      try {
+        this.details = Array.isArray(saved.details) ? saved.details : [];
+        if (saved.sale) {
+          const s = saved.sale;
+          if (s.tax_rate !== undefined && s.tax_rate !== null) this.sale.tax_rate = s.tax_rate;
+          this.sale.discount = s.discount || 0;
+          this.sale.discount_Method = String(s.discount_Method || '2');
+          this.sale.shipping = s.shipping || 0;
+          this.sale.notes = s.notes || '';
+          if (s.warehouse_id && String(s.warehouse_id) !== String(this.sale.warehouse_id)) {
+            this.sale.warehouse_id = s.warehouse_id;
+            // Reload the grid for the cart's warehouse (falls back to the
+            // cached snapshot when offline).
+            try { this.Selected_Warehouse(this.sale.warehouse_id); } catch (e) {}
+          }
+        }
+        if (saved.selectedClientId) {
+          this.selectedClientId = saved.selectedClientId;
+          this.client_name = saved.client_name || this.client_name;
+          this.clientIsEligible = saved.clientIsEligible === true;
+          this.selectedClientPoints = saved.selectedClientPoints || 0;
+          this.selectedClientCreditLimit = saved.selectedClientCreditLimit || 0;
+          this.selectedClientNetBalance = saved.selectedClientNetBalance || 0;
+        }
+        this.draft_sale_id = saved.draft_sale_id || '';
+        this.promotionCode = saved.promotionCode || '';
+        this.promotionDiscount = saved.promotionDiscount || 0;
+        this.appliedPromotions = Array.isArray(saved.appliedPromotions) ? saved.appliedPromotions : [];
+        this.used_points = saved.used_points || 0;
+        this.discount_from_points = saved.discount_from_points || 0;
+        this.points_to_convert = saved.points_to_convert || 0;
+        this.pointsConverted = saved.pointsConverted === true;
+        try { this.CalculTotal(); } catch (e) {}
+      } finally {
+        this._restoringCart = false;
+      }
+    },
+    restoreCartState() {
+      const saved = Util && Util.offlinePos && Util.offlinePos.getCartState
+        ? Util.offlinePos.getCartState()
+        : null;
+      if (!saved) return;
+      // Never clobber a cart the cashier already started in this session.
+      if (this.details && this.details.length) return;
+      this.applyCartSnapshot(saved);
+      try {
+        const msg = this.$t ? (this.$t('pos.Cart_Restored') || 'Your cart was restored') : 'Your cart was restored';
+        this.makeToast && this.makeToast('info', msg, this.$t ? this.$t('Notice') : 'Notice');
+      } catch (e) {}
+    },
+    clearPersistedCart() {
+      try {
+        if (this._persistCartTimer) clearTimeout(this._persistCartTimer);
+      } catch (e) {}
+      try {
+        if (Util && Util.offlinePos && Util.offlinePos.clearCartState) {
+          Util.offlinePos.clearCartState();
+        }
+      } catch (e) {}
     },
     // Handle result of auto/offline sync (both global auto-sync and local POS sync
     // call this so the feedback is consistent with clicking the offline sync button).
@@ -9420,13 +10822,132 @@ export default {
         );
       }
     },
-    async trySyncOfflineSales() {
+    // Anything still waiting to reach the server, across all three queues.
+    hasPendingOfflineWork() {
+      try {
+        const pendingSales = (Util.offlinePos.getOfflineSales() || [])
+          .some(x => x && (x.status === 'pending' || x.status === 'syncing'));
+        const pendingDrafts = (Util.offlinePos.getOfflineDrafts() || [])
+          .some(x => x && x.status !== 'failed');
+        const pendingClients = (Util.offlinePos.getOfflineClients() || [])
+          .some(x => x && x.status !== 'failed');
+        return pendingSales || pendingDrafts || pendingClients;
+      } catch (e) {
+        return false;
+      }
+    },
+
+    // Push customers created offline to the server. Must run BEFORE sales and
+    // drafts sync: queued records reference the temporary local client id and
+    // are remapped to the real id here. Returns false when the network died
+    // mid-way (callers stop the whole sync pass).
+    async syncOfflineClients(includeFailed) {
+      const queue = Util.offlinePos.getOfflineClients() || [];
+      for (let i = 0; i < queue.length; i++) {
+        const rec = queue[i];
+        if (!rec || !rec.payload || rec.status === 'syncing') continue;
+        if (rec.status === 'failed' && !includeFailed) continue;
+        try {
+          Util.offlinePos.markClientStatus(rec.id, 'syncing');
+          const response = await axios.post('clients', rec.payload);
+          const newClient = (response && response.data) || {};
+          const remoteId = newClient.id || (newClient.client && newClient.client.id);
+          if (!remoteId) {
+            Util.offlinePos.markClientStatus(rec.id, 'failed', 'Invalid response from server');
+            continue;
+          }
+          // Rewrite every queued reference (sales, drafts, persisted cart)…
+          Util.offlinePos.remapLocalClientId(rec.id, remoteId);
+          // …and the live component state.
+          try {
+            const entry = (this.clients || []).find(c => c && String(c.id) === String(rec.id));
+            if (entry) entry.id = remoteId;
+            if (String(this.selectedClientId) === String(rec.id)) {
+              this.selectedClientId = remoteId;
+            }
+          } catch (e) {}
+          // Custom field values captured in the quick-add form.
+          if (rec.custom_field_values) {
+            try {
+              await axios.post('custom-field-values', {
+                entity_type: 'App\\Models\\Client',
+                entity_id: remoteId,
+                values: rec.custom_field_values
+              });
+            } catch (e) { /* optional metadata — the client itself synced */ }
+          }
+          Util.offlinePos.removeOfflineClient(rec.id);
+        } catch (error) {
+          const isNetworkError = this.isNetworkFailure(error);
+          if (isNetworkError) {
+            Util.offlinePos.markClientStatus(rec.id, 'pending');
+            // Let the online-signal poll re-probe and retry (~15s).
+            this.backendReachable = false;
+            return false;
+          }
+          const msg =
+            (error.response && error.response.data && (error.response.data.message || error.response.data.error)) ||
+            error.message || 'Unknown error';
+          Util.offlinePos.markClientStatus(rec.id, 'failed', msg);
+          this.offlineLastSyncError = msg;
+        }
+      }
+      return true;
+    },
+
+    // Push drafts held offline to the server. Records whose customer is still
+    // a local id are left for the next pass (their client failed to sync).
+    async syncOfflineDrafts(includeFailed) {
+      const queue = Util.offlinePos.getOfflineDrafts() || [];
+      for (let i = 0; i < queue.length; i++) {
+        const rec = queue[i];
+        if (!rec || !rec.payload || rec.status === 'syncing') continue;
+        if (rec.status === 'failed' && !includeFailed) continue;
+        if (Util.offlinePos.isLocalId(rec.payload.client_id)) continue;
+        // Never touch the draft currently open in the cart — it will be
+        // re-held or completed from here.
+        if (this.draft_sale_id && String(this.draft_sale_id) === String(rec.id)) continue;
+        try {
+          Util.offlinePos.markDraftStatus(rec.id, 'syncing');
+          const response = await axios.post('pos/create_draft', rec.payload);
+          if (response && response.data && response.data.success === true) {
+            Util.offlinePos.removeOfflineDraft(rec.id);
+          } else {
+            Util.offlinePos.markDraftStatus(rec.id, 'failed', 'Invalid response from server');
+          }
+        } catch (error) {
+          const isNetworkError = this.isNetworkFailure(error);
+          if (isNetworkError) {
+            Util.offlinePos.markDraftStatus(rec.id, 'pending');
+            this.backendReachable = false;
+            return false;
+          }
+          const msg =
+            (error.response && error.response.data && (error.response.data.message || error.response.data.error)) ||
+            error.message || 'Unknown error';
+          Util.offlinePos.markDraftStatus(rec.id, 'failed', msg);
+          this.offlineLastSyncError = msg;
+        }
+      }
+      return true;
+    },
+
+    async trySyncOfflineSales(options) {
+      // options.includeFailed: retry records whose last sync attempt failed.
+      // Used by the manual sync button — without it a sale that failed once
+      // (e.g. a transient 500) could never be retried and was silently stuck.
+      const includeFailed = !!(options && options.includeFailed);
       if (this.offlineSyncInProgress) return;
+      // Claim the lock BEFORE the async ping below — otherwise two triggers
+      // (boot timer, online event, manual click) awaiting the ping together
+      // would both enter the sync loops.
+      this.offlineSyncInProgress = true;
       // Check online status defensively
       if (typeof window !== 'undefined') {
         try {
           if (window.navigator && window.navigator.onLine === false) {
             if (this.offlineSyncEnabled) this.isOnline = false;
+            this.offlineSyncInProgress = false;
             return;
           }
         } catch (e) {}
@@ -9435,16 +10956,25 @@ export default {
       // Confirm backend reachability before attempting any sync.
       // This prevents DevTools/flaky "online" events from triggering sync while
       // still effectively offline.
+      let reachable = false;
       try {
-        const ok = await this.pingBackend();
-        if (!ok) {
-          return;
-        }
+        reachable = await this.pingBackend();
       } catch (e) {
+        reachable = false;
+      }
+      if (!reachable) {
+        this.offlineSyncInProgress = false;
+        // A manual click must say something: silently returning here made the
+        // sync button look dead whenever the server was unreachable.
+        if (options && options.notifyUnreachable) {
+          const msg = this.$t
+            ? (this.$t('pos.Server_Unreachable') || 'Server unreachable — offline sales will sync automatically once the connection is back.')
+            : 'Server unreachable — offline sales will sync automatically once the connection is back.';
+          this.makeToast && this.makeToast('warning', msg, this.$t ? this.$t('Warning') : 'Warning');
+        }
         return;
       }
 
-      this.offlineSyncInProgress = true;
       // Notify UI (via global event bus) that POS offline sync has started
       try {
         if (typeof window !== 'undefined' && window.Fire && window.Fire.$emit) {
@@ -9457,11 +10987,24 @@ export default {
         if (!Util || !Util.offlinePos || !Util.offlinePos.getOfflineSales) {
           return;
         }
+        // Customers created offline sync first (their temporary ids get
+        // remapped in every queued record), then held drafts, then sales.
+        try {
+          const clientsOk = await this.syncOfflineClients(includeFailed);
+          if (clientsOk) {
+            await this.syncOfflineDrafts(includeFailed);
+          }
+        } catch (e) {}
         const queue = Util.offlinePos.getOfflineSales() || [];
         for (let i = 0; i < queue.length; i++) {
           const sale = queue[i];
-          // Skip already-synced, failed or in-progress records
-          if (!sale || !sale.payload || sale.status === 'synced' || sale.status === 'syncing' || sale.status === 'failed') continue;
+          // Skip already-synced and in-progress records; failed ones are
+          // retried only on an explicit manual sync.
+          if (!sale || !sale.payload || sale.status === 'synced' || sale.status === 'syncing') continue;
+          if (sale.status === 'failed' && !includeFailed) continue;
+          // Customer still only exists locally (its sync failed above) — the
+          // server would reject the temporary id; retry on the next pass.
+          if (Util.offlinePos.isLocalId(sale.payload.client_id)) continue;
           try {
             // Mark this sale as "syncing" in the shared offline queue so that
             // other sync workers (global/offline, other tabs) do not submit it
@@ -9487,6 +11030,11 @@ export default {
               ...basePayload,
               // Include offline_id so backend can optionally enforce idempotency
               offline_id: sale.id,
+              // When the sale was rung up: the server books the sale (and its
+              // payments/lines) on this date instead of the sync time, so a
+              // sale queued at closing time does not land in the next day's
+              // reports. Only honoured alongside sale_uuid.
+              offline_created_at: sale.createdAt || undefined,
               details: normalizedDetails,
             };
 
@@ -9515,7 +11063,7 @@ export default {
               } catch (e) {}
             }
           } catch (error) {
-            const isNetworkError = !error.response || error.message === 'Network Error';
+            const isNetworkError = this.isNetworkFailure(error);
             if (typeof window !== 'undefined') {
               try {
                 if (window.navigator && window.navigator.onLine === false) {
@@ -9523,8 +11071,20 @@ export default {
                 }
               } catch (e) {}
             }
-            if (isNetworkError && !this.isOnline) {
-              // Still offline, stop and retry later
+            if (isNetworkError) {
+              // The request never reached the server (connection dropped, or
+              // the server is unreachable while the browser still reports
+              // online). Two things used to go wrong here:
+              //  - the record stayed 'syncing' (skipped by every later pass
+              //    until a full page reload released it), or
+              //  - when navigator.onLine was still true it was marked
+              //    'failed', which only the manual sync button retries.
+              // Either way the sale silently stopped syncing. Release it back
+              // to 'pending', flag the backend unreachable so the online
+              // poll re-probes (~15s), and stop this pass — the same
+              // behaviour as the customer/draft loops above.
+              try { Util.offlinePos.markSaleAsPending(sale.id); } catch (e) {}
+              this.backendReachable = false;
               break;
             }
             const msg =
@@ -9539,14 +11099,12 @@ export default {
               error.response && error.response.status
             );
             this.offlineLastSyncError = msg;
-            // For non-network errors, rollback local shadow stock to keep UI consistent
-            if (!isNetworkError) {
-              try {
-                if (Util && Util.shadowStock && Util.shadowStock.revertDeductions) {
-                  Util.shadowStock.revertDeductions(sale.id);
-                }
-              } catch (e) {}
-            }
+            // Server rejected the sale: roll back local shadow stock to keep UI consistent
+            try {
+              if (Util && Util.shadowStock && Util.shadowStock.revertDeductions) {
+                Util.shadowStock.revertDeductions(sale.id);
+              }
+            } catch (e) {}
           }
         }
       } finally {
@@ -9568,7 +11126,9 @@ export default {
         this.makeToast && this.makeToast('warning', msg, this.$t ? this.$t('Warning') : 'Warning');
         return;
       }
-      this.trySyncOfflineSales();
+      // Manual click = the cashier explicitly wants everything pushed,
+      // including records whose previous attempt failed.
+      this.trySyncOfflineSales({ includeFailed: true, notifyUnreachable: true });
     },
     // Ensure all non-service items have sufficient stock before proceeding to payment
     verifyAllItemsInStock() {
@@ -9706,7 +11266,7 @@ export default {
       }
       // Open modern payment modal with current sale data
       this.$refs.modernPaymentModal.openModal({
-        amountDue: this.GrandTotal,
+        amountDue: this.docGrandTotal,
         reference: this.sale.Ref || "POS-" + new Date().getTime(),
         notes: this.selectedClientId ? `Payment for Customer #${this.selectedClientId}` : 'POS Payment'
       });
@@ -9743,19 +11303,13 @@ export default {
     },
   },
   created() {
-    // Clear cached POS data on page reload when online to avoid stale/outdated data
-    // Fresh data will be fetched and cache rebuilt via GetElementsPos()
-    // Only clear when online - when offline, preserve cache as it's needed for offline functionality
-    try {
-      // Check if we're online before clearing cache
-      const isOnline = typeof window !== 'undefined' && window.navigator && window.navigator.onLine !== false;
-      if (isOnline && Util && Util.offlinePos && Util.offlinePos.clearCache) {
-        Util.offlinePos.clearCache();
-      }
-    } catch (e) {
-      // Ignore errors during cache clearing
-    }
-    
+    // NOTE: stale-cache clearing happens inside GetElementsPos() *after* the
+    // bootstrap request succeeds. It used to run here whenever
+    // navigator.onLine was true, but that signal only means "a network
+    // interface is up" — with the LAN up and the server unreachable (WAN down,
+    // server rebooting) it wiped every offline cache and then the bootstrap
+    // fetch failed, leaving the POS with no data at all.
+
     // Preload the offline-sync toggle from the cached company setting so the
     // POS knows upfront whether to skip the offline UI. Without this, a brief
     // window between initOfflineStatus() and GetElementsPos() resolving would
@@ -9809,6 +11363,14 @@ export default {
         }
       });
     } catch (e) {}
+    // A refresh/crash during a sync leaves queue records stuck in 'syncing',
+    // which every future sync pass skips — release them back to 'pending'
+    // (idempotent resubmission: the payload carries a sale_uuid).
+    try {
+      if (Util && Util.offlinePos && Util.offlinePos.resetStuckSyncingSales) {
+        Util.offlinePos.resetStuckSyncingSales();
+      }
+    } catch (e) {}
     // Ensure offline sales badge is accurate immediately after POS refresh,
     // even before any user interaction.
     try {
@@ -9817,6 +11379,33 @@ export default {
 
     this.GetElementsPos(); // This will fetch fresh data and rebuild the cache when online
     this.addPaymentLine();
+    // Persist the in-progress cart (debounced) so a refresh or crash — online
+    // or offline — never loses the sale. Cleared by Reset_Pos() after each
+    // completed sale; restored by restoreCartState() once bootstrap resolves.
+    try {
+      this.$watch(
+        () => [
+          this.details,
+          this.sale,
+          this.selectedClientId,
+          this.promotionCode,
+          this.used_points,
+          this.discount_from_points,
+          this.draft_sale_id
+        ],
+        () => { try { this.persistCartState(); } catch (e) {} },
+        { deep: true }
+      );
+    } catch (e) {}
+    // A refresh can land inside the 400ms persist debounce — flush the pending
+    // snapshot synchronously as the page goes away so nothing is lost.
+    try {
+      if (typeof window !== 'undefined') {
+        this._flushCartOnPageHide = () => { try { this.flushCartState(); } catch (e) {} };
+        window.addEventListener('pagehide', this._flushCartOnPageHide);
+        window.addEventListener('beforeunload', this._flushCartOnPageHide);
+      }
+    } catch (e) {}
     // Initialize warehouse options and sync selection once data is loaded
     this.$watch('warehouses', (ws) => {
       this.warehouseOptions = (ws || []).map(w => ({ value: w.id, text: w.name }));
@@ -9846,7 +11435,8 @@ export default {
           return;
         }
         this.paymentLines = [{
-          amount:          parseFloat(this.GrandTotal.toFixed(this.priceDecimals)),
+          // Prefill in the POS-selected currency (what the cashier collects).
+          amount:          parseFloat(this.docGrandTotal.toFixed(this.priceDecimals)),
           payment_method_id:       2,
         }];
         this.globalPaymentNote = '';
@@ -9905,6 +11495,16 @@ export default {
 
   },
   beforeUnmount() {
+    // Flush any pending (debounced) cart snapshot so navigating away inside
+    // the SPA can't lose the last edit, then stop the timer.
+    try { this.flushCartState(); } catch (e) {}
+    try {
+      if (typeof window !== 'undefined' && this._flushCartOnPageHide) {
+        window.removeEventListener('pagehide', this._flushCartOnPageHide);
+        window.removeEventListener('beforeunload', this._flushCartOnPageHide);
+        this._flushCartOnPageHide = null;
+      }
+    } catch (e) {}
     try {
       if (typeof document !== 'undefined' && document.documentElement) {
         document.documentElement.classList.remove('pos-active');
@@ -12222,6 +13822,23 @@ $transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   color: $color-text-tertiary;
   margin-top: 4px;
 }
+
+/* Inline "View shortcuts" trigger inside a settings section */
+.ps-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 0;
+  background: none;
+  border: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #6f53d9;
+  cursor: pointer;
+  svg { width: 14px; height: 14px; }
+  &:hover { text-decoration: underline; }
+}
 ::v-deep(.ps-input) {
   border-radius: 10px;
   border: 1px solid $color-border-light;
@@ -13263,6 +14880,7 @@ $transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 /* Header */
 .cust-drawer-header {
   position: relative;
+  flex: 0 0 auto;
   /* extra right padding so the absolute close button never overlaps the Quick Add button */
   padding: 24px 60px 22px 24px;
   display: flex;
@@ -13369,6 +14987,7 @@ $transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 /* Search */
 .cust-drawer-search {
   position: relative;
+  flex: 0 0 auto;
   padding: 14px 20px 6px;
   display: flex;
   align-items: center;
@@ -13427,7 +15046,10 @@ $transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 /* List */
 .cust-drawer-list {
   flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   padding: 10px 14px 16px;
   display: flex;
   flex-direction: column;
@@ -13575,7 +15197,10 @@ $transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   .cust-drawer-backdrop { padding: 0; align-items: stretch; }
   .cust-drawer {
     width: 100%;
+    height: 100vh;
+    height: 100dvh;
     max-height: 100vh;
+    max-height: 100dvh;
     border-radius: 0;
   }
   .cust-drawer-header {
@@ -17841,6 +19466,197 @@ $transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   }
 }
 
+/* ============ Customer purchase history panel ============ */
+.cust-drawer-card-history {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: #a1a1b5;
+  transition: background 150ms ease, color 150ms ease;
+  svg { width: 16px; height: 16px; }
+  &:hover { background: #fff1f5; color: #be185d; }
+}
+.cust-hist { width: 680px; }
+.cust-hist-stats {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px 14px 0;
+  @media (max-width: 575.98px) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.cust-hist-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: #faf9fd;
+  border: 1px solid #ece9fb;
+  min-width: 0;
+  &.is-due { background: #fff7ed; border-color: #fed7aa; .cust-hist-stat-value { color: #c2410c; } }
+}
+.cust-hist-stat-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: #8d8da0;
+  font-weight: 600;
+}
+.cust-hist-stat-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1f1f2c;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  &.cust-hist-stat-value-sm { font-size: 12px; }
+}
+.cust-hist-list { gap: 6px; }
+.cust-hist-sale {
+  /* the list is a flex column: overflow:hidden below would let flexbox
+     squash this row to 0 instead of overflowing the list, so never shrink */
+  flex: 0 0 auto;
+  border: 1px solid #ece9fb;
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+  &.is-open { border-color: rgba(244,63,94,0.35); box-shadow: 0 8px 20px -14px rgba(244,63,94,0.45); }
+}
+.cust-hist-sale-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  &:hover { background: #fdf6f9; }
+}
+.cust-hist-sale-icon {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff1f5;
+  color: #be185d;
+  svg { width: 18px; height: 18px; }
+}
+.cust-hist-sale-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.cust-hist-sale-top { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cust-hist-sale-ref { font-weight: 700; font-size: 13px; color: #1f1f2c; }
+.cust-hist-sale-meta { font-size: 11px; color: #8d8da0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cust-hist-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 99px;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  background: #f3f4f6; color: #4b5563;
+  &.is-paid { background: #dcfce7; color: #166534; }
+  &.is-partial { background: #fef3c7; color: #92400e; }
+  &.is-unpaid { background: #fee2e2; color: #991b1b; }
+  &.is-status { background: #ede9fe; color: #5b21b6; }
+}
+.cust-hist-sale-amounts { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.cust-hist-sale-total { font-weight: 700; font-size: 13px; color: #1f1f2c; font-family: 'JetBrains Mono', monospace; }
+.cust-hist-sale-due { font-size: 11px; color: #c2410c; font-weight: 600; }
+.cust-hist-sale-paid { font-size: 11px; color: #166534; font-weight: 600; }
+.cust-hist-sale-caret { flex: 0 0 auto; width: 16px; height: 16px; color: #a1a1b5; transition: transform 200ms ease; }
+.cust-hist-sale.is-open .cust-hist-sale-caret { transform: rotate(180deg); }
+.cust-hist-items { border-top: 1px dashed #ece9fb; background: #fcfbfe; padding: 6px 10px 10px; }
+.cust-hist-items-loading { display: flex; justify-content: center; padding: 12px; }
+.cust-hist-items-empty { font-size: 12px; color: #8d8da0; text-align: center; padding: 10px; }
+.cust-hist-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px;
+  border-bottom: 1px solid #f1eff9;
+  &:last-of-type { border-bottom: 0; }
+  &.is-disabled { opacity: .55; }
+}
+.cust-hist-item-thumb {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: #f5f3fd;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  color: #a1a1b5;
+  img { width: 100%; height: 100%; object-fit: cover; }
+  svg { width: 16px; height: 16px; }
+}
+.cust-hist-item-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.cust-hist-item-name { font-size: 12.5px; font-weight: 600; color: #1f1f2c; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cust-hist-item-meta { font-size: 11px; color: #8d8da0; }
+.cust-hist-item-total { flex: 0 0 auto; font-size: 12px; font-weight: 700; color: #1f1f2c; font-family: 'JetBrains Mono', monospace; }
+.cust-hist-item-add {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid #fbe4ed;
+  background: #fff5f8;
+  color: #be185d;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 150ms ease, transform 150ms ease;
+  svg { width: 15px; height: 15px; }
+  &:hover:not(:disabled) { background: #fdeaf1; transform: scale(1.06); }
+  &:disabled { cursor: not-allowed; opacity: .5; }
+}
+.cust-hist-items-foot { display: flex; justify-content: flex-end; padding-top: 8px; }
+.cust-hist-reorder-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: 0;
+  background: linear-gradient(135deg, #f43f5e 0%, #be185d 100%);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 8px 18px -10px rgba(244,63,94,0.7);
+  svg { width: 15px; height: 15px; }
+  &:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; }
+}
+.cust-hist-pager {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 8px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6f53d9;
+  button {
+    width: 30px; height: 30px; border-radius: 8px; border: 1px solid #ece9fb; background: #f5f3fd; color: #6f53d9;
+    display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+    svg { width: 15px; height: 15px; }
+    &:disabled { opacity: .4; cursor: not-allowed; }
+  }
+}
 </style>
 
 <!-- Non-scoped block: targets html/body/#app which Vue's scoped CSS cannot reach.
@@ -18233,5 +20049,403 @@ html.pos-active:fullscreen .layout-sidebar-large .main-content-wrap {
 .pos-confirm-btn-danger:hover {
   background: #b83838;
   border-color: #b83838;
+}
+
+/* ============================================
+   QUICK ADD CUSTOMER — modal shell (unscoped: the .modal elements are
+   rendered by the BModal shim, so the parent's scoped attribute never
+   lands on them). Rose identity shared with the customer picker.
+   ============================================ */
+.pos-scope .modal.qac-modal,
+.modal.qac-modal {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+.qac-modal .modal-dialog.qac-dialog {
+  max-width: 600px;
+}
+.qac-modal .modal-content {
+  border: 0;
+  border-radius: 20px;
+  overflow: hidden;
+  max-height: calc(100vh - 3.5rem);
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  box-shadow:
+    0 30px 70px -20px rgba(40, 10, 30, 0.4),
+    0 12px 28px -12px rgba(40, 10, 30, 0.25);
+}
+.qac-modal .modal-body.qac-body {
+  padding: 0 !important;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.qac-form {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Header */
+.qac-header {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 22px 60px 20px 24px;
+  color: #fff;
+  background:
+    radial-gradient(800px 220px at -10% -50%, rgba(255,255,255,0.22), transparent 60%),
+    radial-gradient(700px 220px at 120% -10%, rgba(255,255,255,0.18), transparent 55%),
+    linear-gradient(135deg, #be185d 0%, #f43f5e 50%, #fb7185 100%);
+}
+.qac-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 0;
+  background: rgba(255,255,255,0.18);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+.qac-close:hover { background: rgba(255,255,255,0.3); }
+.qac-close svg { width: 16px; height: 16px; }
+.qac-avatar {
+  flex: 0 0 auto;
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255,255,255,0.18);
+  border: 1px solid rgba(255,255,255,0.35);
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: .02em;
+  transition: background 200ms ease, transform 200ms ease;
+}
+.qac-avatar.has-name {
+  background: #fff;
+  color: #be185d;
+  transform: scale(1.04);
+}
+.qac-avatar svg { width: 24px; height: 24px; }
+.qac-header-text { min-width: 0; }
+.qac-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  opacity: .85;
+}
+.qac-title {
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.15;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.qac-sub {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 12px;
+  opacity: .92;
+}
+.qac-sub svg { width: 13px; height: 13px; }
+
+/* Scrollable form body */
+.qac-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 20px 24px 8px;
+}
+.qac-essentials {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.qac-field {
+  display: block;
+  margin: 0;
+  min-width: 0;
+}
+.qac-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: #6b6b80;
+  margin-bottom: 6px;
+}
+.qac-label i { font-style: normal; color: #f43f5e; }
+.qac-control {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.qac-control > svg {
+  position: absolute;
+  left: 13px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 15px;
+  height: 15px;
+  color: #a1a1b5;
+  pointer-events: none;
+}
+.qac-control-area > svg { top: 14px; transform: none; }
+.qac-control input,
+.qac-control textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 14px 10px 38px;
+  border-radius: 12px;
+  border: 1px solid #f3e0e8;
+  background: #fdf8fa;
+  color: #1f1f2c;
+  font-size: 14px;
+  line-height: 1.4;
+  outline: none;
+  transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
+}
+.qac-control textarea { resize: vertical; }
+.qac-control input::placeholder,
+.qac-control textarea::placeholder { color: #b3b3c2; }
+.qac-control input:focus,
+.qac-control textarea:focus {
+  border-color: #f43f5e;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(244,63,94,0.15);
+}
+.qac-control-mono input { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .02em; }
+.qac-essentials .qac-control input { min-height: 48px; font-size: 15px; }
+.qac-field.is-invalid .qac-control input { border-color: #f43f5e; background: #fff5f7; }
+.qac-error {
+  display: block;
+  margin-top: 5px;
+  font-size: 12px;
+  color: #be123c;
+}
+.qac-phone-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .03em;
+  text-transform: none;
+  background: #f3f4f6;
+  color: #4b5563;
+}
+.qac-phone-state svg { width: 12px; height: 12px; }
+.qac-phone-state.is-ok { background: #dcfce7; color: #166534; }
+.qac-phone-state.is-dup { background: #fee2e2; color: #991b1b; }
+.qac-phone-state.is-checking { background: #f5f3fd; color: #6f53d9; }
+.qac-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: qac-pulse 900ms ease-in-out infinite;
+}
+@keyframes qac-pulse {
+  0%, 100% { opacity: .35; transform: scale(.8); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+/* More details toggle */
+.qac-more-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin: 18px 0 4px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  color: #8d8da0;
+}
+.qac-more-line { flex: 1 1 auto; height: 1px; background: #f1e6eb; }
+.qac-more-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #be185d;
+  white-space: nowrap;
+}
+.qac-more-label em { font-style: normal; font-weight: 500; color: #a1a1b5; }
+.qac-more-label svg { width: 15px; height: 15px; transition: transform 200ms ease; }
+.qac-more-label svg.is-open { transform: rotate(180deg); }
+.qac-more-toggle:hover .qac-more-label { color: #9d174d; }
+.qac-more-toggle:focus-visible { outline: 2px solid #f43f5e; outline-offset: 2px; border-radius: 8px; }
+
+.qac-details { padding-top: 10px; }
+.qac-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 14px;
+}
+.qac-span-2 { grid-column: 1 / -1; }
+
+/* Loyalty row */
+.qac-loyalty {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid #ece9fb;
+  background: #faf9fd;
+  cursor: pointer;
+}
+.qac-loyalty-icon {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff7ed;
+  color: #ea580c;
+}
+.qac-loyalty-icon svg { width: 17px; height: 17px; }
+.qac-loyalty-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.qac-loyalty-title { font-size: 13px; font-weight: 700; color: #1f1f2c; }
+.qac-loyalty-help { font-size: 11.5px; color: #8d8da0; }
+
+/* Custom fields (rendered with Bootstrap classes by CustomFieldsForm) */
+.qac-custom { margin-top: 10px; }
+.qac-custom .custom-fields-form h6 {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: #6b6b80 !important;
+  display: flex;
+  align-items: center;
+  margin: 12px 0 4px;
+}
+.qac-custom .form-control {
+  border-radius: 12px;
+  border: 1px solid #f3e0e8;
+  background: #fdf8fa;
+  min-height: 44px;
+}
+.qac-custom .form-control:focus {
+  border-color: #f43f5e;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(244,63,94,0.15);
+}
+.qac-custom legend, .qac-custom label {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: #6b6b80;
+}
+
+/* Footer */
+.qac-footer {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 24px 18px;
+  border-top: 1px solid #f3eef0;
+  background: #fff;
+}
+.qac-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 18px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+.qac-btn svg { width: 16px; height: 16px; }
+.qac-btn:focus-visible { outline: 2px solid #f43f5e; outline-offset: 2px; }
+.qac-btn-ghost { background: #fff; border-color: #ece9fb; color: #6b6b80; }
+.qac-btn-ghost:hover { background: #faf9fd; color: #1f1f2c; }
+.qac-btn-primary {
+  min-width: 180px;
+  color: #fff;
+  background: linear-gradient(135deg, #f43f5e 0%, #be185d 100%);
+  box-shadow: 0 10px 22px -10px rgba(244,63,94,0.75);
+}
+.qac-btn-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 14px 26px -10px rgba(244,63,94,0.8); }
+.qac-btn-primary:disabled { opacity: .55; cursor: not-allowed; box-shadow: none; }
+.qac-spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.45);
+  border-top-color: #fff;
+  animation: qac-spin 700ms linear infinite;
+}
+@keyframes qac-spin { to { transform: rotate(360deg); } }
+
+/* Phones: bottom sheet */
+@media (max-width: 575.98px) {
+  .qac-modal .modal-dialog.qac-dialog {
+    margin: 0;
+    max-width: 100%;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+  }
+  .qac-modal .modal-content {
+    border-radius: 20px 20px 0 0;
+    max-height: 94vh;
+    max-height: 94dvh;
+  }
+  .qac-header { padding: 18px 56px 16px 18px; gap: 12px; }
+  .qac-avatar { width: 48px; height: 48px; font-size: 20px; }
+  .qac-title { font-size: 19px; }
+  .qac-scroll { padding: 16px 16px 6px; }
+  .qac-grid { grid-template-columns: 1fr; }
+  .qac-footer { padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); }
+  .qac-btn-primary { flex: 1 1 auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .qac-avatar, .qac-more-label svg, .qac-btn, .qac-close { transition: none; }
+  .qac-dot { animation: none; opacity: 1; }
 }
 </style>

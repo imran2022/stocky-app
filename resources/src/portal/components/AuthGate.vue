@@ -1,8 +1,10 @@
 <template>
-  <div class="auth-gate">
-    <div v-if="checking" class="auth-gate-loading">
-      <div class="auth-gate-spinner"></div>
-      <p>Checking access...</p>
+  <div>
+    <div v-if="checking" class="rst-login-screen w-100">
+      <div class="container py-4 text-center">
+        <div class="spinner-border text-primary mb-3" role="status"></div>
+        <div class="text-secondary">{{ $t('checking_access') }}</div>
+      </div>
     </div>
     <router-view v-else />
   </div>
@@ -32,28 +34,3 @@ export default {
   },
 };
 </script>
-
-<style scoped>
-.auth-gate { min-height: 100vh; }
-.auth-gate-loading {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 1rem;
-  background: #f1f5f9;
-}
-.auth-gate-loading p { margin: 0; color: #64748b; font-size: 0.95rem; }
-.auth-gate-spinner {
-  width: 40px;
-  height: 40px;
-  border: 3px solid #e2e8f0;
-  border-top-color: #1e293b;
-  border-radius: 50%;
-  animation: auth-gate-spin 0.8s linear infinite;
-}
-@keyframes auth-gate-spin {
-  to { transform: rotate(360deg); }
-}
-</style>

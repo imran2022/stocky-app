@@ -9,6 +9,10 @@
     :export-params="filterParams"
     export-rows-key="reports"
   >
+    <template #actions>
+      <!-- Multi-Currency: view amounts converted (display-only) -->
+      <ViewCurrencySelect />
+    </template>
     <!-- Summary + charts over the WHOLE filtered set (backend summary /
          top_products / warehouse_values), not the visible page. -->
     <template #chart>
@@ -88,6 +92,7 @@ import {
 } from '@ant-design/icons-vue';
 import ReportPage from '../../components/ReportPage.vue';
 import ReportChart from '../../components/ReportChart.vue';
+import ViewCurrencySelect from '../../components/ViewCurrencySelect.vue';
 import { useCrudTable } from '../../composables/useCrudTable';
 import { useFormat } from '../../composables/useFormat';
 import { useUiStore } from '../../stores/ui';

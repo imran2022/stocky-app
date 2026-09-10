@@ -106,7 +106,7 @@ class ProvidersController extends BaseController
 
         $company_info = Setting::where('deleted_at', '=', null)->first();
         $accounts = Account::where('deleted_at', '=', null)->orderBy('id', 'desc')->get(['id', 'account_name']);
-        $payment_methods = PaymentMethod::whereNull('deleted_at')->get(['id', 'name']);
+        $payment_methods = PaymentMethod::active()->whereNull('deleted_at')->get(['id', 'name']);
 
         return response()->json([
             'providers' => $data,
@@ -273,7 +273,7 @@ class ProvidersController extends BaseController
         return response()->json([
             'report' => $data,
             'accounts' => Account::where('deleted_at', '=', null)->orderBy('id', 'desc')->get(['id', 'account_name']),
-            'payment_methods' => PaymentMethod::whereNull('deleted_at')->get(['id', 'name']),
+            'payment_methods' => PaymentMethod::active()->whereNull('deleted_at')->get(['id', 'name']),
         ]);
     }
 
@@ -289,7 +289,12 @@ class ProvidersController extends BaseController
 
         $ShowRecord = Auth::user()->hasRecordView();
 
+        // ✅ record_view decides whose documents; the assigned warehouses
+        // decide which warehouses they may come from. Both apply.
+        $scopeIds = $this->warehouseScopeIds();
+
         $purchases = Purchase::where('deleted_at', '=', null)
+            ->when($scopeIds !== null, fn ($q) => $q->whereIn('warehouse_id', $scopeIds))
             ->with('provider', 'warehouse')
             ->where('provider_id', $request->id)
             ->where(function ($query) use ($ShowRecord) {
@@ -355,7 +360,12 @@ class ProvidersController extends BaseController
 
         $ShowRecord = Auth::user()->hasRecordView();
 
+        // ✅ record_view decides whose documents; the assigned warehouses
+        // decide which warehouses they may come from. Both apply.
+        $scopeIds = $this->warehouseScopeIds();
+
         $payments = DB::table('payment_purchases')
+            ->when($scopeIds !== null, fn ($q) => $q->whereIn('purchases.warehouse_id', $scopeIds))
             ->where(function ($query) use ($ShowRecord) {
                 if (! $ShowRecord) {
                     return $query->where('user_id', '=', Auth::user()->id);
@@ -404,7 +414,12 @@ class ProvidersController extends BaseController
 
         $ShowRecord = Auth::user()->hasRecordView();
 
+        // ✅ record_view decides whose documents; the assigned warehouses
+        // decide which warehouses they may come from. Both apply.
+        $scopeIds = $this->warehouseScopeIds();
+
         $PurchaseReturn = PurchaseReturn::where('deleted_at', '=', null)
+            ->when($scopeIds !== null, fn ($q) => $q->whereIn('warehouse_id', $scopeIds))
             ->with('purchase', 'provider', 'warehouse')
             ->where('provider_id', $request->id)
             ->where(function ($query) use ($ShowRecord) {

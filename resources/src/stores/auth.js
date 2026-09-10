@@ -6,6 +6,16 @@ import { isModuleEnabled } from '../config/modules';
  * Mirrors the legacy Vuex auth module: GET /api/get_user_auth returns
  * { permissions, user, notifs }. Loaded once by the router guard.
  */
+const AUTH_CACHE_KEY = 'stocky_auth_cache_v1';
+
+function readAuthCache() {
+    try {
+        const raw = window.localStorage.getItem(AUTH_CACHE_KEY);
+        return raw ? JSON.parse(raw) : null;
+    } catch (e) {
+        return null;
+    }
+}
 export const useAuthStore = defineStore('auth', {
     state: () => ({
         user: null,
@@ -17,6 +27,10 @@ export const useAuthStore = defineStore('auth', {
     }),
     getters: {
         currency: s => (s.user && s.user.currency) || '$',
+        // Multi-Currency module toggle (System Settings → Features).
+        multiCurrencyEnabled: s => !!(s.user && s.user.enable_multi_currency),
+        // Base currency id (settings.currency_id) — document pickers default to it.
+        defaultCurrencyId: s => (s.user && s.user.default_currency_id) || null,
         username: s => (s.user && s.user.username) || '',
         // Legacy resolves the avatar under /images/avatar/ and falls back to
         // the shipped default when the user has none.
@@ -64,10 +78,29 @@ export const useAuthStore = defineStore('auth', {
                 this.permissions = Array.isArray(data.permissions) ? data.permissions : [];
                 this.notifs = Number(data.notifs) || 0;
                 this.failed = false;
+                // Snapshot for offline boots: a POS refresh with no network must
+                // keep the real user + permissions instead of failing open.
+                try {
+                    window.localStorage.setItem(AUTH_CACHE_KEY, JSON.stringify({
+                        user: this.user,
+                        permissions: this.permissions,
+                    }));
+                } catch (e) { /* storage unavailable — offline fallback skipped */ }
             } catch (e) {
-                // Stay usable in design-preview mode when the API is unreachable;
-                // 401s already redirected to /login inside http.
-                this.failed = true;
+                // Network failure (offline reload): hydrate the last known
+                // user/permissions so the app behaves normally. 401s already
+                // redirected to /login inside http, so a cached snapshot here
+                // belongs to the still-authenticated session cookie holder.
+                const cached = readAuthCache();
+                if (cached && cached.user) {
+                    this.user = cached.user;
+                    this.permissions = Array.isArray(cached.permissions) ? cached.permissions : [];
+                    this.failed = false;
+                } else {
+                    // Stay usable in design-preview mode when the API is
+                    // unreachable and nothing is cached.
+                    this.failed = true;
+                }
             } finally {
                 this.loaded = true;
             }

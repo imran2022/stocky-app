@@ -11,6 +11,13 @@ class ServiceJob extends Model
 
     protected $table = 'service_jobs';
 
+    /**
+     * Statuses whose balance counts toward the customer's due. Pending jobs
+     * are still quotes the customer has not accepted; declined / cancelled
+     * jobs are never collectable.
+     */
+    public const DUE_STATUSES = ['approved', 'in_progress', 'ready', 'delivered', 'completed'];
+
     protected $dates = [
         'scheduled_date',
         'scheduled_end_date',
@@ -135,6 +142,35 @@ class ServiceJob extends Model
     public function warrantyClaims()
     {
         return $this->hasMany(ServiceJob::class, 'parent_job_id');
+    }
+
+    /** Jobs whose outstanding balance is owed by the customer. */
+    public function scopeCountsTowardDue($query)
+    {
+        return $query->whereNull('service_jobs.deleted_at')
+            ->whereIn('service_jobs.status', self::DUE_STATUSES);
+    }
+
+    /**
+     * Aggregate service totals for one customer: ['total', 'paid', 'due'].
+     * Same rule everywhere (customers list, ledger, pay-due, POS previous dues).
+     */
+    public static function dueTotalsForClient($clientId): array
+    {
+        if (! $clientId) {
+            return ['total' => 0.0, 'paid' => 0.0, 'due' => 0.0];
+        }
+
+        $row = static::query()
+            ->countsTowardDue()
+            ->where('client_id', $clientId)
+            ->selectRaw('COALESCE(SUM(total_amount), 0) AS total, COALESCE(SUM(paid_amount), 0) AS paid')
+            ->first();
+
+        $total = (float) ($row->total ?? 0);
+        $paid = (float) ($row->paid ?? 0);
+
+        return ['total' => $total, 'paid' => $paid, 'due' => $total - $paid];
     }
 
     public function getBalanceDueAttribute(): float

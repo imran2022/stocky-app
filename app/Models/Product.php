@@ -19,7 +19,7 @@ class Product extends Model
         'is_preorder', 'preorder_always', 'preorder_available_date', 'preorder_limit', 'preorder_note',
         'is_batch_tracked', 'shelf_life_days', 'generic_name', 'strength', 'dosage_form',
         'pack_size', 'manufacturer', 'prescription_required', 'drug_schedule',
-        'tags', 'faqs', 'size_guide_id',
+        'tags', 'labels', 'faqs', 'size_guide_id',
     ];
 
     protected $casts = [
@@ -58,6 +58,7 @@ class Product extends Model
         'prescription_required' => 'boolean',
         'shelf_life_days' => 'integer',
         'tags' => 'array',
+        'labels' => 'array',
         'faqs' => 'array',
         'size_guide_id' => 'integer',
     ];
@@ -65,6 +66,26 @@ class Product extends Model
     public function sizeGuide()
     {
         return $this->belongsTo(SizeGuide::class, 'size_guide_id');
+    }
+
+    /**
+     * Hand-picked related products, in the order the admin arranged them.
+     * EMPTY means the storefront falls back to its automatic rule.
+     */
+    public function relatedProducts()
+    {
+        return $this->belongsToMany(self::class, 'product_related', 'product_id', 'related_product_id')
+            ->withPivot('sort_order')
+            ->orderBy('product_related.sort_order');
+    }
+
+    /**
+     * Shipping methods this product may be sent by. EMPTY means unrestricted —
+     * every method that reaches the destination is offered.
+     */
+    public function shippingMethods()
+    {
+        return $this->belongsToMany(ShippingMethod::class, 'product_shipping_method');
     }
 
     public function variants()

@@ -31,6 +31,7 @@ import { MENU_ITEM_ICONS } from '../config/menuItemIcons';
 import { useAuthStore } from '../stores/auth';
 import { useUiStore } from '../stores/ui';
 import { useMenuStore } from '../stores/menu';
+import { usePendingWorkStore } from '../stores/pendingWork';
 
 const props = defineProps({
   theme: { type: String, default: 'light' },
@@ -43,6 +44,8 @@ const auth = useAuthStore();
 const ui = useUiStore();
 // The default MENU arranged per the admin-saved order (Settings → Sidebar Menu).
 const menuStore = useMenuStore();
+// Pending-work counts, so a menu row can show what is waiting behind it.
+const pending = usePendingWorkStore();
 const route = useRoute();
 const router = useRouter();
 
@@ -82,7 +85,16 @@ function icon(name) {
  * keyed off the `|next|` in the item key.
  */
 function labelNode(entry) {
-  return label(entry);
+  const text = label(entry);
+  // `items` is a computed, so the badge updates by itself as the counts
+  // refresh — and disappears once the work is processed.
+  const count = entry.badge ? (pending.byKey[entry.badge] || 0) : 0;
+  if (!count) return text;
+
+  return () => h('span', { class: 'sb-row' }, [
+    h('span', { class: 'sb-row-label' }, text),
+    h('span', { class: 'sb-row-badge' }, count > 99 ? '99+' : String(count)),
+  ]);
 }
 
 /**
@@ -227,6 +239,33 @@ watch(openKeys, (nv, ov) => {
 </script>
 
 <style scoped>
+/* A menu row that carries a pending-work count. */
+.sb-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.sb-row-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sb-row-badge {
+  flex: none;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--sb-primary, #6c5ce7);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+}
+
 /* Takes the leftover height in the sider's flex column and scrolls on its own,
    so the last groups (Settings, AI Reports, Reports) stay reachable. */
 .sidebar-menu {
@@ -234,6 +273,10 @@ watch(openKeys, (nv, ov) => {
   overflow-y: auto;
   overflow-x: hidden;
   border-inline-end: none;
+  /* The last row would otherwise sit flush against the container's bottom
+     edge (the flat/large layouts already pad theirs). The safe-area term
+     clears the iOS home indicator in the off-canvas mobile sidebar. */
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
 }
 /* Divider between the light sidebar and the content (dark sider keeps none). */
 .sidebar-menu.ant-menu-light {

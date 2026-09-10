@@ -15,6 +15,7 @@ use App\Models\CountStock;
 use App\Models\Product;
 use App\Models\ProductImage;
 use App\Models\ProductPack;
+use App\Models\ProductPriceTier;
 use App\Models\product_warehouse;
 use App\Models\ProductVariant;
 use App\Models\Setting;
@@ -25,6 +26,7 @@ use App\Models\Warehouse;
 use App\Models\WarehouseLocation;
 use App\Models\ProductWarehouseLocation;
 use App\Services\ProductGalleryService;
+use App\Services\WholesalePricingService;
 use App\utils\helpers;
 use Carbon\Carbon;
 use DB;
@@ -600,6 +602,9 @@ class ProductsController extends BaseController
                 $Product->brand_id = $request['brand_id'];
                 $Product->note = $request['note'];
                 $Product->tags = $this->normalizeTags($request->input('tags'));
+                $Product->labels = $this->normalizeLabels($request->input('labels'));
+                $shippingMethodIds = $this->normalizeIdList($request->input('shipping_method_ids'));
+                $relatedProductIds = $this->normalizeIdList($request->input('related_product_ids'));
                 $Product->faqs = $this->normalizeFaqs($request->input('faqs'));
                 $Product->size_guide_id = $request->input('size_guide_id') ? (int) $request->input('size_guide_id') : null;
                 $Product->TaxNet = $request['TaxNet'] ? $request['TaxNet'] : 0;
@@ -689,7 +694,10 @@ class ProductsController extends BaseController
                 $Product->is_classified = filter_var($request->input('is_classified', false), FILTER_VALIDATE_BOOLEAN);
                 $Product->is_preorder = filter_var($request->input('is_preorder', false), FILTER_VALIDATE_BOOLEAN);
                 $Product->preorder_always = $Product->is_preorder && filter_var($request->input('preorder_always', false), FILTER_VALIDATE_BOOLEAN);
-                $Product->preorder_available_date = $Product->is_preorder && $request->filled('preorder_available_date') && $request['preorder_available_date'] !== 'null'
+                // Kept for ANY product, not just pre-orders: the storefront shows it as
+                // "Estimated delivery" on the card and the product page, so gating it on
+                // is_preorder made the date impossible to set for a normal in-stock item.
+                $Product->preorder_available_date = $request->filled('preorder_available_date') && $request['preorder_available_date'] !== 'null'
                     ? $request['preorder_available_date'] : null;
                 $Product->preorder_limit = $Product->is_preorder && $request->filled('preorder_limit') && $request['preorder_limit'] !== '' && $request['preorder_limit'] !== 'null'
                     ? (int) $request['preorder_limit'] : null;
@@ -728,6 +736,9 @@ class ProductsController extends BaseController
 
                 $Product->image = $filename;
                 $Product->save();
+                // Empty selection = no restriction (every method applies).
+                $Product->shippingMethods()->sync($shippingMethodIds);
+                $this->syncRelatedProducts($Product, $relatedProductIds);
 
                 $this->syncProductMultiCategories($request, $Product);
 
@@ -799,6 +810,8 @@ class ProductsController extends BaseController
                 // variants are inserted so variant pack rows can resolve their
                 // freshly created variant ids by name.
                 $this->syncProductPacks($request, $Product);
+                // Wholesale Pricing by Quantity: persist the product's quantity breaks.
+                $this->syncProductPriceTiers($request, $Product);
 
                 // 1) gather all warehouse IDs
                 $warehouseIds = Warehouse::whereNull('deleted_at')
@@ -1180,6 +1193,9 @@ class ProductsController extends BaseController
                 $Product->discount_method = $request['discount_method'];
                 $Product->note = $request['note'];
                 $Product->tags = $this->normalizeTags($request->input('tags'));
+                $Product->labels = $this->normalizeLabels($request->input('labels'));
+                $shippingMethodIds = $this->normalizeIdList($request->input('shipping_method_ids'));
+                $relatedProductIds = $this->normalizeIdList($request->input('related_product_ids'));
                 $Product->faqs = $this->normalizeFaqs($request->input('faqs'));
                 $Product->size_guide_id = $request->input('size_guide_id') ? (int) $request->input('size_guide_id') : null;
                 $Product->points = $request['points'];
@@ -1285,7 +1301,10 @@ class ProductsController extends BaseController
                 $Product->is_classified = filter_var($request->input('is_classified', false), FILTER_VALIDATE_BOOLEAN);
                 $Product->is_preorder = filter_var($request->input('is_preorder', false), FILTER_VALIDATE_BOOLEAN);
                 $Product->preorder_always = $Product->is_preorder && filter_var($request->input('preorder_always', false), FILTER_VALIDATE_BOOLEAN);
-                $Product->preorder_available_date = $Product->is_preorder && $request->filled('preorder_available_date') && $request['preorder_available_date'] !== 'null'
+                // Kept for ANY product, not just pre-orders: the storefront shows it as
+                // "Estimated delivery" on the card and the product page, so gating it on
+                // is_preorder made the date impossible to set for a normal in-stock item.
+                $Product->preorder_available_date = $request->filled('preorder_available_date') && $request['preorder_available_date'] !== 'null'
                     ? $request['preorder_available_date'] : null;
                 $Product->preorder_limit = $Product->is_preorder && $request->filled('preorder_limit') && $request['preorder_limit'] !== '' && $request['preorder_limit'] !== 'null'
                     ? (int) $request['preorder_limit'] : null;
@@ -1593,11 +1612,16 @@ class ProductsController extends BaseController
 
                 $Product->image = $filename;
                 $Product->save();
+                // Empty selection = no restriction (every method applies).
+                $Product->shippingMethods()->sync($shippingMethodIds);
+                $this->syncRelatedProducts($Product, $relatedProductIds);
 
                 $this->syncProductMultiCategories($request, $Product);
 
                 // Multi-Pack Selling: reconcile per-product selling packs
                 $this->syncProductPacks($request, $Product);
+                // Wholesale Pricing by Quantity: persist the product's quantity breaks.
+                $this->syncProductPriceTiers($request, $Product);
 
                 app(ProductGalleryService::class)->syncAfterUpdate($request, $Product);
 
@@ -1911,6 +1935,20 @@ class ProductsController extends BaseController
             }
         }
 
+        // Wholesale Pricing by Quantity: the product's quantity breaks, shown
+        // read-only on the detail page. Empty when the feature is off.
+        $item['price_tiers'] = [];
+        if ((bool) ($setting->enable_wholesale_pricing ?? false)) {
+            foreach (ProductPriceTier::where('product_id', $id)->whereNull('deleted_at')->orderBy('min_qty')->get() as $tier) {
+                $item['price_tiers'][] = [
+                    'id' => $tier->id,
+                    'min_qty' => (float) $tier->min_qty,
+                    'max_qty' => $tier->max_qty === null ? null : (float) $tier->max_qty,
+                    'price' => number_format((float) $tier->price, helpers::price_decimals(), '.', ','),
+                ];
+            }
+        }
+
         $data[] = $item;
 
         return response()->json($data[0]);
@@ -1921,9 +1959,23 @@ class ProductsController extends BaseController
 
     public function Products_by_Warehouse(request $request, $id)
     {
+        // The warehouse is addressed directly by the URL, so it must be one of
+        // the caller's assigned warehouses — otherwise any restricted user can
+        // read another warehouse's full stock list by changing the id.
+        $this->abortIfWarehouseDenied($id);
+
         $data = [];
+
+        // Allow Overselling (global Features switch): when ON, zero / negative
+        // stock products must still be listed on the sale, quotation, transfer,
+        // adjustment and damage forms — otherwise they can never be picked even
+        // though selling them is permitted. Only the stock condition is
+        // dropped; the service / manage_stock semantics stay untouched.
+        $global_setting = Setting::whereNull('deleted_at')->first();
+        $allow_overselling = (bool) ($global_setting->allow_overselling ?? false);
+
         $product_warehouse_data = product_warehouse::with('warehouse', 'product', 'productVariant')
-            ->where(function ($query) use ($request, $id) {
+            ->where(function ($query) use ($request, $id, $allow_overselling) {
                 return $query->where('warehouse_id', $id)
                     ->where('deleted_at', '=', null)
                     ->where(function ($query) use ($request) {
@@ -1946,12 +1998,19 @@ class ProductsController extends BaseController
                         });
                     })
 
-                    ->where(function ($query) use ($request) {
+                    ->where(function ($query) use ($request, $allow_overselling) {
                         if ($request->stock == '1' && $request->product_service == '1') {
-                            return $query->where('qte', '>', 0)->orWhere('manage_stock', false);
+                            // Overselling ON → same list as the no-stock-enforcement
+                            // branch below (services included, no qte filter).
+                            return $allow_overselling
+                                ? $query
+                                : $query->where('qte', '>', 0)->orWhere('manage_stock', false);
 
                         } elseif ($request->stock == '1' && $request->product_service == '0') {
-                            return $query->where('qte', '>', 0)->orWhere('manage_stock', true);
+                            // Overselling ON → stock-managed products only, no qte filter.
+                            return $allow_overselling
+                                ? $query->where('manage_stock', true)
+                                : $query->where('qte', '>', 0)->orWhere('manage_stock', true);
 
                         } elseif ($request->product_service == '1') {
                             // No stock enforcement, but services requested:
@@ -2128,6 +2187,12 @@ class ProductsController extends BaseController
     // ------------ Get product By ID -----------------\\
     public function show_product_data($id, $variant_id, $warehouse_id = null)
     {
+        // Same as Products_by_Warehouse: the stock figures below are per
+        // warehouse, so the requested warehouse must be assigned to the caller.
+        if ($warehouse_id) {
+            $this->abortIfWarehouseDenied($warehouse_id);
+        }
+
 
         $Product_data = Product::with('unit')
             ->where('id', $id)
@@ -2433,6 +2498,25 @@ class ProductsController extends BaseController
             }
         }
 
+        // Wholesale Pricing by Quantity: the product's quantity breaks, with
+        // tier prices already converted to the sale unit (exactly like
+        // Unit_price above), so the POS can swap them straight into Unit_price.
+        // Empty when the feature is off or the product has no ladder.
+        $item['wholesale_tiers'] = [];
+        foreach (app(WholesalePricingService::class)->tiersForProduct($id) as $tier) {
+            $tierPrice = (float) $tier['price'];
+            if ($Product_data['unitSale']) {
+                $tierPrice = $Product_data['unitSale']->operator == '/'
+                    ? $tierPrice / $Product_data['unitSale']->operator_value
+                    : $tierPrice * $Product_data['unitSale']->operator_value;
+            }
+            $item['wholesale_tiers'][] = [
+                'min_qty' => (float) $tier['min_qty'],
+                'max_qty' => $tier['max_qty'] === null ? null : (float) $tier['max_qty'],
+                'price' => $tierPrice,
+            ];
+        }
+
         $data[] = $item;
 
         return response()->json($data[0]);
@@ -2444,14 +2528,18 @@ class ProductsController extends BaseController
     {
         $this->authorizeForUser($request->user('api'), 'Stock_Alerts', Product::class);
 
+        // Alerts are per warehouse: restrict to the caller's warehouses and
+        // ignore a `warehouse` filter pointing outside them.
+        $allowedWarehouseIds = $this->userWarehouseIds();
+        $warehouseFilter = $this->filterWarehouseId($request->warehouse);
+
         $product_warehouse_data = product_warehouse::with('warehouse', 'product', 'productVariant')
             ->join('products', 'product_warehouse.product_id', '=', 'products.id')
             ->where('manage_stock', true)
             ->whereRaw('qte <= stock_alert')
-            ->where(function ($query) use ($request) {
-                return $query->when($request->filled('warehouse'), function ($query) use ($request) {
-                    return $query->where('warehouse_id', $request->warehouse);
-                });
+            ->whereIn('product_warehouse.warehouse_id', $allowedWarehouseIds)
+            ->when($warehouseFilter, function ($query) use ($warehouseFilter) {
+                return $query->where('product_warehouse.warehouse_id', $warehouseFilter);
             })->where('product_warehouse.deleted_at', null)->get();
 
         $data = [];
@@ -2522,6 +2610,7 @@ class ProductsController extends BaseController
         $subcategories = SubCategory::orderBy('name')->get(['id', 'name', 'category_id']);
         $brands = Brand::where('deleted_at', null)->get(['id', 'name']);
         $size_guides = \App\Models\SizeGuide::where('deleted_at', null)->where('status', 1)->orderBy('name')->get(['id', 'name']);
+        $shipping_methods = \App\Models\ShippingMethod::where('active', true)->orderBy('sort_order')->orderBy('name')->get(['id', 'name', 'price']);
         $units = Unit::where('deleted_at', null)->where('base_unit', null)->get();
 
         // get warehouses and pad with opening‑stock defaults
@@ -2559,18 +2648,21 @@ class ProductsController extends BaseController
         $show_product_gtin = (bool) ($setting->show_product_gtin ?? true);
         $show_serial_tracking = (bool) ($setting->show_serial_tracking ?? false);
         $enable_multi_pack_selling = (bool) ($setting->enable_multi_pack_selling ?? false);
+        $enable_wholesale_pricing = (bool) ($setting->enable_wholesale_pricing ?? false);
 
         return response()->json([
             'categories' => $categories,
             'subcategories' => $subcategories,
             'brands' => $brands,
             'size_guides' => $size_guides,
+            'shipping_methods' => $shipping_methods,
             'units' => $units,
             'warehouses' => $warehouses,
             'warehouse_locations' => $warehouse_locations,
             'show_product_gtin' => $show_product_gtin,
             'show_serial_tracking' => $show_serial_tracking,
             'enable_multi_pack_selling' => $enable_multi_pack_selling,
+            'enable_wholesale_pricing' => $enable_wholesale_pricing,
         ]);
 
     }
@@ -2600,6 +2692,17 @@ class ProductsController extends BaseController
             'warehouses' => $warehouses,
             'barcode_label_settings' => is_array($label_settings) ? $label_settings : null,
             'label_printer_enabled' => (bool) ($posSetting->label_printer_enabled ?? false),
+            'label_printer_render_mode' => $posSetting->label_printer_render_mode ?? 'native',
+            // Physical sticker size for direct printing — the page renders and
+            // prints at this, not at the on-screen preview's sticker size.
+            'label_printer_width_mm' => $posSetting->label_printer_width_mm ?? null,
+            'label_printer_height_mm' => $posSetting->label_printer_height_mm ?? null,
+            'label_printer_dpi' => ((int) ($posSetting->label_printer_dpi ?? 203)) === 300 ? 300 : 203,
+            'label_printer_offset_x_mm' => (float) ($posSetting->label_printer_offset_x_mm ?? 0),
+            'label_printer_offset_y_mm' => (float) ($posSetting->label_printer_offset_y_mm ?? 0),
+            // ASCII fallback ("AED") for currency symbols the printer-font
+            // mode cannot draw.
+            'currency_code' => (string) (optional($setting?->Currency)->code ?? ''),
         ]);
 
     }
@@ -2610,24 +2713,69 @@ class ProductsController extends BaseController
     {
         $this->authorizeForUser($request->user('api'), 'barcode', Product::class);
 
-        $request->validate([
-            'labels' => 'required|array|min:1|max:200',
-            'labels.*.barcode' => 'nullable|string|max:64',
-            'labels.*.name' => 'nullable|string|max:255',
-            'labels.*.Net_price' => 'nullable',
-            'labels.*.Type_barcode' => 'nullable|string|max:20',
-            'labels.*.qte' => 'nullable|integer|min:1|max:1000',
-            'design' => 'required|array',
-        ]);
-
         $posSetting = \App\Models\PosSetting::where('deleted_at', '=', null)->first();
         if (! $posSetting || ! $posSetting->label_printer_enabled) {
             return response()->json(['success' => false, 'configured' => false,
                 'message' => 'Direct label printing is not enabled.'], 422);
         }
 
-        $payload = (new \App\Services\TsplLabelService())
-            ->build($request->input('labels'), $request->input('design'), $posSetting);
+        // The SIZE command must describe the physical sticker, or the printer
+        // looks for the gap in the wrong place and every following label
+        // drifts further off-position. The configured printer size therefore
+        // overrides whatever sticker size the page's design carries.
+        $design = (array) $request->input('design', []);
+        if ((float) ($posSetting->label_printer_width_mm ?? 0) > 0) {
+            $design['width_mm'] = (float) $posSetting->label_printer_width_mm;
+        }
+        if ((float) ($posSetting->label_printer_height_mm ?? 0) > 0) {
+            $design['height_mm'] = (float) $posSetting->label_printer_height_mm;
+        }
+
+        // Raster mode: the browser rendered the label design to a 203 dpi
+        // image, so the print matches the preview exactly. Native mode: the
+        // printer draws it from TSPL text/barcode commands.
+        if (($posSetting->label_printer_render_mode ?? 'native') === 'raster') {
+            $request->validate([
+                'rasters' => 'required|array|min:1|max:200',
+                'rasters.*.data' => 'required|string',
+                'rasters.*.width_bytes' => 'required|integer|min:1',
+                'rasters.*.height' => 'required|integer|min:1',
+                'rasters.*.qte' => 'nullable|integer|min:1|max:1000',
+                'design' => 'required|array',
+            ]);
+            try {
+                $payload = (new \App\Services\TsplRasterService())
+                    ->build($request->input('rasters'), $design, $posSetting);
+            } catch (\InvalidArgumentException $e) {
+                return response()->json(['success' => false, 'configured' => true,
+                    'message' => $e->getMessage()], 422);
+            }
+        } else {
+            $request->validate([
+                'labels' => 'required|array|min:1|max:200',
+                'labels.*.barcode' => 'nullable|string|max:64',
+                'labels.*.name' => 'nullable|string|max:255',
+                'labels.*.Net_price' => 'nullable',
+                'labels.*.Type_barcode' => 'nullable|string|max:20',
+                'labels.*.qte' => 'nullable|integer|min:1|max:1000',
+                'design' => 'required|array',
+            ]);
+            $payload = (new \App\Services\TsplLabelService())
+                ->build($request->input('labels'), $design, $posSetting);
+        }
+
+        // QZ Tray: the browser delivers the bytes to a printer on the client
+        // machine — hand the payload back instead of printing server-side.
+        // Base64 because a raster payload is binary and would not survive JSON.
+        if (\App\Services\LabelPrinterTransport::isClientSide($posSetting)) {
+            return response()->json([
+                'success' => true, 'configured' => true,
+                'qz' => true,
+                'printer' => (string) ($posSetting->label_printer_name ?? ''),
+                'payload_base64' => base64_encode($payload),
+            ]);
+        }
+
         $result = (new \App\Services\LabelPrinterTransport())->send($posSetting, $payload);
 
         if (! $result['ok']) {
@@ -2759,6 +2907,12 @@ class ProductsController extends BaseController
         $item['TaxNet'] = $Product->TaxNet;
         $item['note'] = $Product->note ? $Product->note : '';
         $item['tags'] = is_array($Product->tags) ? $Product->tags : [];
+        $item['labels'] = is_array($Product->labels) ? $Product->labels : [];
+        $item['shipping_method_ids'] = $Product->shippingMethods()->pluck('shipping_methods.id')->all();
+        $item['related_products'] = $Product->relatedProducts()
+            ->get(['products.id', 'products.name', 'products.code'])
+            ->map(fn ($r) => ['id' => $r->id, 'name' => $r->name, 'code' => $r->code])
+            ->all();
         $item['faqs'] = is_array($Product->faqs) ? $Product->faqs : [];
         $item['size_guide_id'] = $Product->size_guide_id;
 
@@ -2811,6 +2965,18 @@ class ProductsController extends BaseController
             ];
         }
 
+        // Wholesale Pricing by Quantity: the product's quantity breaks, raw
+        // (same basis as products.price) so the form round-trips them as typed.
+        $item['price_tiers'] = [];
+        foreach (ProductPriceTier::where('product_id', $id)->whereNull('deleted_at')->orderBy('min_qty')->get() as $tier) {
+            $item['price_tiers'][] = [
+                'id' => $tier->id,
+                'min_qty' => (float) $tier->min_qty,
+                'max_qty' => $tier->max_qty === null ? null : (float) $tier->max_qty,
+                'price' => (float) $tier->price,
+            ];
+        }
+
         $item['is_imei'] = $Product->is_imei ? true : false;
         $item['not_selling'] = $Product->not_selling ? true : false;
         $item['is_featured'] = $Product->is_featured ? true : false;
@@ -2847,7 +3013,7 @@ class ProductsController extends BaseController
                     return [
                         'id' => $img->id,
                         'image_path' => $img->image_path,
-                        'url' => asset('images/products/'.$img->image_path),
+                        'url' => product_image_url($img->image_path),
                         'is_main' => (bool) $img->is_main,
                         'sort_order' => (int) $img->sort_order,
                     ];
@@ -2889,6 +3055,7 @@ class ProductsController extends BaseController
         $all_subcategories = SubCategory::orderBy('name')->get(['id', 'name', 'category_id']);
         $brands = Brand::where('deleted_at', null)->get(['id', 'name']);
         $size_guides = \App\Models\SizeGuide::where('deleted_at', null)->where('status', 1)->orderBy('name')->get(['id', 'name']);
+        $shipping_methods = \App\Models\ShippingMethod::where('active', true)->orderBy('sort_order')->orderBy('name')->get(['id', 'name', 'price']);
 
         $product_units = Unit::where('id', $Product->unit_id)
             ->orWhere('base_unit', $Product->unit_id)
@@ -2922,6 +3089,7 @@ class ProductsController extends BaseController
         $show_product_gtin = (bool) ($setting->show_product_gtin ?? true);
         $show_serial_tracking = (bool) ($setting->show_serial_tracking ?? false);
         $enable_multi_pack_selling = (bool) ($setting->enable_multi_pack_selling ?? false);
+        $enable_wholesale_pricing = (bool) ($setting->enable_wholesale_pricing ?? false);
 
         return response()->json([
             'product' => $data,
@@ -2929,6 +3097,7 @@ class ProductsController extends BaseController
             'all_subcategories' => $all_subcategories,
             'brands' => $brands,
             'size_guides' => $size_guides,
+            'shipping_methods' => $shipping_methods,
             'units' => $units,
             'units_sub' => $product_units,
             'materiels' => $materiels,
@@ -2938,6 +3107,7 @@ class ProductsController extends BaseController
             'show_product_gtin' => $show_product_gtin,
             'show_serial_tracking' => $show_serial_tracking,
             'enable_multi_pack_selling' => $enable_multi_pack_selling,
+            'enable_wholesale_pricing' => $enable_wholesale_pricing,
         ]);
 
     }
@@ -3827,6 +3997,7 @@ class ProductsController extends BaseController
 
         $count_stock = CountStock::whereNull('deleted_at')
             ->with(['warehouse', 'user', 'category'])
+            ->whereIn('warehouse_id', $this->userWarehouseIds())
             ->where(function ($query) use ($request) {
                 $query->when($request->filled('search'), function ($query) use ($request) {
                     $search = $request->search;
@@ -3949,6 +4120,30 @@ class ProductsController extends BaseController
 
         return response()->json(['success' => true]);
 
+    }
+
+    /**
+     * Typeahead for the "Related products" picker: any storefront-visible
+     * product, unlike get_products_materiels which is is_single only.
+     */
+    public function search_products_basic(Request $request)
+    {
+        $this->authorizeForUser($request->user('api'), 'products_view', Product::class);
+
+        $q = trim((string) $request->input('q', ''));
+        $exclude = (int) $request->input('exclude', 0);
+
+        $products = Product::whereNull('deleted_at')
+            ->where('is_active', 1)
+            ->when($exclude > 0, fn ($qq) => $qq->where('id', '!=', $exclude))
+            ->when($q !== '', fn ($qq) => $qq->where(function ($w) use ($q) {
+                $w->where('name', 'like', "%{$q}%")->orWhere('code', 'like', "%{$q}%");
+            }))
+            ->orderBy('name')
+            ->limit(25)
+            ->get(['id', 'name', 'code']);
+
+        return response()->json(['products' => $products]);
     }
 
     // -------------- get_products_materiels ------------------\\
@@ -4559,6 +4754,51 @@ class ProductsController extends BaseController
             ->all();
     }
 
+    /** Store the curated related products in the order they were arranged. */
+    protected function syncRelatedProducts(Product $product, array $ids): void
+    {
+        $sync = [];
+        $position = 0;
+        foreach ($ids as $id) {
+            if ((int) $id === (int) $product->id) {
+                continue; // a product is not related to itself
+            }
+            $sync[(int) $id] = ['sort_order' => $position++];
+        }
+
+        $product->relatedProducts()->sync($sync);
+    }
+
+    /** A JSON string or array of ids → a clean list of positive ints. */
+    protected function normalizeIdList($raw): array
+    {
+        $val = is_string($raw) ? (json_decode($raw, true) ?: []) : (is_array($raw) ? $raw : []);
+
+        return collect($val)
+            ->map(fn ($v) => (int) (is_array($v) ? ($v['id'] ?? 0) : $v))
+            ->filter(fn ($v) => $v > 0)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Normalize the incoming labels payload. Same shape as tags, but a badge
+     * list is meant to be read at a glance, so it is capped much lower.
+     */
+    protected function normalizeLabels($raw): array
+    {
+        $val = is_string($raw) ? (json_decode($raw, true) ?: []) : (is_array($raw) ? $raw : []);
+
+        return collect($val)
+            ->map(fn ($t) => is_array($t) ? trim((string) ($t['text'] ?? $t['name'] ?? '')) : trim((string) $t))
+            ->filter(fn ($t) => $t !== '' && mb_strlen($t) <= 30)
+            ->unique(fn ($t) => mb_strtolower($t))
+            ->take(5)
+            ->values()
+            ->all();
+    }
+
     /**
      * Normalize the incoming FAQs payload (JSON string or array) to [{question, answer}].
      */
@@ -4614,6 +4854,99 @@ class ProductsController extends BaseController
         if ($categoryDirty || $subDirty) {
             $product->saveQuietly();
         }
+    }
+
+    /**
+     * Wholesale Pricing by Quantity: persist / reconcile a product's quantity
+     * breaks (the "10-19 pcs -> 175 each" ladder).
+     *
+     * Only runs when the global feature toggle is on; otherwise existing tiers
+     * are left untouched, so turning the feature off hides the ladder without
+     * destroying it. The incoming "price_tiers" payload is a JSON array of
+     * { id?, min_qty, max_qty, price } — max_qty empty/null means the
+     * open-ended top tier ("100+").
+     *
+     * Rows are sanitised (min_qty >= 1, max_qty >= min_qty, price >= 0),
+     * sorted by min_qty and de-overlapped: a tier starting inside the previous
+     * one is dropped rather than silently shadowing it. Tiers are matched by
+     * id — existing rows updated, new rows inserted, removed rows soft-deleted.
+     */
+    protected function syncProductPriceTiers(Request $request, Product $product): void
+    {
+        $setting = Setting::whereNull('deleted_at')->first();
+        if (! (bool) ($setting->enable_wholesale_pricing ?? false)) {
+            return;
+        }
+
+        if (! $request->has('price_tiers')) {
+            return;
+        }
+
+        $raw = $request->input('price_tiers');
+        $tiers = is_array($raw) ? $raw : json_decode($raw, true);
+        if (! is_array($tiers)) {
+            $tiers = [];
+        }
+
+        $rows = [];
+        foreach ($tiers as $t) {
+            $minQty = isset($t['min_qty']) && $t['min_qty'] !== '' ? (float) $t['min_qty'] : 0;
+            $maxQty = isset($t['max_qty']) && $t['max_qty'] !== '' && $t['max_qty'] !== null ? (float) $t['max_qty'] : null;
+            $price = isset($t['price']) && $t['price'] !== '' ? (float) $t['price'] : -1;
+
+            if ($minQty < 1 || $price < 0) {
+                continue;
+            }
+            if ($maxQty !== null && $maxQty < $minQty) {
+                continue;
+            }
+
+            $rows[] = [
+                'id' => ! empty($t['id']) ? (int) $t['id'] : null,
+                'min_qty' => $minQty,
+                'max_qty' => $maxQty,
+                'price' => $price,
+            ];
+        }
+
+        usort($rows, fn ($a, $b) => $a['min_qty'] <=> $b['min_qty']);
+
+        // Drop brackets that start before the previous one ends — overlapping
+        // ladders make the applied price depend on row order.
+        $clean = [];
+        $prevEnd = null;
+        foreach ($rows as $row) {
+            if ($prevEnd !== null && ($prevEnd === INF || $row['min_qty'] <= $prevEnd)) {
+                continue;
+            }
+            $clean[] = $row;
+            $prevEnd = $row['max_qty'] === null ? INF : $row['max_qty'];
+        }
+
+        $existing = ProductPriceTier::where('product_id', $product->id)
+            ->whereNull('deleted_at')->get()->keyBy('id');
+        $keptIds = [];
+
+        foreach ($clean as $row) {
+            $values = [
+                'product_id' => $product->id,
+                'min_qty' => $row['min_qty'],
+                'max_qty' => $row['max_qty'],
+                'price' => $row['price'],
+            ];
+
+            if ($row['id'] && $existing->has($row['id'])) {
+                $existing[$row['id']]->update($values);
+                $keptIds[] = $row['id'];
+            } else {
+                $keptIds[] = ProductPriceTier::create($values)->id;
+            }
+        }
+
+        ProductPriceTier::where('product_id', $product->id)
+            ->whereNull('deleted_at')
+            ->when($keptIds, fn ($q) => $q->whereNotIn('id', $keptIds))
+            ->delete();
     }
 
     /**

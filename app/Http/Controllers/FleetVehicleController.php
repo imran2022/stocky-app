@@ -8,6 +8,7 @@ use App\Models\VehicleAssignment;
 use App\Models\VehicleFuelLog;
 use App\Models\VehicleMaintenance;
 use App\Models\Warehouse;
+use App\Traits\ScopesWarehouseAccess;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -26,6 +27,8 @@ use Illuminate\Support\Str;
  */
 class FleetVehicleController extends Controller
 {
+    use ScopesWarehouseAccess;
+
     /** Photo directory, relative to public/. */
     private const IMAGE_DIR = 'images/vehicles';
 
@@ -47,6 +50,10 @@ class FleetVehicleController extends Controller
         $dir = strtolower((string) $request->SortType) === 'asc' ? 'asc' : 'desc';
 
         $query = Vehicle::with('warehouse', 'driver')->whereNull('deleted_at');
+
+        // Vehicles are stationed at a warehouse; one with no warehouse belongs
+        // to the whole company and stays visible to everyone.
+        $this->scopeToWarehouses($query, 'warehouse_id', true);
 
         if ($request->filled('status')) {
             $query->where('status', $request->status);
@@ -221,34 +228,42 @@ class FleetVehicleController extends Controller
         $soon = $today->copy()->addDays(self::DUE_SOON_DAYS);
         $monthStart = $today->copy()->startOfMonth();
 
-        $byStatus = Vehicle::whereNull('deleted_at')
+        // Every tile below is counted over the vehicles this user may see, so
+        // the totals and the cost figures describe the same fleet.
+        $visibleVehicleIds = $this->scopeToWarehouses(
+            Vehicle::whereNull('deleted_at'), 'warehouse_id', true
+        )->pluck('id')->all();
+
+        $byStatus = Vehicle::whereNull('deleted_at')->whereIn('id', $visibleVehicleIds)
             ->select('status', DB::raw('count(*) as aggregate'))
             ->groupBy('status')
             ->pluck('aggregate', 'status')
             ->toArray();
 
-        $byType = Vehicle::whereNull('deleted_at')
+        $byType = Vehicle::whereNull('deleted_at')->whereIn('id', $visibleVehicleIds)
             ->select('type', DB::raw('count(*) as aggregate'))
             ->groupBy('type')
             ->pluck('aggregate', 'type')
             ->toArray();
 
         return response()->json([
-            'total' => Vehicle::whereNull('deleted_at')->count(),
+            'total' => count($visibleVehicleIds),
             'by_status' => $byStatus,
             'by_type' => collect($byType)->map(fn ($count, $type) => ['type' => $type, 'count' => $count])->values(),
             'active' => (int) ($byStatus['active'] ?? 0),
             'in_maintenance' => (int) ($byStatus['maintenance'] ?? 0),
-            'assigned' => VehicleAssignment::where('status', 'active')->whereNull('deleted_at')->distinct('vehicle_id')->count('vehicle_id'),
-            'fuel_cost_month' => (float) VehicleFuelLog::whereNull('deleted_at')
+            'assigned' => VehicleAssignment::where('status', 'active')->whereNull('deleted_at')
+                ->whereIn('vehicle_id', $visibleVehicleIds)->distinct('vehicle_id')->count('vehicle_id'),
+            'fuel_cost_month' => (float) VehicleFuelLog::whereNull('deleted_at')->whereIn('vehicle_id', $visibleVehicleIds)
                 ->whereDate('log_date', '>=', $monthStart->toDateString())->sum('total_cost'),
-            'maintenance_cost_month' => (float) VehicleMaintenance::whereNull('deleted_at')
+            'maintenance_cost_month' => (float) VehicleMaintenance::whereNull('deleted_at')->whereIn('vehicle_id', $visibleVehicleIds)
                 ->whereDate('service_date', '>=', $monthStart->toDateString())->sum('cost'),
-            'fuel_cost_total' => (float) VehicleFuelLog::whereNull('deleted_at')->sum('total_cost'),
-            'maintenance_cost_total' => (float) VehicleMaintenance::whereNull('deleted_at')->sum('cost'),
+            'fuel_cost_total' => (float) VehicleFuelLog::whereNull('deleted_at')->whereIn('vehicle_id', $visibleVehicleIds)->sum('total_cost'),
+            'maintenance_cost_total' => (float) VehicleMaintenance::whereNull('deleted_at')->whereIn('vehicle_id', $visibleVehicleIds)->sum('cost'),
             'alerts' => $this->alerts($today, $soon),
             'cost_trend' => $this->costTrend(),
             'recent_maintenance' => VehicleMaintenance::with('vehicle')->whereNull('deleted_at')
+                ->whereIn('vehicle_id', $visibleVehicleIds)
                 ->orderBy('service_date', 'desc')->limit(5)->get()
                 ->map(fn ($m) => [
                     'id' => $m->id,

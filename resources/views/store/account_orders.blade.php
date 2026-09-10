@@ -2,7 +2,11 @@
 
 @section('content')
 @php
-  $currency = $s->currency_code ?? 'USD';
+  // Multi-Currency: this list mixes orders that may each have been placed in
+  // a different currency, while the API returns BASE-currency totals — so the
+  // whole table renders in the base currency (real ISO code for Intl). The
+  // per-order page shows amounts in the order's own currency.
+  $currency = \App\Services\StoreCurrencyService::base()['code'];
 @endphp
 
 <section class="border-b border-line-subtle"
@@ -14,10 +18,10 @@
       <div class="text-fg-muted text-sm mt-1">{{ __('messages.TrackOrdersStatus') }}</div>
     </div>
     <div class="flex gap-2">
-      <a href="{{ url('/online_store/account/returns') }}" class="btn btn-outline">
+      <a href="{{ route('account.returns') }}" class="btn btn-outline">
         <x-store.icon name="rotate-ccw" class="w-4 h-4" />{{ __('messages.MyReturns') }}
       </a>
-      <a href="{{ url('/online_store/account') }}" class="btn btn-outline">
+      <a href="{{ route('account') }}" class="btn btn-outline">
         <x-store.icon name="user" class="w-4 h-4" />{{ __('messages.Account') }}
       </a>
     </div>
@@ -83,7 +87,8 @@
 
 <script>
 (function(){
-  const CURRENCY = document.querySelector('meta[name="currency"]')?.content || @json($currency);
+  // Base ISO code, NOT the session display currency — the amounts are base.
+  const CURRENCY = @json($currency);
   const PRICE_DECIMALS = parseInt(document.querySelector('meta[name="price-decimals"]')?.content, 10) || 2;
   const tableBody = document.querySelector('#ord-table tbody');
   const pager     = document.getElementById('ord-pager');
@@ -117,8 +122,8 @@
     });
 
     const urls = [
-      '/online_store/my/orders?' + params.toString(),
-      '/online_store/orders?' + params.toString()
+      @json(route('my_orders.index')) + '?' + params.toString(),
+      @json(url('/'.store_path_to('orders'))) + '?' + params.toString()
     ];
 
     for (const u of urls) {
@@ -155,7 +160,7 @@
       status === 'cancelled' ? 'chip-danger'  : '';
 
     const statusLabel = STATUS_LABELS[status] || status || '—';
-    const viewUrlBase = @json(url('/online_store/account/orders/'));
+    const viewUrlBase = @json(url('/'.store_path_to('account/orders')));
     const viewUrl     = viewUrlBase + '/' + o.id;
 
     return `

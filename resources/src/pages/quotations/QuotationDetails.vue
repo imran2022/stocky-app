@@ -3,6 +3,14 @@
     <PageHeader :title="$t('DetailQuote')" :breadcrumb="[$t('ListQuotations'), $t('DetailQuote')]">
       <template #actions>
         <a-space wrap>
+          <!-- Multi-Currency: view this document's amounts in another currency -->
+          <a-select
+            v-if="showCurrencySelect"
+            v-model:value="currencySelectId"
+            :options="currencyOptions"
+            :title="$t('Currency')"
+            style="min-width: 92px"
+          />
           <a-button @click="$router.push('/quotations')">
             <template #icon><ArrowLeftOutlined /></template>
             {{ $t('Back') }}
@@ -111,28 +119,28 @@
             <div class="muted">{{ record.code }}</div>
             <div v-if="record.is_imei && record.imei_number" class="muted">SN: {{ record.imei_number }}</div>
           </template>
-          <template v-else-if="column.key === 'price'">{{ money(record.price) }}</template>
+          <template v-else-if="column.key === 'price'">{{ docMoney(record.price) }}</template>
           <template v-else-if="column.key === 'quantity'">
             {{ num(record.quantity) }} {{ record.unit_sale || record.unitSale }}
           </template>
           <!-- DiscountNet is per unit; this column is a line total like Tax below. -->
-          <template v-else-if="column.key === 'discount'">{{ money(record.DiscountNet * record.quantity) }}</template>
-          <template v-else-if="column.key === 'tax'">{{ money(record.taxe * record.quantity) }}</template>
-          <template v-else-if="column.key === 'total'">{{ money(record.total) }}</template>
+          <template v-else-if="column.key === 'discount'">{{ docMoney(record.DiscountNet * record.quantity) }}</template>
+          <template v-else-if="column.key === 'tax'">{{ docMoney(record.taxe * record.quantity) }}</template>
+          <template v-else-if="column.key === 'total'">{{ docMoney(record.total) }}</template>
         </template>
       </a-table>
 
       <div class="inv-summary">
         <!-- Summary labels hardcoded English in legacy's invoice too. -->
         <table>
-          <tr><td>Subtotal:</td><td>{{ money(subtotal) }}</td></tr>
-          <tr><td>Order Tax:</td><td>{{ money(quote.TaxNet) }}</td></tr>
+          <tr><td>Subtotal:</td><td>{{ docMoney(subtotal) }}</td></tr>
+          <tr><td>Order Tax:</td><td>{{ docMoney(quote.TaxNet) }}</td></tr>
           <tr v-if="Number(quote.discount) > 0">
             <td>Discount:</td>
-            <td class="neg">- {{ money(quote.discount) }}</td>
+            <td class="neg">- {{ docMoney(quote.discount) }}</td>
           </tr>
-          <tr><td>Shipping:</td><td>{{ money(quote.shipping) }}</td></tr>
-          <tr class="grand"><td>{{ $t('Total') }}:</td><td>{{ money(quote.GrandTotal) }}</td></tr>
+          <tr><td>Shipping:</td><td>{{ docMoney(quote.shipping) }}</td></tr>
+          <tr class="grand"><td>{{ $t('Total') }}:</td><td>{{ docMoney(quote.GrandTotal) }}</td></tr>
         </table>
       </div>
 
@@ -159,17 +167,22 @@ import {
 } from '@ant-design/icons-vue';
 import PageHeader from '../../components/PageHeader.vue';
 import { useFormat } from '../../composables/useFormat';
+import { useDetailsCurrency } from '../../composables/useDetailsCurrency';
 import { useAuthStore } from '../../stores/auth';
 import http from '../../lib/http';
 
 const { t } = useI18n();
-const { money, date, dateTime } = useFormat();
+const { date, dateTime } = useFormat();
 const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
 
 const loading = ref(true);
 const quote = ref({});
+
+// Multi-Currency: amounts arrive converted into the document's currency;
+// the header selector re-expresses them in any other currency (view-only).
+const { docMoney, currencyOptions, currencySelectId, showCurrencySelect } = useDetailsCurrency(quote);
 const details = ref([]);
 const company = ref({});
 

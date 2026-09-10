@@ -85,6 +85,7 @@
   const T_DECR     = @json(__('messages.Decrease'));
   const T_INCR     = @json(__('messages.Increase'));
   const T_VARIANT  = @json(__('messages.Variant'));
+  const T_WHOLESALE = @json(__('messages.WholesalePrice'));
   const HIDE_PRICES = !!window.__HIDE_PRICES__;
 
   function money(val, currency) {
@@ -144,7 +145,12 @@
             </div>
           </div>
         </td>
-        <td class="text-end px-4 py-3">${HIDE_PRICES ? '—' : money(it.price, it.currency)}</td>
+        <td class="text-end px-4 py-3">
+          ${HIDE_PRICES ? '—' : money(it.price, it.currency)}
+          ${(!HIDE_PRICES && it.base_price != null && Number(it.base_price) > Number(it.price))
+            ? `<div class="text-xs text-fg-muted"><span class="line-through">${money(it.base_price, it.currency)}</span> <span class="chip chip-success">${T_WHOLESALE}</span></div>`
+            : ''}
+        </td>
         <td class="text-center px-4 py-3">
           <div class="qty-stepper mx-auto">
             <button class="js-dec" type="button" aria-label="${T_DECR}">−</button>

@@ -11,26 +11,29 @@ return new class extends Migration
      */
     public function up(): void
     {
+        // NO string defaults. These are optional admin overrides: left NULL,
+        // the login page falls through to tdb('Login_hero_title', ...) etc.,
+        // which is translated into every shipped locale. Baking English in as a
+        // column default made a fresh install permanently English no matter the
+        // company language, since the override was always "set".
+        // The later 2026_03_16 migration (badge, features, button, footer)
+        // already gets this right — these four now match it.
         Schema::table('settings', function (Blueprint $table) {
             $table->string('login_hero_title')
                 ->nullable()
-                ->after('page_title_suffix')
-                ->default('Welcome back!');
+                ->after('page_title_suffix');
 
             $table->string('login_hero_subtitle')
                 ->nullable()
-                ->after('login_hero_title')
-                ->default('Sign in to access your account and keep your operations in sync.');
+                ->after('login_hero_title');
 
             $table->string('login_panel_title')
                 ->nullable()
-                ->after('login_hero_subtitle')
-                ->default('Sign In');
+                ->after('login_hero_subtitle');
 
             $table->string('login_panel_subtitle')
                 ->nullable()
-                ->after('login_panel_title')
-                ->default('Access your dashboard and manage everything from one place.');
+                ->after('login_panel_title');
         });
     }
 

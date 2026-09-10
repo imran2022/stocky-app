@@ -8,6 +8,10 @@
     export-endpoint="report/provider"
     export-rows-key="report"
   >
+    <template #actions>
+      <!-- Multi-Currency: view amounts converted (display-only) -->
+      <ViewCurrencySelect />
+    </template>
     <!-- KPI tiles + top-10 chart (whole-set aggregates from the payload). -->
     <template #chart>
       <a-row :gutter="[16, 16]" style="margin-bottom: 16px">
@@ -67,6 +71,7 @@ import {
 } from '@ant-design/icons-vue';
 import ReportPage from '../../components/ReportPage.vue';
 import ReportChart from '../../components/ReportChart.vue';
+import ViewCurrencySelect from '../../components/ViewCurrencySelect.vue';
 import { useCrudTable } from '../../composables/useCrudTable';
 import { useFormat } from '../../composables/useFormat';
 

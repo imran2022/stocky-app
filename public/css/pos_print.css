@@ -355,13 +355,19 @@ text-align: center;
 }
 
 /* ====================================================================
-   Layout 4 - Bilingual (Arabic + English) receipt overrides
+   Layout 4 - Bilingual (Arabic + English) receipt
    ==================================================================== */
 #invoice-POS .receipt-layout-4,
 #invoice-POS .receipt-layout-4 * {
   text-transform: none !important;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, Arial, sans-serif;
 }
+#invoice-POS .receipt-layout-4 {
+  color: #000;
+  font-size: 10px;
+  line-height: 1.45;
+}
+/* Neutralize the global dotted-row borders for this layout */
 #invoice-POS .receipt-layout-4 table,
 #invoice-POS .receipt-layout-4 table tr,
 #invoice-POS .receipt-layout-4 table tbody tr,
@@ -372,16 +378,221 @@ text-align: center;
 #invoice-POS .receipt-layout-4 table td,
 #invoice-POS .receipt-layout-4 table th {
   border: none !important;
+  font-size: 10px;
   padding: 2px 2px !important;
-  line-height: 1.35 !important;
-}
-/* Dashed item-row separators (keep for the products table only) */
-#invoice-POS .receipt-layout-4 table tbody tr[style*="border-bottom"] {
-  border-bottom: 1px dashed #ddd !important;
+  line-height: 1.4 !important;
+  vertical-align: top;
 }
 #invoice-POS .receipt-layout-4 .info > div {
   line-height: 1.4;
 }
+
+/* Shared alignment helpers */
+#invoice-POS .receipt-layout-4 .bl4-th-left,
+#invoice-POS .receipt-layout-4 .bl4-td-left   { text-align: left !important; }
+#invoice-POS .receipt-layout-4 .bl4-th-center,
+#invoice-POS .receipt-layout-4 .bl4-td-center { text-align: center !important; }
+#invoice-POS .receipt-layout-4 .bl4-th-right,
+#invoice-POS .receipt-layout-4 .bl4-td-right  { text-align: right !important; }
+#invoice-POS .receipt-layout-4 .bl4-td-right,
+#invoice-POS .receipt-layout-4 .bl4-t-val     { white-space: nowrap; }
+
+/* Company header */
+#invoice-POS .receipt-layout-4 .bl4-company-ar {
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.3;
+}
+#invoice-POS .receipt-layout-4 .bl4-company-en {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+}
+#invoice-POS .receipt-layout-4 .bl4-contact {
+  font-size: 10px;
+  color: #333;
+  line-height: 1.45;
+}
+#invoice-POS .receipt-layout-4 .bl4-trn {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid #000;
+  padding: 2px 10px;
+  margin-top: 5px;
+}
+#invoice-POS .receipt-layout-4 .bl4-title {
+  border-top: 2px solid #000;
+  border-bottom: 2px solid #000;
+  padding: 5px 0;
+  margin: 8px 0 6px;
+  text-align: center;
+}
+#invoice-POS .receipt-layout-4 .bl4-title-ar {
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.4;
+}
+#invoice-POS .receipt-layout-4 .bl4-title-en {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+}
+
+/* Invoice meta (EN label — value — AR label) */
+#invoice-POS .receipt-layout-4 .bl4-meta {
+  font-size: 10px;
+  margin-bottom: 2px;
+}
+#invoice-POS .receipt-layout-4 .bl4-meta-row {
+  display: flex;
+  align-items: baseline;
+  padding: 1px 0;
+}
+#invoice-POS .receipt-layout-4 .bl4-meta-en {
+  flex: 0 0 27%;
+  text-align: left;
+  color: #444;
+}
+#invoice-POS .receipt-layout-4 .bl4-meta-val {
+  flex: 1 1 auto;
+  text-align: center;
+  font-weight: 600;
+  word-break: break-word;
+}
+#invoice-POS .receipt-layout-4 .bl4-meta-ar {
+  flex: 0 0 27%;
+  text-align: right;
+  color: #444;
+  direction: rtl;
+}
+
+/* Items table */
+#invoice-POS .receipt-layout-4 .bl4-items {
+  width: 100%;
+  margin-top: 6px;
+  border-collapse: collapse;
+}
+#invoice-POS .receipt-layout-4 .bl4-items thead th {
+  font-weight: 700;
+  border-top: 2px solid #000 !important;
+  border-bottom: 1px solid #000 !important;
+  padding: 3px 2px !important;
+  line-height: 1.3 !important;
+}
+#invoice-POS .receipt-layout-4 .bl4-item-row td {
+  padding: 3px 2px !important;
+  border-bottom: 1px dashed #bbb !important;
+}
+#invoice-POS .receipt-layout-4 .bl4-item-name {
+  font-weight: 600;
+}
+#invoice-POS .receipt-layout-4 .bl4-item-sub {
+  font-size: 9px;
+  color: #444;
+  line-height: 1.35;
+}
+
+/* Totals (EN label — amount — AR label) */
+#invoice-POS .receipt-layout-4 .bl4-totals {
+  width: 100%;
+  margin-top: 2px;
+}
+#invoice-POS .receipt-layout-4 .bl4-t-en {
+  text-align: left !important;
+  color: #333;
+}
+#invoice-POS .receipt-layout-4 .bl4-t-val {
+  text-align: center !important;
+  font-weight: 600;
+}
+#invoice-POS .receipt-layout-4 .bl4-t-ar {
+  text-align: right !important;
+  color: #333;
+  direction: rtl;
+}
+
+/* Grand total band */
+#invoice-POS .receipt-layout-4 .bl4-grand {
+  width: 100%;
+  margin-top: 4px;
+  border-top: 2px solid #000 !important;
+  border-bottom: 2px solid #000 !important;
+}
+#invoice-POS .receipt-layout-4 .bl4-grand td {
+  font-size: 12px;
+  font-weight: 800;
+  color: #000 !important;
+  padding: 4px 2px !important;
+}
+
+/* Paid / balance summary */
+#invoice-POS .receipt-layout-4 .bl4-pays {
+  width: 100%;
+  margin-top: 4px;
+}
+#invoice-POS .receipt-layout-4 .bl4-pays td {
+  font-weight: 600;
+}
+
+/* Payment methods */
+#invoice-POS .receipt-layout-4 .bl4-payments {
+  width: 100%;
+  margin-top: 8px;
+}
+#invoice-POS .receipt-layout-4 .bl4-payments thead th {
+  font-weight: 700;
+  border-top: 1px solid #000 !important;
+  border-bottom: 1px solid #000 !important;
+  padding: 3px 2px !important;
+  line-height: 1.3 !important;
+}
+#invoice-POS .receipt-layout-4 .bl4-pay-note {
+  font-size: 9px;
+  font-style: italic;
+  color: #444;
+  padding-bottom: 4px !important;
+  white-space: pre-line;
+}
+
+/* Footer */
+#invoice-POS .receipt-layout-4 .bl4-footer {
+  margin-top: 8px;
+  text-align: center;
+}
+#invoice-POS .receipt-layout-4 .bl4-sale-note {
+  font-size: 9px;
+  font-style: italic;
+  text-align: left;
+  white-space: pre-line;
+  margin-bottom: 4px;
+}
+#invoice-POS .receipt-layout-4 .bl4-thanks {
+  border-top: 1px solid #000;
+  padding-top: 6px;
+}
+#invoice-POS .receipt-layout-4 .bl4-thanks-ar {
+  font-size: 12px;
+  font-weight: 700;
+}
+#invoice-POS .receipt-layout-4 .bl4-thanks-en {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+}
+#invoice-POS .receipt-layout-4 .bl4-policy {
+  font-size: 9px;
+  color: #333;
+  margin-top: 3px;
+  line-height: 1.5;
+  white-space: pre-line;
+}
+#invoice-POS .receipt-layout-4 .bl4-footer-contact {
+  font-size: 9px;
+  color: #333;
+  margin-top: 4px;
+}
+
 #invoice-POS .receipt-layout-4 .invoice-url-qr{
   display: flex;
   justify-content: center;
@@ -409,8 +620,47 @@ text-align: center;
     border: none !important;
     border-bottom: none !important;
   }
-  #invoice-POS .receipt-layout-4 table tbody tr[style*="border-bottom"] {
+  /* Grayscale-safe borders and text for thermal printing */
+  #invoice-POS .receipt-layout-4,
+  #invoice-POS .receipt-layout-4 table td,
+  #invoice-POS .receipt-layout-4 table th {
+    color: #000 !important;
+  }
+  #invoice-POS .receipt-layout-4 .bl4-contact,
+  #invoice-POS .receipt-layout-4 .bl4-meta-en,
+  #invoice-POS .receipt-layout-4 .bl4-meta-ar,
+  #invoice-POS .receipt-layout-4 .bl4-item-sub,
+  #invoice-POS .receipt-layout-4 .bl4-t-en,
+  #invoice-POS .receipt-layout-4 .bl4-t-ar,
+  #invoice-POS .receipt-layout-4 .bl4-pay-note,
+  #invoice-POS .receipt-layout-4 .bl4-policy,
+  #invoice-POS .receipt-layout-4 .bl4-footer-contact {
+    color: #333 !important;
+  }
+  #invoice-POS .receipt-layout-4 .bl4-items thead th {
+    border-top: 2px solid #000 !important;
+    border-bottom: 1px solid #000 !important;
+  }
+  #invoice-POS .receipt-layout-4 .bl4-item-row td {
     border-bottom: 1px dashed #999 !important;
+  }
+  #invoice-POS .receipt-layout-4 .bl4-grand {
+    border-top: 2px solid #000 !important;
+    border-bottom: 2px solid #000 !important;
+  }
+  #invoice-POS .receipt-layout-4 .bl4-payments thead th {
+    border-top: 1px solid #000 !important;
+    border-bottom: 1px solid #000 !important;
+  }
+  #invoice-POS .receipt-layout-4 .bl4-title {
+    border-top: 2px solid #000 !important;
+    border-bottom: 2px solid #000 !important;
+  }
+  #invoice-POS .receipt-layout-4 .bl4-trn {
+    border: 1px solid #000 !important;
+  }
+  #invoice-POS .receipt-layout-4 .bl4-thanks {
+    border-top: 1px solid #000 !important;
   }
 }
 

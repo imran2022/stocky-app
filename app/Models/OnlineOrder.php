@@ -36,6 +36,7 @@ class OnlineOrder extends Model
         'client_id', 'warehouse_id',
         'total', 'subtotal', 'discount', 'coupon_code', 'tax', 'tax_rate', 'shipping_cost',
         'shipping_method_id', 'shipping_method_name',
+        'delivery_method', 'pickup_branch_id',
         'customer_name', 'customer_email', 'customer_phone',
         'shipping_address', 'shipping_city', 'shipping_state', 'shipping_zip', 'shipping_country',
         'payment_method', 'payment_status', 'stripe_payment_intent_id',
@@ -43,9 +44,13 @@ class OnlineOrder extends Model
         'paystack_reference', 'paystack_transaction_id',
         'flutterwave_tx_ref', 'flutterwave_transaction_id',
         'razorpay_payment_link_id', 'razorpay_payment_id',
+        'bkash_payment_id', 'bkash_trx_id',
+        'sslcommerz_tran_id', 'sslcommerz_val_id',
         'status', 'delivered_at',
         'has_preorder_items',
         'is_flagged', 'flag_reason',
+        // Multi-Currency snapshot chosen by the shopper; NULL = base currency
+        'currency_id', 'exchange_rate',
     ];
 
     protected $casts = [
@@ -59,12 +64,20 @@ class OnlineOrder extends Model
         'tax_rate' => 'decimal:3',
         'shipping_cost' => 'decimal:2',
         'shipping_method_id' => 'integer',
+        'pickup_branch_id' => 'integer',
         'has_preorder_items' => 'boolean',
         'is_flagged' => 'boolean',
         'delivered_at' => 'datetime',
+        'currency_id' => 'integer',
+        'exchange_rate' => 'float',
     ];
 
     // Relationships
+    public function currency(): BelongsTo
+    {
+        return $this->belongsTo(Currency::class);
+    }
+
     public function items(): HasMany
     {
         return $this->hasMany(OnlineOrderItem::class, 'order_id');
@@ -83,6 +96,22 @@ class OnlineOrder extends Model
     public function shippingMethod(): BelongsTo
     {
         return $this->belongsTo(ShippingMethod::class);
+    }
+
+    public function pickupBranch(): BelongsTo
+    {
+        return $this->belongsTo(Warehouse::class, 'pickup_branch_id');
+    }
+
+    public function paymentProofs(): HasMany
+    {
+        return $this->hasMany(OnlineOrderPaymentProof::class, 'order_id');
+    }
+
+    /** True when the shopper collects the order at a branch. */
+    public function isPickup(): bool
+    {
+        return ($this->delivery_method ?? 'ship') === 'pickup';
     }
 
     public function returns(): HasMany

@@ -26,7 +26,7 @@ class CommissionReceiptController extends BaseController
         $order = $request->SortField ?? 'paid_at';
         $dir = $request->SortType ?? 'desc';
 
-        $query = CommissionReceipt::with(['salesAgent:id,name,code', 'paymentMethod:id,title'])
+        $query = CommissionReceipt::with(['salesAgent:id,name,code', 'paymentMethod:id,name'])
             ->where('deleted_at', null);
 
         if ($request->filled('sales_agent_id')) {

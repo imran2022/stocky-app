@@ -151,3 +151,17 @@ $theme-colors: (
      which is fine. */
   @import "./globals-legacy/globals";
 }
+
+/* Bootstrap's `.modal-open .modal { overflow-y: auto }` compiles above to
+   `.pos-scope .modal-open .modal`, which can never match: `modal-open` sits
+   on <body>, an ANCESTOR of .pos-scope. Only `.pos-scope .modal
+   { overflow: hidden }` survives, so any modal taller than the viewport
+   (every form modal on a phone — Quick Add Customer, New Customer, …) gets
+   clipped with its submit row off-screen and no way to scroll. The BModal
+   shim always renders the open modal as `.modal.show`, so this restores
+   Bootstrap's intended scroll container for all POS modals at once. */
+.modal-open .pos-scope .modal,
+.pos-scope .modal.show {
+  overflow-x: hidden;
+  overflow-y: auto;
+}

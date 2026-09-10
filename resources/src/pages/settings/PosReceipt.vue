@@ -85,6 +85,14 @@
                                 <td class="total">Due</td>
                                 <td style="text-align:right;" class="total">5.00</td>
                               </tr>
+                              <tr v-show="pos_settings.show_previous_dues !== 0">
+                                <td class="total">{{ $t('Previous_Dues') }}</td>
+                                <td style="text-align:right;" class="total">10.00</td>
+                              </tr>
+                              <tr v-show="pos_settings.show_net_balance !== 0">
+                                <td class="total">{{ $t('Net_Balance') }}</td>
+                                <td style="text-align:right;" class="total">15.00</td>
+                              </tr>
                             </tbody>
                           </table>
                           <table
@@ -200,6 +208,14 @@
                                 <td class="total">Due</td>
                                 <td style="text-align:right;" class="total">5.00</td>
                               </tr>
+                              <tr v-show="pos_settings.show_previous_dues !== 0">
+                                <td class="total">{{ $t('Previous_Dues') }}</td>
+                                <td style="text-align:right;" class="total">10.00</td>
+                              </tr>
+                              <tr v-show="pos_settings.show_net_balance !== 0">
+                                <td class="total">{{ $t('Net_Balance') }}</td>
+                                <td style="text-align:right;" class="total">15.00</td>
+                              </tr>
                             </tbody>
                           </table>
                           <table
@@ -309,6 +325,14 @@
                                 <td class="total">Due</td>
                                 <td style="text-align:right;" class="total">1.25</td>
                               </tr>
+                              <tr v-show="pos_settings.show_previous_dues !== 0">
+                                <td class="total">{{ $t('Previous_Dues') }}</td>
+                                <td style="text-align:right;" class="total">10.00</td>
+                              </tr>
+                              <tr v-show="pos_settings.show_net_balance !== 0">
+                                <td class="total">{{ $t('Net_Balance') }}</td>
+                                <td style="text-align:right;" class="total">11.25</td>
+                              </tr>
                             </tbody>
                           </table>
                           <table
@@ -355,155 +379,162 @@
 
                         <!-- Layout 4 demo (Bilingual AR+EN) -->
                         <div v-else-if="currentReceiptLayout === 4" class="receipt-layout-4">
-                          <div class="info text-center mb-2">
+                          <div class="info text-center bl4-header">
                             <div class="invoice_logo mb-1" v-show="pos_settings.show_logo !== 0">
                               <div class="demo-logo-circle">LOGO</div>
                             </div>
-                            <div>
-                              <strong style="font-size:13px;">متجر تجريبي</strong><br>
-                              <strong style="font-size:12px;">Demo Store</strong>
-                            </div>
-                            <div style="font-size:10px;margin-top:2px;">123 Demo Street</div>
-                            <div style="font-size:10px;">+123 456 789</div>
-                            <div v-show="pos_settings.show_email" style="font-size:10px;">demo@example.com</div>
-                            <div v-if="setting.vat_number" style="font-size:11px;font-weight:bold;margin-top:4px;">
+                            <div class="bl4-company-ar">متجر تجريبي</div>
+                            <div class="bl4-company-en">Demo Store</div>
+                            <div class="bl4-contact">123 Demo Street</div>
+                            <div class="bl4-contact">+123 456 789</div>
+                            <div class="bl4-contact" v-show="pos_settings.show_email">demo@example.com</div>
+                            <div v-if="setting.vat_number" class="bl4-trn">
                               الرقم الضريبي / TRN : {{setting.vat_number}}
                             </div>
-                            <div class="mt-2 mb-2" style="border-top:1px dashed #000;border-bottom:1px dashed #000;padding:4px 0;">
-                              <strong>فاتورة ضريبية مبسطة</strong><br>
-                              <strong>Simplified Tax Invoice</strong>
+                            <div class="bl4-title">
+                              <div class="bl4-title-ar">فاتورة ضريبية مبسطة</div>
+                              <div class="bl4-title-en">SIMPLIFIED TAX INVOICE</div>
                             </div>
                           </div>
-                          <div style="font-size:10px;">
-                            <div v-show="pos_settings.show_reference !== 0" style="display:flex;justify-content:space-between;">
-                              <span>Invoice No</span>
-                              <span>REF-12345</span>
-                              <span>رقم الفاتورة</span>
+                          <div class="bl4-meta">
+                            <div v-show="pos_settings.show_reference !== 0" class="bl4-meta-row">
+                              <span class="bl4-meta-en">Invoice No</span>
+                              <span class="bl4-meta-val">REF-12345</span>
+                              <span class="bl4-meta-ar">رقم الفاتورة</span>
                             </div>
-                            <div v-show="pos_settings.show_date !== 0" style="display:flex;justify-content:space-between;">
-                              <span>Date</span>
-                              <span>2025-12-10 12:34</span>
-                              <span>تاريخ</span>
+                            <div v-show="pos_settings.show_date !== 0" class="bl4-meta-row">
+                              <span class="bl4-meta-en">Date</span>
+                              <span class="bl4-meta-val">2025-12-10 12:34</span>
+                              <span class="bl4-meta-ar">التاريخ</span>
                             </div>
-                            <div v-show="pos_settings.show_seller !== 0" style="display:flex;justify-content:space-between;">
-                              <span>Seller</span>
-                              <span>John Doe</span>
-                              <span>البائع</span>
+                            <div v-show="pos_settings.show_seller !== 0" class="bl4-meta-row">
+                              <span class="bl4-meta-en">Seller</span>
+                              <span class="bl4-meta-val">John Doe</span>
+                              <span class="bl4-meta-ar">البائع</span>
                             </div>
-                            <div v-show="pos_settings.show_customer" style="display:flex;justify-content:space-between;">
-                              <span>Customer</span>
-                              <span>Jane Smith</span>
-                              <span>العميل</span>
+                            <div v-show="pos_settings.show_customer" class="bl4-meta-row">
+                              <span class="bl4-meta-en">Customer</span>
+                              <span class="bl4-meta-val">Jane Smith</span>
+                              <span class="bl4-meta-ar">العميل</span>
                             </div>
-                            <div v-show="pos_settings.show_Warehouse" style="display:flex;justify-content:space-between;">
-                              <span>Warehouse</span>
-                              <span>Main Store</span>
-                              <span>المستودع</span>
+                            <div v-show="pos_settings.show_Warehouse" class="bl4-meta-row">
+                              <span class="bl4-meta-en">Warehouse</span>
+                              <span class="bl4-meta-val">Main Store</span>
+                              <span class="bl4-meta-ar">المستودع</span>
                             </div>
                           </div>
-                          <table style="width:100%;margin-top:8px;font-size:10px;border-top:1px dashed #000;">
+                          <table class="bl4-items">
+                            <colgroup><col style="width:44%"><col style="width:14%"><col style="width:20%"><col style="width:22%"></colgroup>
                             <thead>
                               <tr>
-                                <th style="text-align:left;padding:4px 0;">Product<br>المنتج</th>
-                                <th style="text-align:center;padding:4px 0;">Qty<br>كمية</th>
-                                <th style="text-align:center;padding:4px 0;">Rate<br>معدل</th>
-                                <th style="text-align:right;padding:4px 0;">Amount<br>مجموع</th>
+                                <th class="bl4-th-left">Product<br>المنتج</th>
+                                <th class="bl4-th-center">Qty<br>الكمية</th>
+                                <th class="bl4-th-right">Rate<br>السعر</th>
+                                <th class="bl4-th-right">Amount<br>الإجمالي</th>
                               </tr>
                             </thead>
                             <tbody>
-                              <tr>
-                                <td>Demo Product A</td>
-                                <td style="text-align:center">2</td>
-                                <td style="text-align:center">10.00</td>
-                                <td style="text-align:right">20.00</td>
+                              <tr class="bl4-item-row">
+                                <td>
+                                  <div class="bl4-item-name">Demo Product A</div>
+                                  <div class="bl4-item-sub" v-show="pos_settings.show_product_discount !== 0">Discount / خصم: -2.00</div>
+                                </td>
+                                <td class="bl4-td-center">2</td>
+                                <td class="bl4-td-right">10.00</td>
+                                <td class="bl4-td-right">20.00</td>
                               </tr>
-                              <tr v-show="pos_settings.show_product_discount !== 0" style="border-bottom:1px dashed #eee;">
-                                <td colspan="4" style="color:#888;font-style:italic;font-size:9px;padding:0 0 2px 4px;">Discount / تخفيض: -2.00</td>
-                              </tr>
-                              <tr style="border-bottom:1px dashed #eee;">
-                                <td>Demo Product B</td>
-                                <td style="text-align:center">1</td>
-                                <td style="text-align:center">5.00</td>
-                                <td style="text-align:right">5.00</td>
+                              <tr class="bl4-item-row">
+                                <td><div class="bl4-item-name">Demo Product B</div></td>
+                                <td class="bl4-td-center">1</td>
+                                <td class="bl4-td-right">5.00</td>
+                                <td class="bl4-td-right">5.00</td>
                               </tr>
                             </tbody>
                           </table>
-                          <table style="width:100%;font-size:10px;border-top:1px dashed #000;margin-top:4px;">
-                            <colgroup><col style="width:35%"><col style="width:5%"><col style="width:25%"><col style="width:35%"></colgroup>
+                          <table class="bl4-totals">
+                            <colgroup><col style="width:32%"><col style="width:36%"><col style="width:32%"></colgroup>
                             <tbody>
                               <tr>
-                                <td style="text-align:left" class="total">Sub Total</td>
-                                <td class="total">:</td>
-                                <td style="text-align:center" class="total">25.00</td>
-                                <td style="text-align:right" class="total">المجموع الفرعي</td>
+                                <td class="bl4-t-en">Sub Total</td>
+                                <td class="bl4-t-val">25.00</td>
+                                <td class="bl4-t-ar">المجموع الفرعي</td>
                               </tr>
                               <tr v-show="pos_settings.show_tax">
-                                <td style="text-align:left" class="total">VAT @ Total</td>
-                                <td class="total">:</td>
-                                <td style="text-align:center" class="total">1.25</td>
-                                <td style="text-align:right" class="total">قيمة الضريبة</td>
+                                <td class="bl4-t-en">VAT</td>
+                                <td class="bl4-t-val">1.25</td>
+                                <td class="bl4-t-ar">ضريبة القيمة المضافة</td>
                               </tr>
                               <tr v-show="pos_settings.show_discount">
-                                <td style="text-align:left" class="total">Discount</td>
-                                <td class="total">:</td>
-                                <td style="text-align:center" class="total">0.00</td>
-                                <td style="text-align:right" class="total">تخفيض</td>
+                                <td class="bl4-t-en">Discount</td>
+                                <td class="bl4-t-val">0.00</td>
+                                <td class="bl4-t-ar">الخصم</td>
                               </tr>
                               <tr v-show="pos_settings.show_shipping">
-                                <td style="text-align:left" class="total">Shipping</td>
-                                <td class="total">:</td>
-                                <td style="text-align:center" class="total">1.25</td>
-                                <td style="text-align:right" class="total">الشحن</td>
+                                <td class="bl4-t-en">Shipping</td>
+                                <td class="bl4-t-val">1.25</td>
+                                <td class="bl4-t-ar">الشحن</td>
                               </tr>
                             </tbody>
                           </table>
-                          <table style="width:100%;font-size:10px;font-weight:bold;border-top:1px dashed #000;border-bottom:1px dashed #000;margin-top:4px;padding:4px 0;">
-                            <colgroup><col style="width:35%"><col style="width:5%"><col style="width:25%"><col style="width:35%"></colgroup>
+                          <table class="bl4-grand">
+                            <colgroup><col style="width:32%"><col style="width:36%"><col style="width:32%"></colgroup>
                             <tbody>
                               <tr>
-                                <td style="text-align:left">Grand Total</td>
-                                <td>:</td>
-                                <td style="text-align:center">26.25</td>
-                                <td style="text-align:right">المبلغ الإجمالي</td>
+                                <td class="bl4-t-en">Grand Total</td>
+                                <td class="bl4-t-val">26.25</td>
+                                <td class="bl4-t-ar">المبلغ الإجمالي</td>
                               </tr>
                             </tbody>
                           </table>
-                          <table style="width:100%;font-size:10px;margin-top:4px;">
-                            <colgroup><col style="width:35%"><col style="width:5%"><col style="width:25%"><col style="width:35%"></colgroup>
+                          <table class="bl4-pays">
+                            <colgroup><col style="width:32%"><col style="width:36%"><col style="width:32%"></colgroup>
                             <tbody>
                               <tr v-show="pos_settings.show_paid !== 0">
-                                <td style="text-align:left"><strong>Paid Amount</strong></td>
-                                <td><strong>:</strong></td>
-                                <td style="text-align:center">25.00</td>
-                                <td style="text-align:right"><strong>المبلغ المدفوع</strong></td>
+                                <td class="bl4-t-en">Paid Amount</td>
+                                <td class="bl4-t-val">25.00</td>
+                                <td class="bl4-t-ar">المبلغ المدفوع</td>
                               </tr>
                               <tr v-show="pos_settings.show_due !== 0">
-                                <td style="text-align:left"><strong>Balance</strong></td>
-                                <td><strong>:</strong></td>
-                                <td style="text-align:center">1.25</td>
-                                <td style="text-align:right"><strong>الرصيد</strong></td>
+                                <td class="bl4-t-en">Balance Due</td>
+                                <td class="bl4-t-val">1.25</td>
+                                <td class="bl4-t-ar">المبلغ المتبقي</td>
+                              </tr>
+                              <tr v-show="pos_settings.show_previous_dues !== 0">
+                                <td class="bl4-t-en">Previous Dues</td>
+                                <td class="bl4-t-val">10.00</td>
+                                <td class="bl4-t-ar">المستحقات السابقة</td>
+                              </tr>
+                              <tr v-show="pos_settings.show_net_balance !== 0">
+                                <td class="bl4-t-en">Net Balance</td>
+                                <td class="bl4-t-val">11.25</td>
+                                <td class="bl4-t-ar">الرصيد الصافي</td>
                               </tr>
                             </tbody>
                           </table>
-                          <table style="font-size:10px;width:100%;margin-top:4px;" v-show="pos_settings.show_payments !== 0">
+                          <table class="bl4-payments" v-show="pos_settings.show_payments !== 0">
                             <thead>
-                              <tr style="background:#eee;">
-                                <th style="text-align:left;">Paid By / طريقة الدفع:</th>
-                                <th style="text-align:center;">Amount / المبلغ:</th>
-                                <th style="text-align:right;">Change / الباقي:</th>
+                              <tr>
+                                <th class="bl4-th-left">Paid By<br>طريقة الدفع</th>
+                                <th class="bl4-th-center">Amount<br>المبلغ</th>
+                                <th class="bl4-th-right">Change<br>الباقي</th>
                               </tr>
                             </thead>
                             <tbody>
                               <tr>
-                                <td style="text-align:left;">Cash</td>
-                                <td style="text-align:center;">25.00</td>
-                                <td style="text-align:right;">0.00</td>
+                                <td class="bl4-td-left">Cash</td>
+                                <td class="bl4-td-center">25.00</td>
+                                <td class="bl4-td-right">0.00</td>
                               </tr>
                             </tbody>
                           </table>
-                          <p class="mt-2 mb-0 text-center" v-show="pos_settings.show_note" style="white-space:pre-line;">
-                            <small><strong>{{ pos_settings.note_customer || 'Thank you for your purchase!' }}</strong></small>
-                          </p>
+                          <div class="bl4-footer">
+                            <div class="bl4-thanks">
+                              <div class="bl4-thanks-ar">شكراً لتسوقكم معنا</div>
+                              <div class="bl4-thanks-en">Thank You For Shopping With Us!</div>
+                            </div>
+                            <div v-show="pos_settings.show_note" class="bl4-policy">{{ pos_settings.note_customer || 'Thank you for your purchase!' }}</div>
+                            <div class="bl4-footer-contact">+123 456 789 &middot; demo@example.com</div>
+                          </div>
                           <div class="mt-2 text-center" v-show="pos_settings.show_zatca_qr !== 0">
                             <div class="zatca-qr">
                               <div class="zatca-qr-title">ZATCA</div>
@@ -606,6 +637,14 @@
                               <tr v-show="pos_settings.show_due !== 0">
                                 <td>Due</td>
                                 <td>5.00</td>
+                              </tr>
+                              <tr v-show="pos_settings.show_previous_dues !== 0">
+                                <td>{{ $t('Previous_Dues') }}</td>
+                                <td>10.00</td>
+                              </tr>
+                              <tr v-show="pos_settings.show_net_balance !== 0">
+                                <td>{{ $t('Net_Balance') }}</td>
+                                <td>15.00</td>
                               </tr>
                             </tbody>
                           </table>
@@ -804,6 +843,8 @@ const pos_settings = ref({
   receipt_font_size: null,
   show_paid: '',
   show_due: '',
+  show_previous_dues: '',
+  show_net_balance: '',
   show_payments: '',
   show_zatca_qr: '',
   cash_drawer_auto_open: false,
@@ -832,6 +873,8 @@ const toggles = [
   { field: 'show_note', label: 'Show_Note_to_customer' },
   { field: 'show_paid', label: 'Show_Paid_Line' },
   { field: 'show_due', label: 'Show_Due_Line' },
+  { field: 'show_previous_dues', label: 'Show_Previous_Dues_Line', desc: 'Show_Previous_Dues_Line_Desc' },
+  { field: 'show_net_balance', label: 'Show_Net_Balance_Line', desc: 'Show_Net_Balance_Line_Desc' },
   { field: 'show_payments', label: 'Show_Payments_Table' },
   { field: 'show_zatca_qr', label: 'Show_ZATCA_QR' },
 ];
@@ -914,6 +957,8 @@ async function submit() {
       receipt_paper_size: s.receipt_paper_size,
       show_paid: s.show_paid,
       show_due: s.show_due,
+      show_previous_dues: s.show_previous_dues,
+      show_net_balance: s.show_net_balance,
       show_payments: s.show_payments,
       show_zatca_qr: s.show_zatca_qr,
       receipt_layout: s.receipt_layout,
@@ -936,8 +981,11 @@ function printPosDemo() {
     w.document.write('<link rel="stylesheet" href="/css/pos_print.css">');
     w.document.write(receiptFontHeadTags(pos_settings.value, 'body'));
     w.document.write('</head><body>');
+    // Same wrapper as the real POS print path (PosPage._writePrintWindow):
+    // /css/pos_print.css scopes receipt rules under #invoice-POS.
+    w.document.write('<div id="invoice-POS">');
     w.document.write(el.innerHTML);
-    w.document.write('</body></html>');
+    w.document.write('</div></body></html>');
     w.document.close();
     whenPrintFontsReady(w, () => { try { w.print(); } catch (e) {} });
   } catch (e) { /* preview print errors are non-fatal, like legacy */ }
@@ -1066,6 +1114,194 @@ onMounted(loadSettings);
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
+}
+
+/* Layout 4 specific styles (Bilingual AR+EN) — mirrors /css/pos_print.css
+   so the on-screen demo matches the printed receipt. */
+.receipt-layout-4 {
+  color: #000;
+  font-size: 10px;
+  line-height: 1.45;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, Arial, sans-serif;
+}
+.receipt-layout-4 table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.receipt-layout-4 table td,
+.receipt-layout-4 table th {
+  font-size: 10px;
+  padding: 2px;
+  line-height: 1.4;
+  vertical-align: top;
+}
+.receipt-layout-4 .bl4-th-left,
+.receipt-layout-4 .bl4-td-left   { text-align: left; }
+.receipt-layout-4 .bl4-th-center,
+.receipt-layout-4 .bl4-td-center { text-align: center; }
+.receipt-layout-4 .bl4-th-right,
+.receipt-layout-4 .bl4-td-right  { text-align: right; }
+.receipt-layout-4 .bl4-td-right,
+.receipt-layout-4 .bl4-t-val     { white-space: nowrap; }
+.receipt-layout-4 .bl4-company-ar {
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.3;
+}
+.receipt-layout-4 .bl4-company-en {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+}
+.receipt-layout-4 .bl4-contact {
+  font-size: 10px;
+  color: #333;
+  line-height: 1.45;
+}
+.receipt-layout-4 .bl4-trn {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid #000;
+  padding: 2px 10px;
+  margin-top: 5px;
+}
+.receipt-layout-4 .bl4-title {
+  border-top: 2px solid #000;
+  border-bottom: 2px solid #000;
+  padding: 5px 0;
+  margin: 8px 0 6px;
+  text-align: center;
+}
+.receipt-layout-4 .bl4-title-ar {
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.4;
+}
+.receipt-layout-4 .bl4-title-en {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+}
+.receipt-layout-4 .bl4-meta {
+  font-size: 10px;
+  margin-bottom: 2px;
+}
+.receipt-layout-4 .bl4-meta-row {
+  display: flex;
+  align-items: baseline;
+  padding: 1px 0;
+}
+.receipt-layout-4 .bl4-meta-en {
+  flex: 0 0 27%;
+  text-align: left;
+  color: #444;
+}
+.receipt-layout-4 .bl4-meta-val {
+  flex: 1 1 auto;
+  text-align: center;
+  font-weight: 600;
+  word-break: break-word;
+}
+.receipt-layout-4 .bl4-meta-ar {
+  flex: 0 0 27%;
+  text-align: right;
+  color: #444;
+  direction: rtl;
+}
+.receipt-layout-4 .bl4-items {
+  margin-top: 6px;
+}
+.receipt-layout-4 .bl4-items thead th {
+  font-weight: 700;
+  border-top: 2px solid #000;
+  border-bottom: 1px solid #000;
+  padding: 3px 2px;
+  line-height: 1.3;
+}
+.receipt-layout-4 .bl4-item-row td {
+  padding: 3px 2px;
+  border-bottom: 1px dashed #bbb;
+}
+.receipt-layout-4 .bl4-item-name {
+  font-weight: 600;
+}
+.receipt-layout-4 .bl4-item-sub {
+  font-size: 9px;
+  color: #444;
+  line-height: 1.35;
+}
+.receipt-layout-4 .bl4-totals {
+  margin-top: 2px;
+}
+.receipt-layout-4 .bl4-t-en {
+  text-align: left;
+  color: #333;
+}
+.receipt-layout-4 .bl4-t-val {
+  text-align: center;
+  font-weight: 600;
+}
+.receipt-layout-4 .bl4-t-ar {
+  text-align: right;
+  color: #333;
+  direction: rtl;
+}
+.receipt-layout-4 .bl4-grand {
+  margin-top: 4px;
+  border-top: 2px solid #000;
+  border-bottom: 2px solid #000;
+}
+.receipt-layout-4 .bl4-grand td {
+  font-size: 12px;
+  font-weight: 800;
+  color: #000;
+  padding: 4px 2px;
+}
+.receipt-layout-4 .bl4-pays {
+  margin-top: 4px;
+}
+.receipt-layout-4 .bl4-pays td {
+  font-weight: 600;
+}
+.receipt-layout-4 .bl4-payments {
+  margin-top: 8px;
+}
+.receipt-layout-4 .bl4-payments thead th {
+  font-weight: 700;
+  border-top: 1px solid #000;
+  border-bottom: 1px solid #000;
+  padding: 3px 2px;
+  line-height: 1.3;
+}
+.receipt-layout-4 .bl4-footer {
+  margin-top: 8px;
+  text-align: center;
+}
+.receipt-layout-4 .bl4-thanks {
+  border-top: 1px solid #000;
+  padding-top: 6px;
+}
+.receipt-layout-4 .bl4-thanks-ar {
+  font-size: 12px;
+  font-weight: 700;
+}
+.receipt-layout-4 .bl4-thanks-en {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+}
+.receipt-layout-4 .bl4-policy {
+  font-size: 9px;
+  color: #333;
+  margin-top: 3px;
+  line-height: 1.5;
+  white-space: pre-line;
+}
+.receipt-layout-4 .bl4-footer-contact {
+  font-size: 9px;
+  color: #333;
+  margin-top: 4px;
 }
 
 /* Layout 5 specific styles (Minimal) */

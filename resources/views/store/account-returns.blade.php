@@ -4,7 +4,9 @@
 @php
   use App\Models\StoreSetting;
   $s = $s ?? StoreSetting::first();
-  $currency = $s->currency_code ?? '$';
+  // Multi-Currency: refund amounts from the API are base-currency and the
+  // list may span orders placed in different currencies — render in base.
+  $currency = \App\Services\StoreCurrencyService::base()['symbol'];
 @endphp
 
 <section class="border-b border-line-subtle"
@@ -66,7 +68,8 @@
 
 <script>
 (function(){
-  const cur = document.querySelector('meta[name="currency"]')?.content || '{{ $currency }}';
+  // Base symbol, NOT the session display currency — the amounts are base.
+  const cur = @json($currency);
   const PRICE_DECIMALS = parseInt(document.querySelector('meta[name="price-decimals"]')?.content, 10) || 2;
   const loading = document.getElementById('ret-loading');
   const empty   = document.getElementById('ret-empty');
@@ -80,7 +83,7 @@
     rejected:  @json(__('messages.ReturnStatusRejected')),
     refunded:  @json(__('messages.ReturnStatusRefunded')),
   };
-  const orderBase = '{{ url('/online_store/account/orders') }}';
+  const orderBase = '{{ url('/'.store_path_to('account/orders')) }}';
 
   function money(n){ return cur + Number(n||0).toLocaleString('en-US', { minimumFractionDigits: PRICE_DECIMALS, maximumFractionDigits: PRICE_DECIMALS }); }
   function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }

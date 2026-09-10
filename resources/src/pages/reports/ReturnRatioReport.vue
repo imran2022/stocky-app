@@ -1,6 +1,11 @@
 <template>
   <div class="page">
-    <PageHeader :title="$t('Return_Ratio_Report')" :breadcrumb="[$t('Reports'), $t('Return_Ratio_Report')]" />
+    <PageHeader :title="$t('Return_Ratio_Report')" :breadcrumb="[$t('Reports'), $t('Return_Ratio_Report')]">
+      <template #actions>
+        <!-- Multi-Currency: view amounts converted (display-only) -->
+        <ViewCurrencySelect />
+      </template>
+    </PageHeader>
 
     <a-card size="small" style="margin-bottom: 16px">
       <a-space wrap :size="12">
@@ -66,6 +71,7 @@ import PageHeader from '../../components/PageHeader.vue';
 import { useFormat } from '../../composables/useFormat';
 import http from '../../lib/http';
 import DateRangePicker from '../../components/DateRangePicker.vue';
+import ViewCurrencySelect from '../../components/ViewCurrencySelect.vue';
 
 const { t } = useI18n();
 const { money } = useFormat();

@@ -1,9 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router';
 
 /**
- * Vue 3 port of the legacy portal/router.js (vue-router 3 -> 4).
- * Same routes, same /portal base, same guest/auth structure. The dynamic
- * imports are inlined by the standalone Vite build (single bundle).
+ * Portal routes (base /portal). Guest pages render the portal "gate" screen;
+ * everything else sits inside AuthGate → PortalLayout (the portal shell).
  */
 const router = createRouter({
   history: createWebHistory('/portal'),
@@ -41,8 +40,9 @@ const router = createRouter({
       ],
     },
   ],
+  scrollBehavior(to, from, saved) {
+    return saved || { top: 0 };
+  },
 });
-
-router.beforeEach((to, from, next) => { next(); });
 
 export default router;

@@ -23,9 +23,17 @@ export const useMenuStore = defineStore('menu', {
                     arranged = MENU;
                 }
             }
-            // Drop top-level groups whose module the admin switched off
-            // (Settings → Modules). Recomputes live when the toggles save.
-            return arranged.filter(entry => auth.moduleEnabled(entry.key));
+            // Drop entries whose module the admin switched off (Settings →
+            // Modules). Applied at every level: connector entries (WooCommerce,
+            // Shopify, Salla…) live nested under the Ecommerce Platforms /
+            // Integrations sections but keep a `key` matching config/modules.js.
+            // Entries without a key are never toggleable and always pass.
+            const dropDisabled = entries => entries
+                .filter(entry => auth.moduleEnabled(entry.key))
+                .map(entry => (entry.children
+                    ? { ...entry, children: dropDisabled(entry.children) }
+                    : entry));
+            return dropDisabled(arranged);
         },
     },
 });

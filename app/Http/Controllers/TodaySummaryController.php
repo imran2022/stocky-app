@@ -13,8 +13,13 @@ class TodaySummaryController extends Controller
 {
     /**
      * Everything the topbar "Today's summary" drawer shows, in one call.
-     * Numbers respect the user's warehouse restriction where a warehouse_id
-     * exists on the row (sales, purchases, returns, stock).
+     *
+     * Two restrictions are applied everywhere the underlying row supports them:
+     *  - warehouse: users without `is_all_warehouses` only see the warehouses
+     *    assigned to them (sales, purchases, returns, payments, expenses, stock);
+     *  - records: users without the `record_view` permission only see the rows
+     *    they own (user_id), exactly like the list pages and reports do.
+     * Rows with no such column (stock levels, new customers) stay global.
      */
     public function index(Request $request)
     {
@@ -33,18 +38,30 @@ class TodaySummaryController extends Controller
             return $q;
         };
 
+        // Same record_view resolution as the rest of the app (user flag first,
+        // role permission as the backward-compatible fallback).
+        $viewRecords = $user ? $user->hasRecordView() : false;
+        $userId = $user ? $user->id : 0;
+        $own = function ($q, $col = 'user_id') use ($viewRecords, $userId) {
+            if (! $viewRecords) {
+                $q->where($col, $userId);
+            }
+
+            return $q;
+        };
+
         /* ------------------------------------------------------------ sales */
-        $s = $wh(DB::table('sales')->whereNull('deleted_at')->whereDate('date', $today))
+        $s = $own($wh(DB::table('sales')->whereNull('deleted_at')->whereDate('date', $today)))
             ->selectRaw('COUNT(*) c, COALESCE(SUM(GrandTotal),0) net, COALESCE(SUM(TaxNet),0) tax,
                          COALESCE(SUM(discount),0) disc, COALESCE(SUM(shipping),0) ship')
             ->first();
-        $itemsSold = (float) $wh(
+        $itemsSold = (float) $own($wh(
             DB::table('sale_details')
                 ->join('sales', 'sales.id', '=', 'sale_details.sale_id')
                 ->whereNull('sales.deleted_at')->whereDate('sales.date', $today),
             'sales.warehouse_id'
-        )->sum('sale_details.quantity');
-        $saleReturns = (float) $wh(DB::table('sale_returns')->whereNull('deleted_at')->whereDate('date', $today))
+        ), 'sales.user_id')->sum('sale_details.quantity');
+        $saleReturns = (float) $own($wh(DB::table('sale_returns')->whereNull('deleted_at')->whereDate('date', $today)))
             ->sum('GrandTotal');
 
         $taxableSales = max(0, $s->net - $s->tax - $s->ship);
@@ -61,17 +78,17 @@ class TodaySummaryController extends Controller
         ];
 
         /* -------------------------------------------------------- purchases */
-        $p = $wh(DB::table('purchases')->whereNull('deleted_at')->whereDate('date', $today))
+        $p = $own($wh(DB::table('purchases')->whereNull('deleted_at')->whereDate('date', $today)))
             ->selectRaw('COUNT(*) c, COALESCE(SUM(GrandTotal),0) net, COALESCE(SUM(TaxNet),0) tax,
                          COALESCE(SUM(discount),0) disc, COALESCE(SUM(shipping),0) ship')
             ->first();
-        $itemsPurchased = (float) $wh(
+        $itemsPurchased = (float) $own($wh(
             DB::table('purchase_details')
                 ->join('purchases', 'purchases.id', '=', 'purchase_details.purchase_id')
                 ->whereNull('purchases.deleted_at')->whereDate('purchases.date', $today),
             'purchases.warehouse_id'
-        )->sum('purchase_details.quantity');
-        $purchaseReturns = (float) $wh(DB::table('purchase_returns')->whereNull('deleted_at')->whereDate('date', $today))
+        ), 'purchases.user_id')->sum('purchase_details.quantity');
+        $purchaseReturns = (float) $own($wh(DB::table('purchase_returns')->whereNull('deleted_at')->whereDate('date', $today)))
             ->sum('GrandTotal');
 
         $taxablePurch = max(0, $p->net - $p->tax - $p->ship);
@@ -126,27 +143,45 @@ class TodaySummaryController extends Controller
         ];
 
         /* --------------------------------------------------------- payments */
-        $received = DB::table('payment_sales')
-            ->join('payment_methods', 'payment_methods.id', '=', 'payment_sales.payment_method_id')
-            ->whereNull('payment_sales.deleted_at')
-            ->whereDate('payment_sales.date', $today)
+        // Payments carry no warehouse of their own, so the parent sale/purchase
+        // is joined to apply the warehouse restriction (and to skip payments
+        // left behind by a deleted document).
+        $received = $own($wh(
+            DB::table('payment_sales')
+                ->join('payment_methods', 'payment_methods.id', '=', 'payment_sales.payment_method_id')
+                ->join('sales', 'sales.id', '=', 'payment_sales.sale_id')
+                ->whereNull('payment_sales.deleted_at')
+                ->whereNull('sales.deleted_at')
+                ->whereDate('payment_sales.date', $today),
+            'sales.warehouse_id'
+        ), 'payment_sales.user_id')
             ->groupBy('payment_methods.name')
             ->selectRaw('payment_methods.name, COALESCE(SUM(payment_sales.montant),0) amount')
             ->pluck('amount', 'name');
-        $given = DB::table('payment_purchases')
-            ->join('payment_methods', 'payment_methods.id', '=', 'payment_purchases.payment_method_id')
-            ->whereNull('payment_purchases.deleted_at')
-            ->whereDate('payment_purchases.date', $today)
+        $given = $own($wh(
+            DB::table('payment_purchases')
+                ->join('payment_methods', 'payment_methods.id', '=', 'payment_purchases.payment_method_id')
+                ->join('purchases', 'purchases.id', '=', 'payment_purchases.purchase_id')
+                ->whereNull('payment_purchases.deleted_at')
+                ->whereNull('purchases.deleted_at')
+                ->whereDate('payment_purchases.date', $today),
+            'purchases.warehouse_id'
+        ), 'payment_purchases.user_id')
             ->groupBy('payment_methods.name')
             ->selectRaw('payment_methods.name, COALESCE(SUM(payment_purchases.montant),0) amount')
             ->pluck('amount', 'name');
 
         // Opening-balance settlements are cash movements too: client side counts as
         // received, supplier side as given.
-        $openingReceived = DB::table('client_opening_balance_payments')
-            ->join('payment_methods', 'payment_methods.id', '=', 'client_opening_balance_payments.payment_method_id')
-            ->whereNull('client_opening_balance_payments.deleted_at')
-            ->whereDate('client_opening_balance_payments.date', $today)
+        // Opening-balance settlements have no warehouse column; only the record
+        // restriction can apply to them.
+        $openingReceived = $own(
+            DB::table('client_opening_balance_payments')
+                ->join('payment_methods', 'payment_methods.id', '=', 'client_opening_balance_payments.payment_method_id')
+                ->whereNull('client_opening_balance_payments.deleted_at')
+                ->whereDate('client_opening_balance_payments.date', $today),
+            'client_opening_balance_payments.user_id'
+        )
             ->groupBy('payment_methods.name')
             ->selectRaw('payment_methods.name, COALESCE(SUM(client_opening_balance_payments.montant),0) amount')
             ->pluck('amount', 'name');
@@ -154,10 +189,13 @@ class TodaySummaryController extends Controller
             $received[$name] = (float) ($received[$name] ?? 0) + (float) $amount;
         }
 
-        $openingGiven = DB::table('provider_opening_balance_payments')
-            ->join('payment_methods', 'payment_methods.id', '=', 'provider_opening_balance_payments.payment_method_id')
-            ->whereNull('provider_opening_balance_payments.deleted_at')
-            ->whereDate('provider_opening_balance_payments.date', $today)
+        $openingGiven = $own(
+            DB::table('provider_opening_balance_payments')
+                ->join('payment_methods', 'payment_methods.id', '=', 'provider_opening_balance_payments.payment_method_id')
+                ->whereNull('provider_opening_balance_payments.deleted_at')
+                ->whereDate('provider_opening_balance_payments.date', $today),
+            'provider_opening_balance_payments.user_id'
+        )
             ->groupBy('payment_methods.name')
             ->selectRaw('payment_methods.name, COALESCE(SUM(provider_opening_balance_payments.montant),0) amount')
             ->pluck('amount', 'name');
@@ -175,17 +213,20 @@ class TodaySummaryController extends Controller
         ];
 
         /* ----------------------------------------------------------- profit */
-        $cogs = (float) $wh(
+        $cogs = (float) $own($wh(
             DB::table('sale_details')
                 ->join('sales', 'sales.id', '=', 'sale_details.sale_id')
                 ->leftJoin('product_variants', 'product_variants.id', '=', 'sale_details.product_variant_id')
                 ->leftJoin('products', 'products.id', '=', 'sale_details.product_id')
                 ->whereNull('sales.deleted_at')->whereDate('sales.date', $today),
             'sales.warehouse_id'
-        )->selectRaw('COALESCE(SUM(sale_details.quantity * COALESCE(product_variants.cost, products.cost, 0)),0) v')
+        ), 'sales.user_id')
+            ->selectRaw('COALESCE(SUM(sale_details.quantity * COALESCE(product_variants.cost, products.cost, 0)),0) v')
             ->value('v');
 
-        $expenses = (float) DB::table('expenses')->whereNull('deleted_at')->whereDate('date', $today)->sum('amount');
+        $expenses = (float) $own($wh(
+            DB::table('expenses')->whereNull('deleted_at')->whereDate('date', $today)
+        ))->sum('amount');
 
         $grossProfit = $taxableSales - $cogs;
         $netProfit = $grossProfit - $expenses;
@@ -201,6 +242,8 @@ class TodaySummaryController extends Controller
         ];
 
         /* ------------------------------------------------------------ tiles */
+        // Clients carry neither a warehouse nor an owner column, so this tile
+        // stays global for every user.
         $newCustomers = (int) DB::table('clients')->whereNull('deleted_at')->whereDate('created_at', $today)->count();
 
         $lowStock = (int) $wh(
@@ -215,13 +258,15 @@ class TodaySummaryController extends Controller
 
         $onShift = 0;
         if (Schema::hasTable('attendances')) {
-            $onShift = (int) DB::table('attendances')
-                ->whereNull('deleted_at')
-                ->whereDate('date', $today)
-                ->where(function ($q) {
-                    $q->whereNull('clock_out')->orWhere('clock_out', '');
-                })
-                ->count();
+            // Same record restriction the attendance report applies.
+            $onShift = (int) $own(
+                DB::table('attendances')
+                    ->whereNull('deleted_at')
+                    ->whereDate('date', $today)
+                    ->where(function ($q) {
+                        $q->whereNull('clock_out')->orWhere('clock_out', '');
+                    })
+            )->count();
         }
 
         return response()->json([

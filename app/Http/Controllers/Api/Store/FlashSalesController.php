@@ -24,6 +24,7 @@ class FlashSalesController extends Controller
         $sales = $query->get()->map(fn (FlashSale $f) => [
             'id' => $f->id,
             'name' => $f->name,
+            'name_translations' => (object) ($f->name_translations ?? []),
             'is_active' => (bool) $f->is_active,
             'starts_at' => optional($f->starts_at)->toDateTimeString(),
             'ends_at' => optional($f->ends_at)->toDateTimeString(),
@@ -32,7 +33,10 @@ class FlashSalesController extends Controller
             'is_running' => $f->isRunning(),
         ]);
 
-        return response()->json(['flash_sales' => $sales]);
+        return response()->json([
+            'flash_sales' => $sales,
+            'locales' => store_locales(),
+        ]);
     }
 
     public function show(Request $request, $id)
@@ -44,6 +48,8 @@ class FlashSalesController extends Controller
         return response()->json([
             'id' => $sale->id,
             'name' => $sale->name,
+            'name_translations' => (object) ($sale->name_translations ?? []),
+            'locales' => store_locales(),
             'is_active' => (bool) $sale->is_active,
             'starts_at' => optional($sale->starts_at)->toDateTimeString(),
             'ends_at' => optional($sale->ends_at)->toDateTimeString(),
@@ -69,6 +75,7 @@ class FlashSalesController extends Controller
         $sale = DB::transaction(function () use ($data) {
             $sale = FlashSale::create([
                 'name' => $data['name'],
+                'name_translations' => $data['name_translations'] ?? null,
                 'is_active' => $data['is_active'] ?? true,
                 'starts_at' => $data['starts_at'] ?? null,
                 'ends_at' => $data['ends_at'] ?? null,
@@ -92,6 +99,7 @@ class FlashSalesController extends Controller
         DB::transaction(function () use ($sale, $data) {
             $sale->update([
                 'name' => $data['name'],
+                'name_translations' => $data['name_translations'] ?? null,
                 'is_active' => $data['is_active'] ?? true,
                 'starts_at' => $data['starts_at'] ?? null,
                 'ends_at' => $data['ends_at'] ?? null,
@@ -131,8 +139,10 @@ class FlashSalesController extends Controller
 
     private function validateData(Request $request): array
     {
-        return $request->validate([
+        $data = $request->validate([
             'name' => ['required', 'string', 'max:150'],
+            'name_translations' => ['nullable', 'array'],
+            'name_translations.*' => ['nullable', 'string', 'max:150'],
             'is_active' => ['nullable', 'boolean'],
             'starts_at' => ['nullable', 'date'],
             'ends_at' => ['nullable', 'date', 'after_or_equal:starts_at'],
@@ -142,6 +152,18 @@ class FlashSalesController extends Controller
             'products.*.discount_type' => ['required', 'in:percent,fixed'],
             'products.*.discount_value' => ['required', 'numeric', 'min:0'],
         ]);
+
+        // Keep only locales the storefront can render, and drop blanks so the
+        // model falls back to `name` for those languages.
+        $translations = [];
+        foreach ($data['name_translations'] ?? [] as $locale => $value) {
+            if (isset(store_locales()[$locale]) && trim((string) $value) !== '') {
+                $translations[$locale] = trim((string) $value);
+            }
+        }
+        $data['name_translations'] = $translations ?: null;
+
+        return $data;
     }
 
     private function syncProducts(FlashSale $sale, array $products): void

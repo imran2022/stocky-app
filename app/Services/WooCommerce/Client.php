@@ -14,7 +14,7 @@ class Client
         $baseUrl = rtrim($baseUrl, '/');
 
         // Optional override for tunneling / local proxy
-        $override = env('WOO_API_BASE_URL');
+        $override = SyncOptions::str('api_base_url');
         if (is_string($override) && $override !== '') {
             $this->baseUrl = rtrim($override, '/');
             $host = parse_url($baseUrl, PHP_URL_HOST);
@@ -267,9 +267,9 @@ class Client
 
     private function execWithRetries(string $method, string $url, ?array $data, int $timeoutSeconds, int $connectTimeoutSeconds)
     {
-        $maxRetries = (int) env('WOO_HTTP_RETRIES', 2);
+        $maxRetries = SyncOptions::int('http_retries', 2);
         $maxRetries = max(0, min(10, $maxRetries));
-        $baseSleepMs = (int) env('WOO_HTTP_RETRY_BASE_MS', 300);
+        $baseSleepMs = SyncOptions::int('http_retry_base_ms', 300);
         $baseSleepMs = max(0, min(10000, $baseSleepMs));
 
         $attempt = 0;

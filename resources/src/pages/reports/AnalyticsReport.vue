@@ -3,6 +3,8 @@
     <PageHeader :title="$t('Analytics_Report')" :breadcrumb="[$t('Reports'), $t('Analytics_Report')]">
       <template #actions>
         <a-space>
+          <!-- Multi-Currency: view amounts converted (display-only) -->
+          <ViewCurrencySelect />
           <a-button :loading="loading" @click="load">
             <template #icon><ReloadOutlined /></template>
             {{ $t('Refresh') }}
@@ -118,6 +120,7 @@ import PageHeader from '../../components/PageHeader.vue';
 import { useFormat } from '../../composables/useFormat';
 import http from '../../lib/http';
 import DateRangePicker from '../../components/DateRangePicker.vue';
+import ViewCurrencySelect from '../../components/ViewCurrencySelect.vue';
 
 const { t } = useI18n();
 const { money } = useFormat();

@@ -2,14 +2,17 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Brand;
 use App\Models\Category;
 use App\Models\Collection;
 use App\Models\FlashSale;
 use App\Models\Product;
+use App\Models\ProductReview;
 use App\Models\StoreBanner;
 use App\Models\StorePage;
 use App\Models\StoreSetting;
 use App\Services\FlashSaleService;
+use App\Services\WholesalePricingService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Schema;
 use DB;
@@ -29,6 +32,15 @@ class StoreFrontController extends Controller
         // the default eCommerce storefront untouched.
         if (($s->theme ?? 'default') === 'real_estate') {
             return app(RealEstateStoreController::class)->home($request);
+        }
+        if (($s->theme ?? 'default') === 'electronics') {
+            return app(ElectronicsStoreController::class)->home($request);
+        }
+        if (($s->theme ?? 'default') === 'toys') {
+            return app(ToysStoreController::class)->home($request);
+        }
+        if (($s->theme ?? 'default') === 'grocery') {
+            return app(GroceryStoreController::class)->home($request);
         }
 
         // 1) Load lineup (already cast to array by StoreSetting::$casts)
@@ -110,8 +122,8 @@ class StoreFrontController extends Controller
             if ($type === 'hero') {
                 $blocks[] = [
                     'type' => 'hero',
-                    'title' => $s->hero_title ?? null,
-                    'subtitle' => $s->hero_subtitle ?? null,
+                    'title' => $s->localizedText('hero_title') ?? null,
+                    'subtitle' => $s->localizedText('hero_subtitle') ?? null,
                     'image' => $s->hero_image_path ?? null,
                     'cfg' => ['index' => $i],
                 ];
@@ -266,7 +278,7 @@ class StoreFrontController extends Controller
             $sale = FlashSale::running()->orderBy('sort_order')->orderBy('ends_at')->first();
             $flashBlock = [
                 'type' => 'flash_sale',
-                'title' => $sale->name ?? __('messages.FlashSale'),
+                'title' => $sale?->localizedName() ?: __('messages.FlashSale'),
                 'ends_at' => optional($sale->ends_at)->toIso8601String(),
                 'products' => $flashProducts,
                 'cfg' => ['layout' => 'grid'],
@@ -289,15 +301,141 @@ class StoreFrontController extends Controller
 
         $categories = Category::with('subcategories')->orderBy('name')->get();
 
+        // Automatic sections (default theme): category photo tiles, product
+        // grids, promos, reviews and brands — filled from live data so the
+        // homepage is never empty, even with a bare lineup.
+        $auto = $this->buildAutoSections($s, $blocks, $categories, $defaultTaxRate);
+
         $viewData = [
             's' => $s,
             'blocks' => $blocks,
             'categories' => $categories,
             'banners' => $banners,
+            'auto' => $auto,
             'showCategoryBar' => true,
         ];
 
         return view('store.index', $viewData);
+    }
+
+    /**
+     * Default theme homepage: data for the automatic sections.
+     */
+    protected function buildAutoSections(StoreSetting $s, array $blocks, $categories, float $defaultTaxRate): array
+    {
+        $visible = Product::query()->where('is_active', 1)->where('hide_from_online_store', 0);
+        $counts = (clone $visible)->select('category_id', DB::raw('COUNT(*) AS c'))->groupBy('category_id')->pluck('c', 'category_id');
+
+        $tiles = $categories->map(function ($c) use ($counts) {
+            $img = Product::query()->where('category_id', $c->id)->where('is_active', 1)->where('hide_from_online_store', 0)
+                ->whereNotNull('image')->where('image', '!=', '')->where('image', '!=', 'no-image.png')
+                ->orderByDesc('is_featured')->orderByDesc('created_at')->value('image');
+
+            return [
+                'id' => $c->id, 'name' => $c->name, 'count' => (int) ($counts[$c->id] ?? 0),
+                'image_url' => $img ? product_image_url($img) : null,
+                'url' => route('store.shop', ['category' => $c->id]),
+            ];
+        })->filter(fn ($t) => $t['count'] > 0)->sortByDesc('count')->take(12)->values();
+
+        $blockTypes = collect($blocks)->pluck('type')->all();
+        $seen = collect($blocks)->flatMap(fn ($b) => isset($b['products']) ? collect($b['products'])->pluck('id') : collect())->all();
+
+        $newArrivals = $this->hydrate(
+            $this->baseQuery()->when($seen, fn ($q) => $q->whereNotIn('products.id', $seen))->orderByDesc('products.created_at')->orderByDesc('products.id'),
+            $s, $defaultTaxRate, 8
+        );
+
+        $bestSellers = collect();
+        if (! in_array('best_sellers', $blockTypes, true)) {
+            [$minVariantSub, $baseExpr, $afterDiscountExpr, $finalExpr] = $this->priceSqlParts();
+            $bestSellers = $this->buildBestSellerProducts($s, $baseExpr, $afterDiscountExpr, $finalExpr, $minVariantSub, $defaultTaxRate, 8);
+            if ($bestSellers->count() < 4) {
+                $have = array_merge($bestSellers->pluck('id')->all(), $newArrivals->pluck('id')->all(), $seen);
+                $more = $this->hydrate(
+                    $this->baseQuery()->when($have, fn ($q) => $q->whereNotIn('products.id', $have))->orderByDesc('products.is_featured')->orderByDesc('products.price'),
+                    $s, $defaultTaxRate, 8 - $bestSellers->count()
+                );
+                $bestSellers = $bestSellers->concat($more)->values();
+            }
+            $this->attachRatings($bestSellers);
+        }
+
+        $flashIds = array_keys(app(FlashSaleService::class)->runningRules());
+        $onSale = $this->hydrate(
+            $this->baseQuery()->where(function ($q) use ($flashIds) {
+                $q->where('products.discount', '>', 0);
+                if ($flashIds) {
+                    $q->orWhereIn('products.id', $flashIds);
+                }
+            })->orderByDesc('products.discount')->orderByDesc('products.created_at'),
+            $s, $defaultTaxRate, 8
+        );
+
+        // Promo tiles: the two biggest categories, using their newest product photo.
+        $promos = $tiles->filter(fn ($t) => $t['image_url'])->take(2)->values()->map(fn ($t, $i) => [
+            'kicker' => $i === 0 ? __('messages.Handpicked') : __('messages.JustListed'),
+            'title' => $t['name'],
+            'subtitle' => trans_choice('messages.products', $t['count'], ['count' => $t['count']]),
+            'image' => $t['image_url'],
+            'url' => $t['url'],
+        ]);
+
+        $testimonials = Schema::hasTable('product_reviews')
+            ? ProductReview::query()->with('product:id,name')->where('status', 'approved')->where('rating', '>=', 4)
+                ->whereNotNull('comment')->where('comment', '!=', '')->orderByDesc('created_at')->take(3)->get()
+            : collect();
+
+        $brandIds = (clone $visible)->whereNotNull('brand_id')->distinct()->pluck('brand_id');
+        $brands = $brandIds->count() >= 3 ? Brand::whereIn('id', $brandIds)->orderBy('name')->take(12)->get() : collect();
+
+        $trust = [
+            ['icon' => 'truck', 'title' => __('messages.FastShipping'), 'subtitle' => __('messages.TrustShippingText')],
+            ['icon' => 'shield-check', 'title' => __('messages.SecurePayment'), 'subtitle' => __('messages.TrustPaymentText')],
+            ['icon' => 'refresh', 'title' => __('messages.ReturnsRefunds'), 'subtitle' => __('messages.TrustReturnsText')],
+            ['icon' => 'message', 'title' => __('messages.Support'), 'subtitle' => __('messages.TrustSupportText')],
+        ];
+
+        $stats = [
+            'products' => (clone $visible)->count(),
+            'rating' => Schema::hasTable('product_reviews') ? round((float) (ProductReview::where('status', 'approved')->avg('rating') ?: 0), 1) : 0,
+            'reviews' => Schema::hasTable('product_reviews') ? ProductReview::where('status', 'approved')->count() : 0,
+        ];
+
+        return compact('tiles', 'newArrivals', 'bestSellers', 'onSale', 'promos', 'testimonials', 'brands', 'trust', 'stats')
+            + ['best_sellers' => $bestSellers, 'new_arrivals' => $newArrivals, 'on_sale' => $onSale];
+    }
+
+    /**
+     * The price SQL fragments the homepage/shop pipelines share, so theme
+     * controllers can hydrate product lists with identical pricing rules.
+     *
+     * @return array{0: \Illuminate\Database\Query\Builder, 1: string, 2: string, 3: string}
+     */
+    protected function priceSqlParts(): array
+    {
+        $minVariantSub = DB::table('product_variants')
+            ->select('product_id', DB::raw('MIN(price) AS min_variant_price'))
+            ->groupBy('product_id');
+
+        $baseExpr = 'COALESCE(pvmin.min_variant_price, products.price)';
+        $discValExpr = 'IFNULL(products.discount, 0)';
+        $afterDiscountExpr = "GREATEST(0,
+            CASE
+                WHEN products.discount_method = '1' THEN $baseExpr - ($baseExpr * ($discValExpr/100))
+                WHEN products.discount_method = '2' THEN $baseExpr - LEAST($discValExpr, $baseExpr)
+                ELSE $baseExpr
+            END
+        )";
+        $taxRateExpr = 'COALESCE(products.TaxNet, 0)';
+        $finalExpr = "ROUND(
+            CASE
+                WHEN products.tax_method = '2' THEN $afterDiscountExpr
+                ELSE $afterDiscountExpr * (1 + ($taxRateExpr/100))
+            END, 2
+        )";
+
+        return [$minVariantSub, $baseExpr, $afterDiscountExpr, $finalExpr];
     }
 
     /**
@@ -454,10 +592,12 @@ class StoreFrontController extends Controller
         }
         $this->attachStockToProducts($products, $s->activeWarehouseIds());
 
+        $this->attachRatings($products->getCollection());
+
         $seo = [
             'title' => $q !== '' ? $q : __('messages.Shop'),
-            'description' => $s->seo_meta_description ?: (($s->store_name ?? '').' — '.__('messages.Shop')),
-            'canonical' => $s->storeUrl('online_store/shop'),
+            'description' => $s->localizedText('seo_meta_description') ?: (($s->store_name ?? '').' — '.__('messages.Shop')),
+            'canonical' => $s->storeUrl(store_path_to('shop')),
         ];
 
         return view('store.shop', [
@@ -505,9 +645,9 @@ class StoreFrontController extends Controller
             abort(404);
         }
 
-        $metaDesc = trim((string) ($page->seo_description ?: \Illuminate\Support\Str::limit(strip_tags((string) $page->content), 160)));
+        $metaDesc = trim((string) ($page->localized('seo_description') ?: \Illuminate\Support\Str::limit(strip_tags((string) $page->localized('content')), 160)));
         $seo = [
-            'title' => $page->seo_title ?: $page->title,
+            'title' => $page->localized('seo_title') ?: $page->localized('title'),
             'description' => $metaDesc,
             'canonical' => $s->canonicalForAppUrl(route('store.page', $page->slug)),
         ];
@@ -611,11 +751,13 @@ class StoreFrontController extends Controller
         // ===== SEO: canonical, Open Graph, Product JSON-LD =====
         $canonical = $s->canonicalForAppUrl(route('store.product.show', $product->id));
         $imageUrls = collect($product->productGalleryFilenames())
-            ->map(fn ($f) => $f ? asset('images/products/'.$f) : null)
+            ->map(fn ($f) => product_image_url_or_null($f))
             ->filter()->values()->all();
         $metaDesc = trim(\Illuminate\Support\Str::limit(strip_tags((string) $product->note), 160))
             ?: ($product->name.' — '.($s->store_name ?? ''));
-        $currencyIso = optional(optional(\App\Models\Setting::first())->Currency)->name;
+        // schema.org wants the ISO code (e.g. "USD"), not the display name.
+        // Price stays in the base currency, matching the code we advertise.
+        $currencyIso = strtoupper((string) optional(optional(\App\Models\Setting::first())->Currency)->code) ?: null;
         $inStock = $this->productHasStock($product);
 
         $offer = [
@@ -658,6 +800,7 @@ class StoreFrontController extends Controller
         return view('store.product', [
             's' => $s,
             'product' => $product,
+            'wholesaleTiers' => $this->wholesaleTierDisplay($product, $defaultTaxRate),
             'related' => $related,
             'reviewStats' => $reviewStats,
             'inWishlist' => $inWishlist,
@@ -666,6 +809,89 @@ class StoreFrontController extends Controller
             'seo' => $seo,
             'fitmentInfo' => $fitmentInfo,
         ]);
+    }
+
+    /**
+     * Wholesale Pricing by Quantity: a product's quantity breaks converted to
+     * storefront display prices — i.e. the tier price REPLACES the retail base
+     * (and any product discount, exactly like a flash-sale price does) and then
+     * gets tax added when the product is tax-exclusive. Prices stay in the base
+     * currency, like every other price the cart holds.
+     *
+     * Returns [] when the feature is off or the product has no ladder, so every
+     * caller can render it unconditionally.
+     *
+     * @return array<int, array{min: float, max: float|null, price: float}>
+     */
+    private function wholesaleTierDisplay($product, float $defaultTaxRate): array
+    {
+        if (! $product) {
+            return [];
+        }
+
+        $tiers = app(WholesalePricingService::class)->tiersForProduct($product->id);
+        if (! $tiers) {
+            return [];
+        }
+
+        $isInclusive = (string) $product->tax_method === '2';
+        $taxRate = is_numeric($product->TaxNet) ? (float) $product->TaxNet : $defaultTaxRate;
+
+        return array_map(function ($tier) use ($isInclusive, $taxRate) {
+            $price = (float) $tier['price'];
+            if (! $isInclusive && $taxRate > 0) {
+                $price = $price * (1 + $taxRate / 100);
+            }
+
+            return [
+                'min' => (float) $tier['min_qty'],
+                'max' => $tier['max_qty'] === null ? null : (float) $tier['max_qty'],
+                'price' => round($price, 2),
+            ];
+        }, $tiers);
+    }
+
+    /**
+     * Quantity ladders for the products currently in the shopper's cart, so the
+     * cart and checkout pages can re-price lines live as quantities change.
+     * Reading it fresh (instead of trusting what localStorage kept) means an
+     * admin's price change takes effect on the next page load; the server still
+     * recomputes every total at checkout regardless.
+     */
+    public function wholesaleTiers(Request $request)
+    {
+        $service = app(WholesalePricingService::class);
+        if (! $service->enabled()) {
+            return response()->json(['enabled' => false, 'tiers' => (object) []]);
+        }
+
+        $ids = collect(explode(',', (string) $request->query('ids', '')))
+            ->map(fn ($v) => (int) trim($v))
+            ->filter()
+            ->unique()
+            ->take(200)
+            ->values();
+
+        if ($ids->isEmpty()) {
+            return response()->json(['enabled' => true, 'tiers' => (object) []]);
+        }
+
+        $s = StoreSetting::first();
+        $defaultTaxRate = (float) ($s->default_tax_rate ?? 0);
+
+        // Warm the service cache for the whole set in one query, then format
+        // each product with its own tax treatment.
+        $service->tiersFor($ids);
+
+        $out = [];
+        foreach (Product::whereIn('id', $ids)->get(['id', 'tax_method', 'TaxNet']) as $product) {
+            $rows = $this->wholesaleTierDisplay($product, $defaultTaxRate);
+            if ($rows) {
+                $out[(string) $product->id] = $rows;
+            }
+        }
+
+        return response()->json(['enabled' => true, 'tiers' => $out ?: (object) []]);
     }
 
     /**
@@ -713,7 +939,9 @@ class StoreFrontController extends Controller
 
         $products = $this->hydrateProductsByIds($s, $ids);
         // Preserve loaded relations used by the comparison table.
-        $products->loadMissing(['brand:id,name', 'category:id,name', 'subCategory:id,name']);
+        if ($products instanceof \Illuminate\Database\Eloquent\Collection) {
+            $products->loadMissing(['brand:id,name', 'category:id,name', 'subCategory:id,name']);
+        }
 
         $categories = Category::with('subcategories')->orderBy('name')->get();
 
@@ -792,6 +1020,30 @@ class StoreFrontController extends Controller
                 DB::raw("$afterDiscountExpr AS after_discount"),
                 DB::raw("$finalExpr AS final_display_price")
             );
+
+        // Curated list wins outright: if an admin picked related products for
+        // this one, show exactly those, in their order. Only an empty list
+        // falls through to the automatic rule below.
+        $curatedIds = DB::table('product_related')
+            ->where('product_id', $product->id)
+            ->orderBy('sort_order')
+            ->pluck('related_product_id')
+            ->all();
+
+        if ($curatedIds) {
+            $curated = $base()->whereIn('products.id', $curatedIds)->get()
+                ->sortBy(fn ($p) => array_search($p->id, $curatedIds))
+                ->values();
+
+            $this->applyDisplayPrices($curated, $defaultTaxRate);
+            $this->attachStockToProducts($curated, $s->activeWarehouseIds());
+
+            if ($s->hide_out_of_stock ?? false) {
+                $curated = $curated->filter(fn ($p) => $this->productHasStock($p))->values();
+            }
+
+            return $this->filterByVehicle($curated);
+        }
 
         $sameCat = $product->category_id
             ? $base()->where('products.category_id', $product->category_id)->orderBy('products.created_at', 'desc')->take($limit)->get()
@@ -889,7 +1141,7 @@ class StoreFrontController extends Controller
      * applied to the headline and each variant, plus a compare-at (original)
      * price for the strikethrough. Mirrors the collection price pipeline.
      */
-    private function buildFlashProducts($s, string $baseExpr, string $afterDiscountExpr, string $finalExpr, $minVariantSub, float $defaultTaxRate, ?int $limit)
+    protected function buildFlashProducts($s, string $baseExpr, string $afterDiscountExpr, string $finalExpr, $minVariantSub, float $defaultTaxRate, ?int $limit)
     {
         $rules = app(FlashSaleService::class)->runningRules(); // product_id => ['type','value']
         if (empty($rules)) {
@@ -970,7 +1222,7 @@ class StoreFrontController extends Controller
      * Attach the SQL-computed final price to each product and compute each variant's
      * display price with the same discount + tax rules (mirrors the collection pipeline).
      */
-    private function applyDisplayPrices($products, float $defaultTaxRate): void
+    protected function applyDisplayPrices($products, float $defaultTaxRate): void
     {
         foreach ($products as $p) {
             $p->display_price = (float) ($p->final_display_price ?? 0);
@@ -1002,7 +1254,7 @@ class StoreFrontController extends Controller
      * Build the best-selling products (by total quantity sold across online orders).
      * Powers the admin-managed "Frequently viewed items" homepage section.
      */
-    private function buildBestSellerProducts($s, string $baseExpr, string $afterDiscountExpr, string $finalExpr, $minVariantSub, float $defaultTaxRate, ?int $limit)
+    protected function buildBestSellerProducts($s, string $baseExpr, string $afterDiscountExpr, string $finalExpr, $minVariantSub, float $defaultTaxRate, ?int $limit)
     {
         if (! Schema::hasTable('online_order_items')) {
             return collect();
@@ -1060,7 +1312,7 @@ class StoreFrontController extends Controller
      * Build an admin-curated list of products (preserving the chosen order).
      * Powers the "You may also like" homepage section.
      */
-    private function buildCuratedProducts($s, array $ids, string $baseExpr, string $afterDiscountExpr, string $finalExpr, $minVariantSub, float $defaultTaxRate, ?int $limit)
+    protected function buildCuratedProducts($s, array $ids, string $baseExpr, string $afterDiscountExpr, string $finalExpr, $minVariantSub, float $defaultTaxRate, ?int $limit)
     {
         $ids = array_values(array_unique(array_filter($ids, fn ($id) => (int) $id > 0)));
         if (empty($ids)) {
@@ -1111,7 +1363,7 @@ class StoreFrontController extends Controller
      *
      * @param  int[]  $warehouseIds
      */
-    private function attachStockToProducts($products, array $warehouseIds): void
+    protected function attachStockToProducts($products, array $warehouseIds): void
     {
         if (! $warehouseIds || ! $products) {
             foreach ($products as $p) {
@@ -1194,7 +1446,7 @@ class StoreFrontController extends Controller
      * No-op when Vehicle Fitment is off or no vehicle is chosen; products
      * without fitment data are universal and always kept.
      */
-    private function filterByVehicle($products)
+    protected function filterByVehicle($products)
     {
         $fitment = app(\App\Services\FitmentService::class);
         if (! $fitment->enabled() || ! ($vehicle = $fitment->currentVehicle())) {
@@ -1213,7 +1465,7 @@ class StoreFrontController extends Controller
     /**
      * Whether the product has at least one unit in stock (after attachStockToProducts).
      */
-    private function productHasStock($p): bool
+    protected function productHasStock($p): bool
     {
         // Pre-order products should always be considered "available"
         if ($p->is_preorder) {
@@ -1283,11 +1535,111 @@ class StoreFrontController extends Controller
         foreach ($products as $p) {
             $p->loadMissing(['images' => fn ($q) => $q->orderBy('sort_order')->orderBy('id')]);
             $fn = $p->primaryProductImageFilename();
-            $p->image_url = $fn ? asset('images/products/'.$fn) : asset('images/products/no-image.png');
+            $p->image_url = product_image_url($fn);
             $p->display_price = $p->computeFinalPrice()['final'];
             $p->url = route('store.product.show', $p->id);
         }
 
         return response()->json($products);
+    }
+
+    /** Storefront-visible products, with the relations the cards need. */
+    protected function baseQuery()
+    {
+        return Product::query()
+            ->whereNull('products.deleted_at')
+            ->where('products.is_active', 1)
+            ->where('products.hide_from_online_store', 0)
+            ->with([
+                'variants:id,product_id,name,price,image',
+                'images:id,product_id,image_path,is_main,sort_order',
+            ]);
+    }
+
+    /**
+     * Run a product query through the shared pricing + stock pipeline and
+     * attach review ratings, so the theme's cards show the same numbers as
+     * the shop page.
+     */
+    protected function hydrate($query, StoreSetting $s, float $defaultTaxRate, int $limit)
+    {
+        [$minVariantSub, $baseExpr, $afterDiscountExpr, $finalExpr] = $this->priceSqlParts();
+
+        $products = $query
+            ->leftJoinSub($minVariantSub, 'pvmin', fn ($join) => $join->on('pvmin.product_id', '=', 'products.id'))
+            ->addSelect(
+                'products.*',
+                DB::raw("$baseExpr AS base_price"),
+                DB::raw("$afterDiscountExpr AS after_discount"),
+                DB::raw("$finalExpr AS final_display_price")
+            )
+            ->take(max(1, $limit * 2)) // over-fetch: hide_out_of_stock / vehicle filters may drop rows
+            ->get();
+
+        $this->applyDisplayPrices($products, $defaultTaxRate);
+
+        // Strike-through for discounted products (flash sales set their own).
+        foreach ($products as $p) {
+            if (isset($p->compare_at_price)) {
+                continue;
+            }
+            if ((float) ($p->discount ?? 0) > 0) {
+                $isInclusive = (string) $p->tax_method === '2';
+                $taxRate = is_numeric($p->TaxNet) ? (float) $p->TaxNet : $defaultTaxRate;
+                $original = (float) ($p->base_price ?? $p->price);
+                if (! $isInclusive && $taxRate > 0) {
+                    $original = $original * (1 + $taxRate / 100);
+                }
+                $original = round($original, 2);
+                if ($original > (float) $p->display_price + 0.01) {
+                    $p->compare_at_price = $original;
+                }
+            }
+        }
+
+        $this->attachStockToProducts($products, $s->activeWarehouseIds());
+
+        if ($s->hide_out_of_stock ?? false) {
+            $products = $products->filter(fn ($p) => $this->productHasStock($p))->values();
+        }
+
+        $products = $this->filterByVehicle($products)->take($limit)->values();
+        $this->attachRatings($products);
+
+        return $products;
+    }
+
+    /** product_id → avg rating / count for approved reviews. */
+    protected function ratingSubquery()
+    {
+        if (! Schema::hasTable('product_reviews')) {
+            return null;
+        }
+
+        return DB::table('product_reviews')
+            ->where('status', 'approved')
+            ->select('product_id', DB::raw('AVG(rating) AS rating_avg'), DB::raw('COUNT(*) AS rating_count'))
+            ->groupBy('product_id');
+    }
+
+    protected function attachRatings($products): void
+    {
+        if ($products->isEmpty() || ! Schema::hasTable('product_reviews')) {
+            return;
+        }
+        $ids = $products->pluck('id')->all();
+        $rows = DB::table('product_reviews')
+            ->where('status', 'approved')
+            ->whereIn('product_id', $ids)
+            ->select('product_id', DB::raw('AVG(rating) AS rating_avg'), DB::raw('COUNT(*) AS rating_count'))
+            ->groupBy('product_id')
+            ->get()
+            ->keyBy('product_id');
+
+        foreach ($products as $p) {
+            $r = $rows[$p->id] ?? null;
+            $p->rating_avg = $r ? round((float) $r->rating_avg, 1) : null;
+            $p->rating_count = $r ? (int) $r->rating_count : 0;
+        }
     }
 }

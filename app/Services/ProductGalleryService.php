@@ -80,7 +80,7 @@ class ProductGalleryService
 
         if ($request->hasFile('image')) {
             $this->alignGalleryToLegacyColumn($product);
-        } elseif (! $galleryMetaMeaningful && ! $request->hasFile('gallery_images')) {
+        } elseif (! $galleryMetaMeaningful && ! $request->hasFile('gallery_images') && ! $request->filled('gallery_urls')) {
             $this->alignGalleryToLegacyColumn($product);
         }
 
@@ -167,17 +167,69 @@ class ProductGalleryService
         }
     }
 
+    /**
+     * New gallery entries: uploaded files (gallery_images[]) and pasted links
+     * (gallery_urls[]). gallery_new_manifest (JSON [{kind:'file'|'url'}...])
+     * gives their combined order so rows are created in the order the admin
+     * arranged them — main_index / main_pending_index rely on that order.
+     */
     protected function storeGalleryUploads(Request $request, Product $product, int $startSort): void
     {
         $files = $request->file('gallery_images', []);
         if (! is_array($files)) {
             $files = $files ? [$files] : [];
         }
+        $files = array_values($files);
+
+        $urls = $request->input('gallery_urls', []);
+        if (! is_array($urls)) {
+            $urls = $urls ? [$urls] : [];
+        }
+        $urls = array_values(array_map(fn ($u) => trim((string) $u), $urls));
+
+        $manifest = null;
+        if ($request->filled('gallery_new_manifest')) {
+            $decoded = json_decode((string) $request->input('gallery_new_manifest'), true);
+            if (is_array($decoded)) {
+                $manifest = $decoded;
+            }
+        }
+        if (! is_array($manifest)) {
+            $manifest = array_merge(
+                array_fill(0, count($files), ['kind' => 'file']),
+                array_fill(0, count($urls), ['kind' => 'url'])
+            );
+        }
 
         $path = public_path('/images/products');
         $sort = $startSort;
+        $fi = 0;
+        $ui = 0;
 
-        foreach ($files as $file) {
+        foreach ($manifest as $entry) {
+            $kind = is_array($entry) ? ($entry['kind'] ?? '') : (string) $entry;
+
+            if ($kind === 'url') {
+                $url = $urls[$ui++] ?? null;
+                $url = static::sanitizeRemoteImageUrl($url);
+                if ($url === null) {
+                    continue;
+                }
+                $exists = ProductImage::where('product_id', $product->id)->where('image_path', $url)->exists();
+                if ($exists) {
+                    continue;
+                }
+                ProductImage::create([
+                    'product_id' => $product->id,
+                    'image_path' => $url,
+                    'is_main' => false,
+                    'sort_order' => $sort++,
+                ]);
+
+                continue;
+            }
+
+            $file = $files[$fi++] ?? null;
             if (! $file || ! $file->isValid()) {
                 continue;
             }
@@ -199,6 +251,26 @@ class ProductGalleryService
                 'sort_order' => $sort++,
             ]);
         }
+    }
+
+    /**
+     * A pasted image link must be an absolute http(s) URL that fits the
+     * image_path column; anything else is dropped silently.
+     */
+    public static function sanitizeRemoteImageUrl($raw): ?string
+    {
+        $url = trim((string) $raw);
+        if ($url === '' || strlen($url) > 255) {
+            return null;
+        }
+        if (! preg_match('#^https?://#i', $url)) {
+            return null;
+        }
+        if (filter_var($url, FILTER_VALIDATE_URL) === false) {
+            return null;
+        }
+
+        return $url;
     }
 
     protected function alignGalleryToLegacyColumn(Product $product): void
@@ -346,6 +418,9 @@ class ProductGalleryService
     {
         if ($filename === null || $filename === '' || $filename === 'no-image.png') {
             return;
+        }
+        if (product_image_is_remote($filename)) {
+            return; // pasted link — nothing on disk
         }
 
         $full = public_path('/images/products/'.$filename);

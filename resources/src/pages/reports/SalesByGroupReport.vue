@@ -9,6 +9,10 @@
     :export-params="filterParams"
     export-rows-key="reports"
   >
+    <template #actions>
+      <!-- Multi-Currency: view amounts converted (display-only) -->
+      <ViewCurrencySelect />
+    </template>
     <!-- Summary + charts over the WHOLE filtered set (backend summary/top_groups/timeseries). -->
     <template #chart>
       <a-row :gutter="[16, 16]" style="margin-bottom: 16px">
@@ -105,6 +109,7 @@ import { useFormat } from '../../composables/useFormat';
 import { useUiStore } from '../../stores/ui';
 import { t as tf } from '../../i18n';
 import DateRangePicker from '../../components/DateRangePicker.vue';
+import ViewCurrencySelect from '../../components/ViewCurrencySelect.vue';
 
 const { t } = useI18n();
 const { money } = useFormat();

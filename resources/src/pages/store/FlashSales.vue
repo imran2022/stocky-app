@@ -70,6 +70,18 @@
           </a-col>
         </a-row>
 
+        <template v-if="localeList.length">
+          <a-divider orientation="left">{{ $t('Translations') }}</a-divider>
+          <div class="i18n-hint">{{ $t('Translations_Fallback_Hint') }}</div>
+          <a-row :gutter="16">
+            <a-col v-for="l in localeList" :key="l.code" :xs="24" :md="12">
+              <a-form-item :label="l.label">
+                <a-input v-model:value="form.name_translations[l.code]" :placeholder="form.name" />
+              </a-form-item>
+            </a-col>
+          </a-row>
+        </template>
+
         <a-divider orientation="left">{{ $t('Products') }}</a-divider>
         <a-form-item>
           <a-input v-model:value="prodQuery" :placeholder="$t('Search_products')" @input="searchProducts" />
@@ -119,9 +131,10 @@
  * Flash sales — GET store/flash-sales?search → {flash_sales}; edit GET
  * store/flash-sales/{id} (flat, products normalized); product search GET
  * store/flash-sales/search-products?q (300ms debounce); save POST/PUT with
- * {name, is_active 1|0, starts_at|null, ends_at|null, products[{product_id,
- * discount_type percent|fixed, discount_value}]}. Flash price preview =
- * legacy formula.
+ * {name, name_translations{locale: name}, is_active 1|0, starts_at|null,
+ * ends_at|null, products[{product_id, discount_type percent|fixed,
+ * discount_value}]}. Flash price preview = legacy formula. The storefront
+ * locales come back from the API as {locale: label}.
  */
 import { ref, computed, onMounted } from 'vue';
 import { message, Modal } from 'ant-design-vue';
@@ -141,7 +154,14 @@ const prodQuery = ref('');
 const results = ref([]);
 let searchTimer = null;
 
-const emptyForm = () => ({ id: null, name: '', is_active: true, starts_at: '', ends_at: '', products: [] });
+// Storefront locales, from the API: [{code: 'fr', label: 'Français'}, …].
+const localeList = ref([]);
+function setLocales(map) {
+  if (!map) return;
+  localeList.value = Object.keys(map).map(code => ({ code, label: map[code] }));
+}
+
+const emptyForm = () => ({ id: null, name: '', name_translations: {}, is_active: true, starts_at: '', ends_at: '', products: [] });
 const form = ref(emptyForm());
 
 const columns = computed(() => [
@@ -170,6 +190,7 @@ async function fetch() {
   try {
     const resp = await http.get('store/flash-sales', { search: search.value });
     rows.value = resp.flash_sales || [];
+    setLocales(resp.locales);
   } catch (e) {
     message.error(t('Failed'));
   } finally {
@@ -185,9 +206,11 @@ function openCreate() {
 async function openEdit(id) {
   try {
     const d = await http.get(`store/flash-sales/${id}`);
+    setLocales(d.locales);
     form.value = {
       id: d.id,
       name: d.name,
+      name_translations: { ...(d.name_translations || {}) },
       is_active: !!d.is_active,
       starts_at: (d.starts_at || '').replace(' ', 'T').slice(0, 16),
       ends_at: (d.ends_at || '').replace(' ', 'T').slice(0, 16),
@@ -230,6 +253,7 @@ async function submit() {
   saving.value = true;
   const payload = {
     name: form.value.name,
+    name_translations: form.value.name_translations,
     is_active: form.value.is_active ? 1 : 0,
     starts_at: form.value.starts_at || null,
     ends_at: form.value.ends_at || null,
@@ -287,6 +311,11 @@ onMounted(fetch);
   display: block;
   padding: 6px 10px;
   cursor: pointer;
+}
+.i18n-hint {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+  margin-bottom: 12px;
 }
 .result-row:hover {
   background: rgba(0, 0, 0, 0.04);

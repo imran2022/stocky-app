@@ -27,11 +27,11 @@ class SitemapController extends Controller
             ];
         };
 
-        // Static storefront pages
-        $add('online_store', null, 'daily', '1.0');
-        $add('online_store/shop', null, 'daily', '0.9');
-        $add('online_store/flash-sales', null, 'daily', '0.5');
-        $add('online_store/contact', null, 'monthly', '0.3');
+        // Static storefront pages (base path follows Store Settings → Store URL)
+        $add(store_path_to(), null, 'daily', '1.0');
+        $add(store_path_to('shop'), null, 'daily', '0.9');
+        $add(store_path_to('flash-sales'), null, 'daily', '0.5');
+        $add(store_path_to('contact'), null, 'monthly', '0.3');
 
         // Products
         if (Schema::hasTable('products')) {
@@ -42,7 +42,7 @@ class SitemapController extends Controller
                 ->orderBy('id')
                 ->get(['id', 'updated_at'])
                 ->each(function ($p) use ($add) {
-                    $add('online_store/product/'.$p->id, $p->updated_at, 'weekly', '0.8');
+                    $add(store_path_to('product/'.$p->id), $p->updated_at, 'weekly', '0.8');
                 });
         }
 
@@ -54,7 +54,7 @@ class SitemapController extends Controller
                 ->get(['slug', 'updated_at'])
                 ->each(function ($p) use ($add) {
                     if ($p->slug) {
-                        $add('online_store/pages/'.$p->slug, $p->updated_at, 'monthly', '0.4');
+                        $add(store_path_to('pages/'.$p->slug), $p->updated_at, 'monthly', '0.4');
                     }
                 });
         }
@@ -66,7 +66,7 @@ class SitemapController extends Controller
                 ->get(['id', 'slug', 'updated_at'])
                 ->each(function ($c) use ($add) {
                     if ($c->slug) {
-                        $add('online_store/shop?collection='.$c->slug, $c->updated_at, 'weekly', '0.5');
+                        $add(store_path_to('shop').'?collection='.$c->slug, $c->updated_at, 'weekly', '0.5');
                     }
                 });
         }

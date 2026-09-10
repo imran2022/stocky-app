@@ -156,7 +156,9 @@ async function submit() {
 
 async function loadCategories() {
   try {
-    const data = await http.get('categories');
+    // limit: -1 tells the API to return every category (the default page size
+    // is 10, which silently truncated this select).
+    const data = await http.get('categories', { limit: -1, SortField: 'name', SortType: 'asc' });
     categories.value = data.categories || [];
   } catch (e) {
     // The select stays empty; the table itself still works.

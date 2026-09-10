@@ -82,6 +82,24 @@
             </a-form-item>
           </a-col>
         </a-row>
+        <template v-if="localeList.length">
+          <a-divider orientation="left">{{ $t('Translations') }}</a-divider>
+          <div class="i18n-hint">{{ $t('Translations_Fallback_Hint') }}</div>
+          <a-tabs v-model:activeKey="localeTab" size="small">
+            <a-tab-pane v-for="l in localeList" :key="l.code" :tab="l.label">
+              <a-form-item :label="$t('Title')">
+                <a-input v-model:value="form.title_translations[l.code]" :placeholder="form.title" />
+              </a-form-item>
+              <a-form-item :label="$t('Message')">
+                <a-textarea v-model:value="form.message_translations[l.code]" :rows="3" :placeholder="form.message" />
+              </a-form-item>
+              <a-form-item v-if="form.type !== 'subscription'" :label="$t('Button_Label')">
+                <a-input v-model:value="form.cta_label_translations[l.code]" :placeholder="form.cta_label" />
+              </a-form-item>
+            </a-tab-pane>
+          </a-tabs>
+        </template>
+
         <a-row :gutter="16">
           <a-col :xs="24" :md="8">
             <a-form-item :label="$t('Trigger')">
@@ -145,7 +163,9 @@
  * Popup messages — GET store/popups → {popups}; save MULTIPART POST
  * store/popups[/{id}] (edit is POST too — legacy) with all fields, enabled
  * 1|0, optional image. Toggle re-POSTs the row's fields with enabled
- * flipped (legacy).
+ * flipped (legacy) — it sends no *_translations keys, which is exactly how
+ * the server knows to leave the existing per-locale copy alone.
+ * Storefront locales come back from the API as {locale: label}.
  */
 import { ref, computed, onMounted } from 'vue';
 import { message, Modal } from 'ant-design-vue';
@@ -163,8 +183,18 @@ const popups = ref([]);
 const modalOpen = ref(false);
 const imageList = ref([]);
 
+// Storefront locales, from the API: [{code: 'fr', label: 'Français'}, …].
+const localeList = ref([]);
+const localeTab = ref('');
+function setLocales(map) {
+  if (!map) return;
+  localeList.value = Object.keys(map).map(code => ({ code, label: map[code] }));
+  if (!localeTab.value && localeList.value.length) localeTab.value = localeList.value[0].code;
+}
+
 const emptyForm = () => ({
   id: null, title: '', message: '', type: 'announcement', cta_label: '', cta_url: '',
+  title_translations: {}, message_translations: {}, cta_label_translations: {},
   enabled: true, trigger: 'delay', delay_seconds: 3, frequency: 'session',
   starts_at: '', ends_at: '', sort_order: 0, image_url: null,
 });
@@ -187,6 +217,7 @@ async function fetch() {
   try {
     const r = await http.get('store/popups');
     popups.value = r.popups || [];
+    setLocales(r.locales);
   } catch (e) {
     message.error(t('Failed'));
   } finally {
@@ -199,7 +230,15 @@ function openCreate() {
   modalOpen.value = true;
 }
 function openEdit(p) {
-  form.value = { ...emptyForm(), ...p, enabled: !!p.enabled };
+  form.value = {
+    ...emptyForm(),
+    ...p,
+    enabled: !!p.enabled,
+    // The API sends these as objects ({} when empty) — copy so edits stay local.
+    title_translations: { ...(p.title_translations || {}) },
+    message_translations: { ...(p.message_translations || {}) },
+    cta_label_translations: { ...(p.cta_label_translations || {}) },
+  };
   imageList.value = [];
   modalOpen.value = true;
 }
@@ -211,6 +250,16 @@ function buildFormData() {
     if (f[k] !== null && f[k] !== undefined) fd.append(k, f[k]);
   });
   fd.append('enabled', f.enabled ? 1 : 0);
+
+  // Every locale key is sent, blanks included, so clearing a translation in the
+  // form actually clears it server-side. The list's enable/disable toggle sends
+  // none of these, which is how it leaves existing copy untouched.
+  ['title', 'message', 'cta_label'].forEach(field => {
+    localeList.value.forEach(l => {
+      fd.append(`${field}_translations[${l.code}]`, (f[`${field}_translations`] || {})[l.code] || '');
+    });
+  });
+
   const img = imageList.value[0];
   if (img) fd.append('image', img.originFileObj || img);
   return fd;
@@ -267,3 +316,11 @@ function confirmDelete(p) {
 
 onMounted(fetch);
 </script>
+
+<style scoped>
+.i18n-hint {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+  margin-bottom: 4px;
+}
+</style>

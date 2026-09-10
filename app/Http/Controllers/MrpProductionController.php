@@ -60,6 +60,7 @@ class MrpProductionController extends BaseController
         $query = MrpProductionOrder::leftJoin('products', 'products.id', '=', 'mrp_production_orders.product_id')
             ->leftJoin('warehouses', 'warehouses.id', '=', 'mrp_production_orders.warehouse_id')
             ->whereNull('mrp_production_orders.deleted_at')
+            ->tap(fn ($q) => $this->scopeToWarehouses($q, 'mrp_production_orders.warehouse_id'))
             ->select(
                 'mrp_production_orders.*',
                 'products.name as product_name',
@@ -163,6 +164,9 @@ class MrpProductionController extends BaseController
         $order = MrpProductionOrder::whereNull('deleted_at')
             ->with(['materials', 'workOrders.workCenter', 'workOrders.employee', 'qualityChecks.lines', 'bom', 'warehouse', 'product'])
             ->findOrFail($id);
+
+        // A production order consumes and produces stock in its warehouse.
+        $this->abortIfWarehouseDenied($order->warehouse_id);
 
         $materials = $order->materials->map(function ($m) use ($order) {
             $product = Product::find($m->product_id);
@@ -289,6 +293,12 @@ class MrpProductionController extends BaseController
             'planned_end' => 'nullable|date|after_or_equal:planned_start',
         ]);
 
+        // The order books stock in this warehouse — it must be the caller's.
+        $this->abortIfWarehouseDenied($request->warehouse_id);
+        if ($request->filled('fg_warehouse_id')) {
+            $this->abortIfWarehouseDenied($request->fg_warehouse_id);
+        }
+
         $bom = $request->bom_id
             ? MrpBom::whereNull('deleted_at')->find($request->bom_id)
             : MrpBom::defaultFor($request->product_id);
@@ -332,6 +342,14 @@ class MrpProductionController extends BaseController
         $this->authorizeForUser($request->user('api'), 'update', MrpProductionOrder::class);
 
         $order = MrpProductionOrder::whereNull('deleted_at')->findOrFail($id);
+        // The order's own warehouse, and any warehouse it is being moved to.
+        $this->abortIfWarehouseDenied($order->warehouse_id);
+        if ($request->filled('warehouse_id')) {
+            $this->abortIfWarehouseDenied($request->warehouse_id);
+        }
+        if ($request->filled('fg_warehouse_id')) {
+            $this->abortIfWarehouseDenied($request->fg_warehouse_id);
+        }
 
         if ($order->isFinished()) {
             return response()->json([

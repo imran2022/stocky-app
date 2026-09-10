@@ -154,7 +154,7 @@ class SalesReturnController extends BaseController
         $customers = client::where('deleted_at', '=', null)->get(['id', 'name']);
         $sales = Sale::where('deleted_at', '=', null)->get(['id', 'Ref']);
         $accounts = Account::where('deleted_at', '=', null)->orderBy('id', 'desc')->get(['id', 'account_name']);
-        $payment_methods = PaymentMethod::whereNull('deleted_at')->get(['id', 'name']);
+        $payment_methods = PaymentMethod::active()->whereNull('deleted_at')->get(['id', 'name']);
 
         // get warehouses assigned to user
         $user_auth = auth()->user();
@@ -189,7 +189,7 @@ class SalesReturnController extends BaseController
             'statut' => 'required',
         ]);
 
-        \DB::transaction(function () use ($request) {
+        $createdReturn = \DB::transaction(function () use ($request) {
             $order = new SaleReturn;
 
             $order->date = $request->date;
@@ -207,6 +207,13 @@ class SalesReturnController extends BaseController
             $order->payment_statut = 'unpaid';
             $order->notes = $request->notes;
             $order->user_id = Auth::user()->id;
+            // Multi-Currency: the return inherits the parent sale's snapshot
+            // so its documents print in the same currency.
+            if ($request->sale_id) {
+                $parentSale = Sale::find($request->sale_id);
+                $order->currency_id = $parentSale->currency_id ?? null;
+                $order->exchange_rate = $parentSale->exchange_rate ?? null;
+            }
 
             $order->save();
 
@@ -296,7 +303,17 @@ class SalesReturnController extends BaseController
                     $serialService->applyForSaleReturn($order, $data, $persistedDetails);
                 }
             }
+
+            return $order;
         }, 10);
+
+        // ZATCA Phase 2: report the return as a credit note (non-blocking;
+        // no-op unless Phase 2 is enabled and onboarding is finished).
+        try {
+            \App\Jobs\SubmitDocumentToZatca::dispatch(SaleReturn::class, $createdReturn->id)->afterCommit();
+        } catch (\Throwable $e) {
+            \Log::warning('ZATCA submit dispatch failed (non-blocking): '.$e->getMessage(), ['sale_return_id' => $createdReturn->id]);
+        }
 
         return response()->json(['success' => true]);
     }
@@ -337,6 +354,10 @@ class SalesReturnController extends BaseController
             }
 
             // Check If User Has Permission view All Records
+            // Warehouse half of the same rule: record_view says whose documents,
+            // the assigned warehouses say which warehouses they may come from.
+            $this->abortIfDocumentWarehouseDenied($current_SaleReturn);
+
             if (! $view_records) {
                 // Check If User->id === SaleReturn->id
                 $this->authorizeForUser($request->user('api'), 'check_record', $current_SaleReturn);
@@ -585,6 +606,10 @@ class SalesReturnController extends BaseController
             $old_return_details = SaleReturnDetails::where('sale_return_id', $id)->get();
 
             // Check If User Has Permission view All Records
+            // Warehouse half of the same rule: record_view says whose documents,
+            // the assigned warehouses say which warehouses they may come from.
+            $this->abortIfDocumentWarehouseDenied($current_SaleReturn);
+
             if (! $view_records) {
                 // Check If User->id === current_SaleReturn->id
                 $this->authorizeForUser($request->user('api'), 'check_record', $current_SaleReturn);
@@ -728,6 +753,10 @@ class SalesReturnController extends BaseController
 
                 $old_return_details = SaleReturnDetails::where('sale_return_id', $SaleReturn_id)->get();
                 // Check If User Has Permission view All Records
+                // Warehouse half of the same rule: record_view says whose documents,
+                // the assigned warehouses say which warehouses they may come from.
+                $this->abortIfDocumentWarehouseDenied($current_SaleReturn);
+
                 if (! $view_records) {
                     // Check If User->id === current_SaleReturn->id
                     $this->authorizeForUser($request->user('api'), 'check_record', $current_SaleReturn);
@@ -837,6 +866,10 @@ class SalesReturnController extends BaseController
         $SaleReturn = SaleReturn::findOrFail($id);
 
         // Check If User Has Permission view All Records
+        // Warehouse half of the same rule: record_view says whose documents,
+        // the assigned warehouses say which warehouses they may come from.
+        $this->abortIfDocumentWarehouseDenied($SaleReturn);
+
         if (! $view_records) {
             // Check If User->id === SaleReturn->id
             $this->authorizeForUser($request->user('api'), 'check_record', $SaleReturn);
@@ -901,9 +934,15 @@ class SalesReturnController extends BaseController
             ->where('deleted_at', '=', null)
             ->findOrFail($id);
 
+        $docCurrency = helpers::Get_Document_Currency($Sale_Return);
+
         $details = [];
 
         // Check If User Has Permission view All Records
+        // Warehouse half of the same rule: record_view says whose documents,
+        // the assigned warehouses say which warehouses they may come from.
+        $this->abortIfDocumentWarehouseDenied($Sale_Return);
+
         if (! $view_records) {
             // Check If User->id === SaleReturn->id
             $this->authorizeForUser($request->user('api'), 'check_record', $Sale_Return);
@@ -913,23 +952,29 @@ class SalesReturnController extends BaseController
         // has to identify the record it describes.
         $return_details['id'] = $Sale_Return->id;
         $return_details['Ref'] = $Sale_Return->Ref;
+        // Multi-Currency: amounts in this payload are converted into the
+        // document currency — the page must render them with THIS symbol.
+        $return_details['currency_symbol'] = $docCurrency['symbol'];
+        $return_details['currency_code'] = $docCurrency['code'];
+        $return_details['currency_id'] = $docCurrency['id'];
+        $return_details['currency_rate'] = $docCurrency['rate'];
         $return_details['sale_id'] = $Sale_Return->sale_id ? $Sale_Return['sale']->id : null;
         $return_details['sale_ref'] = $Sale_Return['sale'] ? $Sale_Return['sale']->Ref : '---';
         $return_details['date'] = $Sale_Return->date.' '.$Sale_Return->time;
         $return_details['note'] = $Sale_Return->notes;
         $return_details['statut'] = $Sale_Return->statut;
-        $return_details['discount'] = $Sale_Return->discount;
-        $return_details['shipping'] = $Sale_Return->shipping;
+        $return_details['discount'] = $Sale_Return->discount * $docCurrency['rate'];
+        $return_details['shipping'] = $Sale_Return->shipping * $docCurrency['rate'];
         $return_details['tax_rate'] = $Sale_Return->tax_rate;
-        $return_details['TaxNet'] = $Sale_Return->TaxNet;
+        $return_details['TaxNet'] = $Sale_Return->TaxNet * $docCurrency['rate'];
         $return_details['client_name'] = $Sale_Return['client']->name;
         $return_details['client_phone'] = $Sale_Return['client']->phone;
         $return_details['client_adr'] = $Sale_Return['client']->adresse;
         $return_details['client_email'] = $Sale_Return['client']->email;
         $return_details['client_tax'] = $Sale_Return['client']->tax_number;
         $return_details['warehouse'] = $Sale_Return['warehouse']->name;
-        $return_details['GrandTotal'] = number_format($Sale_Return->GrandTotal, helpers::price_decimals(), '.', '');
-        $return_details['paid_amount'] = number_format($Sale_Return->paid_amount, helpers::price_decimals(), '.', '');
+        $return_details['GrandTotal'] = number_format($Sale_Return->GrandTotal * $docCurrency['rate'], helpers::price_decimals(), '.', '');
+        $return_details['paid_amount'] = number_format($Sale_Return->paid_amount * $docCurrency['rate'], helpers::price_decimals(), '.', '');
         $return_details['due'] = number_format($return_details['GrandTotal'] - $return_details['paid_amount'], helpers::price_decimals(), '.', '');
         $return_details['payment_status'] = $Sale_Return->payment_statut;
 
@@ -940,6 +985,14 @@ class SalesReturnController extends BaseController
             // Lines with quantity 0 were not actually returned — hide them.
             if ((float) $detail->quantity <= 0) {
                 continue;
+            }
+
+            // Convert per-line monetary fields to the document currency (in-memory only,
+            // rate is 1.0 for base-currency documents). Percent discounts stay percentages.
+            $detail->price = $detail->price * $docCurrency['rate'];
+            $detail->total = $detail->total * $docCurrency['rate'];
+            if ($detail->discount_method == '2') {
+                $detail->discount = $detail->discount * $docCurrency['rate'];
             }
 
             // check if detail has sale_unit_id Or Null
@@ -1109,6 +1162,10 @@ class SalesReturnController extends BaseController
         $details = [];
 
         // Check If User Has Permission view All Records
+        // Warehouse half of the same rule: record_view says whose documents,
+        // the assigned warehouses say which warehouses they may come from.
+        $this->abortIfDocumentWarehouseDenied($SaleReturn);
+
         if (! $view_records) {
             // Check If User->id === SaleReturn->id
             $this->authorizeForUser($request->user('api'), 'check_record', $SaleReturn);
@@ -1230,6 +1287,8 @@ class SalesReturnController extends BaseController
             ->where('deleted_at', '=', null)
             ->findOrFail($id);
 
+        $docCurrency = helpers::Get_Document_Currency($Sale_Return);
+
         $batchesByDetail = app(BatchService::class)->batchesForSaleReturnDetails($Sale_Return['details']);
 
         $return_details['client_name'] = $Sale_Return['client']->name;
@@ -1237,15 +1296,15 @@ class SalesReturnController extends BaseController
         $return_details['client_adr'] = $Sale_Return['client']->adresse;
         $return_details['client_email'] = $Sale_Return['client']->email;
         $return_details['client_tax'] = $Sale_Return['client']->tax_number;
-        $return_details['TaxNet'] = number_format($Sale_Return->TaxNet, helpers::price_decimals(), '.', '');
-        $return_details['discount'] = number_format($Sale_Return->discount, helpers::price_decimals(), '.', '');
-        $return_details['shipping'] = number_format($Sale_Return->shipping, helpers::price_decimals(), '.', '');
+        $return_details['TaxNet'] = number_format($Sale_Return->TaxNet * $docCurrency['rate'], helpers::price_decimals(), '.', '');
+        $return_details['discount'] = number_format($Sale_Return->discount * $docCurrency['rate'], helpers::price_decimals(), '.', '');
+        $return_details['shipping'] = number_format($Sale_Return->shipping * $docCurrency['rate'], helpers::price_decimals(), '.', '');
         $return_details['statut'] = $Sale_Return->statut;
         $return_details['sale_ref'] = $Sale_Return['sale'] ? $Sale_Return['sale']->Ref : '---';
         $return_details['Ref'] = $Sale_Return->Ref;
         $return_details['date'] = $Sale_Return->date.' '.$Sale_Return->time;
-        $return_details['GrandTotal'] = number_format($Sale_Return->GrandTotal, helpers::price_decimals(), '.', '');
-        $return_details['paid_amount'] = number_format($Sale_Return->paid_amount, helpers::price_decimals(), '.', '');
+        $return_details['GrandTotal'] = number_format($Sale_Return->GrandTotal * $docCurrency['rate'], helpers::price_decimals(), '.', '');
+        $return_details['paid_amount'] = number_format($Sale_Return->paid_amount * $docCurrency['rate'], helpers::price_decimals(), '.', '');
         $return_details['due'] = number_format($return_details['GrandTotal'] - $return_details['paid_amount'], helpers::price_decimals(), '.', '');
         $return_details['payment_status'] = $Sale_Return->payment_statut;
 
@@ -1254,6 +1313,14 @@ class SalesReturnController extends BaseController
             // Lines with quantity 0 were not actually returned — keep them off the PDF.
             if ((float) $detail->quantity <= 0) {
                 continue;
+            }
+
+            // Convert per-line monetary fields to the document currency (in-memory only,
+            // rate is 1.0 for base-currency documents). Percent discounts stay percentages.
+            $detail->price = $detail->price * $docCurrency['rate'];
+            $detail->total = $detail->total * $docCurrency['rate'];
+            if ($detail->discount_method == '2') {
+                $detail->discount = $detail->discount * $docCurrency['rate'];
             }
 
             // check if detail has sale_unit_id Or Null
@@ -1315,7 +1382,7 @@ class SalesReturnController extends BaseController
         }
 
         $settings = Setting::where('deleted_at', '=', null)->first();
-        $symbol = $helpers->Get_Currency_Code();
+        $symbol = $docCurrency['code'];
 
         $Html = view('pdf.Sales_Return_pdf', [
             'symbol' => $symbol,
@@ -1375,6 +1442,10 @@ class SalesReturnController extends BaseController
 
         $details = [];
         // Check If User Has Permission view All Records
+        // Warehouse half of the same rule: record_view says whose documents,
+        // the assigned warehouses say which warehouses they may come from.
+        $this->abortIfDocumentWarehouseDenied($SaleReturn);
+
         if (! $view_records) {
             // Check If User->id === SaleReturn->id
             $this->authorizeForUser($request->user('api'), 'check_record', $SaleReturn);

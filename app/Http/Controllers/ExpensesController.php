@@ -124,7 +124,7 @@ class ExpensesController extends BaseController
 
         $Expenses_category = ExpenseCategory::where('deleted_at', '=', null)->get(['id', 'name']);
         $accounts = Account::where('deleted_at', '=', null)->get(['id', 'account_name']);
-        $payment_methods = PaymentMethod::where('deleted_at', '=', null)->get(['id', 'name']);
+        $payment_methods = PaymentMethod::active()->where('deleted_at', '=', null)->get(['id', 'name']);
 
         // get warehouses assigned to user
         $user_auth = auth()->user();
@@ -346,6 +346,10 @@ class ExpensesController extends BaseController
             $expense = Expense::findOrFail($id);
 
             // Check If User Has Permission view All Records
+            // Warehouse half of the same rule: record_view says whose documents,
+            // the assigned warehouses say which warehouses they may come from.
+            $this->abortIfDocumentWarehouseDenied($expense);
+
             if (! $view_records) {
                 // Check If User->id === expense->id
                 $this->authorizeForUser($request->user('api'), 'check_record', $expense);
@@ -402,6 +406,10 @@ class ExpensesController extends BaseController
         $expense = Expense::findOrFail($id);
 
         // Check If User Has Permission view All Records
+        // Warehouse half of the same rule: record_view says whose documents,
+        // the assigned warehouses say which warehouses they may come from.
+        $this->abortIfDocumentWarehouseDenied($expense);
+
         if (! $view_records) {
             // Check If User->id === expense->id
             $this->authorizeForUser($request->user('api'), 'check_record', $expense);
@@ -439,6 +447,10 @@ class ExpensesController extends BaseController
             $expense = Expense::findOrFail($expense_id);
 
             // Check If User Has Permission view All Records
+            // Warehouse half of the same rule: record_view says whose documents,
+            // the assigned warehouses say which warehouses they may come from.
+            $this->abortIfDocumentWarehouseDenied($expense);
+
             if (! $view_records) {
                 // Check If User->id === expense->id
                 $this->authorizeForUser($request->user('api'), 'check_record', $expense);
@@ -471,8 +483,15 @@ class ExpensesController extends BaseController
         if ($last) {
             $item = $last->Ref;
             $nwMsg = explode('_', $item);
-            $inMsg = $nwMsg[1] + 1;
-            $code = $nwMsg[0].'_'.$inMsg;
+            // Refs from imports/demo data may not follow the EXP_n format
+            // (e.g. "DEMO-EXP-0015") — fall back to the trailing number.
+            if (count($nwMsg) >= 2 && is_numeric($nwMsg[1])) {
+                $code = $nwMsg[0].'_'.($nwMsg[1] + 1);
+            } elseif (preg_match('/(\d+)$/', $item, $m)) {
+                $code = 'EXP_'.((int) $m[1] + 1);
+            } else {
+                $code = 'EXP_'.($last->id + 1);
+            }
         } else {
             $code = 'EXP_1111';
         }
@@ -499,7 +518,7 @@ class ExpensesController extends BaseController
 
         $Expenses_category = ExpenseCategory::where('deleted_at', '=', null)->get(['id', 'name']);
         $accounts = Account::where('deleted_at', '=', null)->get(['id', 'account_name']);
-        $payment_methods = PaymentMethod::where('deleted_at', '=', null)->get(['id', 'name']);
+        $payment_methods = PaymentMethod::active()->where('deleted_at', '=', null)->get(['id', 'name']);
 
         return response()->json([
             'Expenses_category' => $Expenses_category,
@@ -522,6 +541,10 @@ class ExpensesController extends BaseController
         $Expense = Expense::where('deleted_at', '=', null)->findOrFail($id);
 
         // Check If User Has Permission view All Records
+        // Warehouse half of the same rule: record_view says whose documents,
+        // the assigned warehouses say which warehouses they may come from.
+        $this->abortIfDocumentWarehouseDenied($Expense);
+
         if (! $view_records) {
             // Check If User->id === Expense->id
             $this->authorizeForUser($request->user('api'), 'check_record', $Expense);
@@ -579,7 +602,7 @@ class ExpensesController extends BaseController
 
         $Expenses_category = ExpenseCategory::where('deleted_at', '=', null)->get(['id', 'name']);
         $accounts = Account::where('deleted_at', '=', null)->get(['id', 'account_name']);
-        $payment_methods = PaymentMethod::where('deleted_at', '=', null)->get(['id', 'name']);
+        $payment_methods = PaymentMethod::active()->where('deleted_at', '=', null)->get(['id', 'name']);
 
         return response()->json([
             'expense' => $data,

@@ -79,6 +79,11 @@ class SettingsApiController extends Controller
         }
 
         $s->default_currency_id = $default_currency_id;
+        // Locales the storefront can render, for the default-language select
+        // and the per-language copy editors.
+        $s->store_locales = store_locales();
+        $s->translatable_text_fields = StoreSetting::TRANSLATABLE_TEXT;
+        $s->text_translations = (object) ($s->text_translations ?? []);
         // The secrets themselves are $hidden on the model; the UI only needs
         // to know whether one is stored (leave-blank-keeps behaviour).
         $s->paypal_secret_set = trim((string) $s->paypal_client_secret) !== '';
@@ -87,6 +92,14 @@ class SettingsApiController extends Controller
         $s->flutterwave_hash_set = trim((string) $s->flutterwave_secret_hash) !== '';
         $s->razorpay_secret_set = trim((string) $s->razorpay_key_secret) !== '';
         $s->razorpay_webhook_secret_set = trim((string) $s->razorpay_webhook_secret) !== '';
+        $s->bkash_secret_set = trim((string) $s->bkash_app_secret) !== '';
+        $s->bkash_password_set = trim((string) $s->bkash_password) !== '';
+        $s->sslcommerz_password_set = trim((string) $s->sslcommerz_store_password) !== '';
+
+        // Where the storefront currently lives (custom path / root domain),
+        // plus the app origin so the UI can preview the URL while editing.
+        $s->store_effective_url = store_base_url();
+        $s->app_origin = rtrim(url('/'), '/');
 
         $pendingCustomersCount = \App\Models\EcommerceClient::where('status', 0)
             ->whereNull('deleted_at')
@@ -134,7 +147,7 @@ class SettingsApiController extends Controller
                 'enabled' => (int) filter_var($request->input('enabled'), FILTER_VALIDATE_BOOLEAN),
             ]);
         }
-        foreach (['registration_enabled', 'require_invite_code', 'require_admin_approval', 'require_email_verification', 'allow_cancellations', 'auto_approve_reviews', 'cookie_consent_enabled', 'wallet_enabled', 'wallet_allow_negative', 'wallet_withdrawal_enabled', 'payment_cod_enabled', 'payment_mobile_money_enabled', 'paypal_enabled', 'paypal_test_mode', 'paystack_enabled', 'flutterwave_enabled', 'razorpay_enabled'] as $regField) {
+        foreach (['registration_enabled', 'require_invite_code', 'require_admin_approval', 'require_email_verification', 'allow_cancellations', 'auto_approve_reviews', 'cookie_consent_enabled', 'wallet_enabled', 'wallet_allow_negative', 'wallet_withdrawal_enabled', 'payment_cod_enabled', 'payment_mobile_money_enabled', 'payment_stripe_enabled', 'payment_gcash_enabled', 'payment_bank_transfer_enabled', 'payment_cash_on_pickup_enabled', 'paypal_enabled', 'paypal_test_mode', 'paystack_enabled', 'flutterwave_enabled', 'razorpay_enabled', 'bkash_enabled', 'bkash_sandbox', 'sslcommerz_enabled', 'sslcommerz_sandbox', 'store_use_root_domain'] as $regField) {
             if ($request->has($regField)) {
                 $request->merge([
                     $regField => (int) filter_var($request->input($regField), FILTER_VALIDATE_BOOLEAN),
@@ -167,6 +180,16 @@ class SettingsApiController extends Controller
             ]);
         }
 
+        // Electronics theme slide/banner uploads arrive as
+        // theme_image__<list>__<index>; validate each one like hero_image.
+        $themeImageRules = [];
+        foreach (array_keys($request->allFiles()) as $fileKey) {
+            if (preg_match('/^theme_image__(?:[a-z_]+__)?(slides|banners|tiles)__(\d{1,2})$/', $fileKey)) {
+                $themeImageRules[$fileKey] = 'nullable|file|mimes:jpg,jpeg,png,webp|max:8192';
+            }
+        }
+        $request->validate($themeImageRules);
+
         // --- Validation ---
         $data = $request->validate([
             'enabled' => 'nullable|in:0,1',
@@ -189,6 +212,22 @@ class SettingsApiController extends Controller
             // Storefront checkout payment methods
             'payment_cod_enabled' => 'nullable|in:0,1',
             'payment_mobile_money_enabled' => 'nullable|in:0,1',
+            // Card payments can be switched off without clearing the Stripe keys.
+            'payment_stripe_enabled' => 'nullable|in:0,1',
+
+            // Manual/offline methods: GCash, bank transfer, cash on pickup
+            'payment_gcash_enabled' => 'nullable|in:0,1',
+            'gcash_account_name' => 'nullable|string|max:150',
+            'gcash_account_number' => 'nullable|string|max:60',
+            'gcash_instructions' => 'nullable|string|max:1000',
+            'payment_bank_transfer_enabled' => 'nullable|in:0,1',
+            'bank_name' => 'nullable|string|max:150',
+            'bank_account_name' => 'nullable|string|max:150',
+            'bank_account_number' => 'nullable|string|max:60',
+            'bank_branch' => 'nullable|string|max:150',
+            'bank_instructions' => 'nullable|string|max:1000',
+            'payment_cash_on_pickup_enabled' => 'nullable|in:0,1',
+            'pickup_instructions' => 'nullable|string|max:1000',
 
             // PayPal gateway (online-store checkout)
             'paypal_enabled' => 'nullable|in:0,1',
@@ -214,19 +253,40 @@ class SettingsApiController extends Controller
             'razorpay_key_secret' => 'nullable|string|max:500',
             'razorpay_webhook_secret' => 'nullable|string|max:191',
 
+            // bKash gateway (Tokenized Checkout; sandbox/live switch)
+            'bkash_enabled' => 'nullable|in:0,1',
+            'bkash_app_key' => 'nullable|string|max:191',
+            'bkash_app_secret' => 'nullable|string|max:500',
+            'bkash_username' => 'nullable|string|max:191',
+            'bkash_password' => 'nullable|string|max:500',
+            'bkash_sandbox' => 'nullable|in:0,1',
+
+            // SSLCommerz gateway (hosted checkout; sandbox/live switch)
+            'sslcommerz_enabled' => 'nullable|in:0,1',
+            'sslcommerz_store_id' => 'nullable|string|max:191',
+            'sslcommerz_store_password' => 'nullable|string|max:500',
+            'sslcommerz_sandbox' => 'nullable|in:0,1',
+
             'allow_overselling' => 'nullable|in:0,1',
             'hide_out_of_stock' => 'nullable|in:0,1',
             'hide_prices_for_guests' => 'nullable|in:0,1',
             'show_stock' => 'nullable|in:0,1',
 
             'store_name' => 'nullable|string|max:190',
-            'theme' => 'nullable|string|in:default,real_estate',
+            'theme' => 'nullable|string|in:default,real_estate,'.implode(',', \App\Support\StoreThemes::SKINS),
+            // Per-theme presentation options (JSON map keyed by theme).
+            'theme_options' => 'nullable',
             'primary_color' => 'nullable|string|max:20',
             'secondary_color' => 'nullable|string|max:20',
             'font_family' => 'nullable|string|max:100',
 
             'language' => 'nullable|string|max:10',
-            'default_currency_id' => 'required|integer',
+            'default_currency_id' => 'nullable|integer',
+            // Storefront display currency — distinct from default_currency_id,
+            // which sets the accounting base every amount is stored in.
+            'display_currency_id' => 'nullable|integer',
+            // Per-language copy: {field: {locale: text}} for TRANSLATABLE_TEXT.
+            'text_translations' => 'nullable',
             'default_warehouse_id' => 'nullable|integer',
             'warehouse_ids' => 'nullable',
             'store_all_warehouses' => 'nullable|in:0,1',
@@ -242,6 +302,10 @@ class SettingsApiController extends Controller
             'seo_meta_description' => 'nullable|string|max:1000',
             'store_domain' => 'nullable|string|max:190',
             'seo_title_template' => 'nullable|string|max:190',
+
+            // Store URL configuration (custom base path / root-domain mode)
+            'store_url_path' => 'nullable|string|max:100',
+            'store_use_root_domain' => 'nullable|in:0,1',
 
             'topbar_text_left' => 'nullable|string|max:190',
             'topbar_text_right' => 'nullable|string|max:190',
@@ -259,10 +323,32 @@ class SettingsApiController extends Controller
             'logo' => 'nullable|file|mimes:jpg,jpeg,png,webp|max:4096',
             'favicon' => 'nullable|file|mimes:jpg,jpeg,png,webp,ico|mimetypes:image/png,image/jpeg,image/webp,image/x-icon,image/vnd.microsoft.icon|max:2048',
             'hero_image' => 'nullable|file|mimes:jpg,jpeg,png,webp|max:8192',
+            'gcash_qr' => 'nullable|file|mimes:jpg,jpeg,png,webp|max:4096',
         ]);
 
+        // --- Store URL path: normalize + reject unsafe or reserved paths. The
+        // default 'online_store' is stored as NULL so untouched installs keep
+        // behaving exactly as before this setting existed. ---
+        if (array_key_exists('store_url_path', $data)) {
+            $raw = trim((string) $data['store_url_path'], "/ \t\n\r");
+            if ($raw === '' || strtolower($raw) === 'online_store') {
+                $data['store_url_path'] = null;
+            } else {
+                $clean = store_sanitize_path($raw);
+                if ($clean === null) {
+                    return response()->json([
+                        'message' => 'The store URL path is invalid or conflicts with a system route.',
+                        'errors' => ['store_url_path' => ['Use letters, numbers, dashes or underscores (e.g. "shop"), avoiding reserved system paths.']],
+                    ], 422);
+                }
+                $data['store_url_path'] = $clean;
+            }
+        }
+
+        $urlConfigTouched = array_key_exists('store_url_path', $data) || array_key_exists('store_use_root_domain', $data);
+
         // Gateway secrets: blank means "keep the stored one" (never echoed back).
-        foreach (['paypal_client_secret', 'paystack_secret_key', 'flutterwave_secret_key', 'flutterwave_secret_hash', 'razorpay_key_secret', 'razorpay_webhook_secret'] as $secretField) {
+        foreach (['paypal_client_secret', 'paystack_secret_key', 'flutterwave_secret_key', 'flutterwave_secret_hash', 'razorpay_key_secret', 'razorpay_webhook_secret', 'bkash_app_secret', 'bkash_password', 'sslcommerz_store_password'] as $secretField) {
             if (array_key_exists($secretField, $data) && trim((string) $data[$secretField]) === '') {
                 unset($data[$secretField]);
             }
@@ -373,6 +459,26 @@ class SettingsApiController extends Controller
             $data['favicon_path'] = 'images/store/'.$filename;
         }
 
+        // --- GCASH QR (600x600 max) ---
+        if ($request->hasFile('gcash_qr')) {
+            if ($s->gcash_qr_path && File::exists(public_path($s->gcash_qr_path))) {
+                File::delete(public_path($s->gcash_qr_path));
+            }
+
+            $ext = strtolower($request->file('gcash_qr')->guessExtension() ?: 'png');
+            $filename = (string) Str::uuid().'.'.$ext;
+
+            Image::make($request->file('gcash_qr')->getRealPath())
+                ->resize(600, 600, function ($c) {
+                    $c->aspectRatio();
+                    $c->upsize();
+                })
+                ->encode($ext, 88)
+                ->save($targetDir.'/'.$filename);
+
+            $data['gcash_qr_path'] = 'images/store/'.$filename;
+        }
+
         // --- HERO IMAGE (1600x800 max) ---
         if ($request->hasFile('hero_image')) {
             if ($s->hero_image_path && File::exists(public_path($s->hero_image_path))) {
@@ -391,6 +497,70 @@ class SettingsApiController extends Controller
                 ->save($targetDir.'/'.$filename);
 
             $data['hero_image_path'] = 'images/store/'.$filename;
+        }
+
+        // --- THEME OPTIONS (skin themes: electronics, toys, …) ---
+        // theme_options = {<theme>: {...}}; each theme's support class sanitizes
+        // its own map. Uploaded images arrive as theme_image__<theme>__<list>__<i>
+        // (legacy electronics form: theme_image__<list>__<i>).
+        if ($request->has('theme_options')) {
+            $existing = is_array($s->theme_options) ? $s->theme_options : [];
+            $incoming = $request->input('theme_options');
+            if (is_string($incoming)) {
+                $incoming = json_decode($incoming, true);
+            }
+            if (! is_array($incoming)) {
+                $incoming = [];
+            }
+            // Legacy payload without a theme key = electronics options.
+            if (! array_intersect(array_keys($incoming), \App\Support\StoreThemes::SKINS)) {
+                $incoming = [\App\Support\ElectronicsTheme::KEY => $incoming];
+            }
+
+            $themeDir = public_path('images/store/theme');
+            foreach (\App\Support\StoreThemes::SKINS as $themeKey) {
+                if (! array_key_exists($themeKey, $incoming)) {
+                    continue;
+                }
+                $clean = \App\Support\StoreThemes::sanitize($themeKey, $incoming[$themeKey]);
+
+                foreach ($request->allFiles() as $fileKey => $file) {
+                    if (! $file || ! preg_match('/^theme_image__(?:([a-z_]+)__)?(slides|banners|tiles)__(\d{1,2})$/', $fileKey, $m)) {
+                        continue;
+                    }
+                    $fileTheme = $m[1] !== '' ? $m[1] : \App\Support\ElectronicsTheme::KEY;
+                    if ($fileTheme !== $themeKey) {
+                        continue;
+                    }
+                    [$list, $idx] = [$m[2], (int) $m[3]];
+                    if (! isset($clean[$list][$idx])) {
+                        continue;
+                    }
+                    if (! File::exists($themeDir)) {
+                        File::makeDirectory($themeDir, 0755, true);
+                    }
+                    $ext = strtolower($file->guessExtension() ?: 'jpg');
+                    $filename = (string) Str::uuid().'.'.$ext;
+                    Image::make($file->getRealPath())
+                        ->resize(1600, 1000, function ($c) {
+                            $c->aspectRatio();
+                            $c->upsize();
+                        })
+                        ->encode($ext, 82)
+                        ->save($themeDir.'/'.$filename);
+
+                    $old = (string) ($clean[$list][$idx]['image'] ?? '');
+                    if ($old !== '' && Str::startsWith($old, 'images/store/theme/') && File::exists(public_path($old))) {
+                        File::delete(public_path($old));
+                    }
+                    $clean[$list][$idx]['image'] = 'images/store/theme/'.$filename;
+                }
+
+                $existing[$themeKey] = $clean;
+            }
+            $data['theme_options'] = $existing;
+        } else {
+            unset($data['theme_options']);
         }
 
         // ============================
@@ -414,7 +584,31 @@ class SettingsApiController extends Controller
         // SAVE CHANGES
         // ============================
 
+        // A partial submit that never mentions the map must leave it alone.
+        if ($request->has('text_translations')) {
+            $data['text_translations'] = StoreSetting::cleanTextTranslations($data['text_translations'] ?? null);
+        } else {
+            unset($data['text_translations']);
+        }
+
         $s->fill($data)->save();
+
+        // store_settings() is cached for 10 minutes — drop it on every save so
+        // changes (storefront default language/currency included) apply now.
+        store_url_config_clear();
+
+        // Store URL changed: drop the cached config so the new base path takes
+        // effect on the next request, and rebuild Laravel's route cache if one
+        // exists (the storefront prefix is baked into cached routes).
+        if ($urlConfigTouched) {
+            try {
+                if (app()->routesAreCached()) {
+                    \Illuminate\Support\Facades\Artisan::call('route:clear');
+                }
+            } catch (\Throwable $e) {
+                // best effort — an admin can still run `php artisan route:clear`
+            }
+        }
 
         return response()->json($s->fresh());
     }
@@ -439,6 +633,7 @@ class SettingsApiController extends Controller
             'menus' => $menus,
             'pages' => $pages,
             'collections' => $collections,
+            'locales' => store_locales(),
         ]);
     }
 
@@ -493,8 +688,21 @@ class SettingsApiController extends Controller
                 if (! in_array($type, $allowedTypes, true)) {
                     $type = 'url';
                 }
+                // Per-locale label; blanks fall back to `label` on the storefront.
+                $labels = $it['label_translations'] ?? [];
+                if (is_string($labels)) {
+                    $labels = json_decode($labels, true);
+                }
+                $cleanLabels = [];
+                foreach ((array) $labels as $locale => $text) {
+                    if (isset(store_locales()[$locale]) && trim((string) $text) !== '') {
+                        $cleanLabels[$locale] = mb_substr(trim((string) $text), 0, 80);
+                    }
+                }
+
                 $clean[] = [
                     'label' => mb_substr($label, 0, 80),
+                    'label_translations' => (object) $cleanLabels,
                     'type' => $type,
                     'value' => mb_substr(trim((string) ($it['value'] ?? '')), 0, 255),
                 ];

@@ -1,5 +1,5 @@
 @php
-  $currency = $currency ?? (isset($s) ? ($s->currency_code ?? '$') : '$');
+  $currency = $currency ?? store_currency()['symbol'];
 @endphp
 @include('store.partials.home-modals-scripts', ['currency' => $currency, 'nlBtn' => __('messages.Subscribe')])
 <script>

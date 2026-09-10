@@ -4,6 +4,8 @@ namespace App\Jobs;
 
 use App\Models\SyncJob;
 use App\Models\WooCommerceSetting;
+use App\Services\WooCommerce\SyncQueue;
+use App\Services\WooCommerce\SyncOptions;
 use App\Services\WooCommerce\SyncService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -110,7 +112,7 @@ class WooCommerceProductsPullJob implements ShouldQueue
         try {
             $sync = SyncService::fromSettings($settings);
 
-            $batchSize = (int) env('WOO_PRODUCTS_PER_JOB', 5);
+            $batchSize = SyncOptions::int('products_per_job');
             $batchSize = max(1, min(200, $batchSize));
 
             $cursorPage = (int) ($state['cursor_page'] ?? 1);
@@ -180,13 +182,12 @@ class WooCommerceProductsPullJob implements ShouldQueue
                 $dbJob->save();
             }
 
-            // If not done, queue the next batch on the same dedicated queue.
+            // If not done, queue the next batch on the shared WooCommerce queue.
             // Without this, the job can get stuck in stage=queued_next_batch with no queued work.
             if (!$done) {
-                $queue = $this->syncJobId ? ('woocommerce-sync-'.(int) $this->syncJobId) : 'default';
                 self::dispatch($this->progressKey, $this->onlyUnsynced, $this->syncJobId)
-                    ->onConnection('database')
-                    ->onQueue($queue);
+                    ->onConnection(SyncQueue::CONNECTION)
+                    ->onQueue(SyncQueue::NAME);
             }
         } catch (\Throwable $e) {
             if ($e->getMessage() === self::CANCELLED_EXCEPTION) {

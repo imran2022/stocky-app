@@ -22,7 +22,7 @@ function csrfHeaders() {
     return meta ? { 'X-CSRF-TOKEN': meta.getAttribute('content') } : {};
 }
 
-async function request(method, url, { params, body, formData } = {}) {
+async function request(method, url, { params, body, formData, raw } = {}) {
     let full = BASE + url.replace(/^\//, '');
     if (params) {
         const qs = new URLSearchParams();
@@ -63,8 +63,9 @@ async function request(method, url, { params, body, formData } = {}) {
         try { err.data = await res.json(); } catch (e) { /* not JSON */ }
         throw err;
     }
-    if (res.status === 204) return null;
-    return res.json();
+    if (res.status === 204) return raw ? { status: 204, data: null } : null;
+    const data = await res.json();
+    return raw ? { status: res.status, data } : data;
 }
 
 /** GET a binary response (PDF downloads) and save it via a temporary link. */
@@ -117,4 +118,10 @@ export default {
     delete: (url) => request('DELETE', url),
     download,
     blob,
+    /**
+     * Same as the verbs above but resolves `{ status, data }` instead of the
+     * bare body. The POS axios shim needs the HTTP status (its callers read
+     * `response.status`), which the plain verbs discard.
+     */
+    raw: (method, url, opts = {}) => request(method, url, { ...opts, raw: true }),
 };

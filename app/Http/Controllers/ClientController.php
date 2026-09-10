@@ -12,6 +12,8 @@ use App\Models\PaymentSaleReturns;
 use App\Models\Quotation;
 use App\Models\Sale;
 use App\Models\SaleReturn;
+use App\Models\ServiceJob;
+use App\Models\ServiceJobPayment;
 use App\Models\Setting;
 use App\utils\helpers;
 use Carbon\Carbon;
@@ -116,6 +118,11 @@ class ClientController extends BaseController
 
             $item['return_Due'] = $item['total_amount_return'] - $item['total_paid_return'];
 
+            $service = ServiceJob::dueTotalsForClient($client->id);
+            $item['service_total_amount'] = $service['total'];
+            $item['service_total_paid'] = $service['paid'];
+            $item['service_due'] = $service['due'];
+
             $item['id'] = $client->id;
             $item['firstname'] = $client->firstname;
             $item['lastname'] = $client->lastname;
@@ -134,7 +141,7 @@ class ClientController extends BaseController
             $item['points'] = $client->points;
             $item['opening_balance'] = $client->opening_balance ?? 0;
             $item['credit_limit'] = $client->credit_limit ?? 0;
-            $item['net_balance'] = ($client->opening_balance ?? 0) + $item['due'] - $item['return_Due'];
+            $item['net_balance'] = ($client->opening_balance ?? 0) + $item['due'] + $item['service_due'] - $item['return_Due'];
             $data[] = $item;
         }
 
@@ -146,7 +153,7 @@ class ClientController extends BaseController
                 $query->select('client_id')->from('ecommerce_clients');
             })->count();
 
-        $payment_methods = PaymentMethod::whereNull('deleted_at')->get(['id', 'name']);
+        $payment_methods = PaymentMethod::active()->whereNull('deleted_at')->get(['id', 'name']);
 
         return response()->json([
             'clients' => $data,
@@ -211,7 +218,7 @@ class ClientController extends BaseController
         $client = Client::where('deleted_at', '=', null)->findOrFail($id);
         
         $accounts = Account::where('deleted_at', '=', null)->orderBy('id', 'desc')->get(['id', 'account_name']);
-        $payment_methods = PaymentMethod::whereNull('deleted_at')->get(['id', 'name']);
+        $payment_methods = PaymentMethod::active()->whereNull('deleted_at')->get(['id', 'name']);
         
         return response()->json([
             'client' => $client,
@@ -785,6 +792,56 @@ class ClientController extends BaseController
                     $paid_amount_total -= $amount;
                 }
             }
+
+            // STEP 3: Pay open service jobs (oldest first) with whatever is left
+            if ($paid_amount_total > 0) {
+                $client_jobs_due = ServiceJob::countsTowardDue()
+                    ->where('client_id', $request->client_id)
+                    ->whereRaw('total_amount - paid_amount > 0.0001')
+                    ->orderBy('created_at', 'asc')
+                    ->orderBy('id', 'asc')
+                    ->get();
+
+                $serviceJobController = app(ServiceJobController::class);
+                $servicePaymentController = app(ServiceJobPaymentController::class);
+
+                foreach ($client_jobs_due as $job) {
+                    if ($paid_amount_total <= 0) {
+                        break;
+                    }
+                    $due = round((float) $job->total_amount - (float) $job->paid_amount, 2);
+                    if ($due <= 0) {
+                        continue;
+                    }
+                    $amount = min($due, $paid_amount_total);
+
+                    ServiceJobPayment::create([
+                        'Ref' => $servicePaymentController->getNumberOrder(),
+                        'service_job_id' => $job->id,
+                        'user_id' => Auth::user()->id,
+                        'date' => Carbon::now(),
+                        'montant' => $amount,
+                        'change' => 0,
+                        'payment_method_id' => $request['payment_method_id'] ?: null,
+                        'account_id' => $request['account_id'] ? $request['account_id'] : null,
+                        'payment_kind' => 'payment',
+                        'notes' => $request['notes'],
+                    ]);
+
+                    if ($request['account_id']) {
+                        $account = Account::find($request['account_id']);
+                        if ($account) {
+                            $account->update([
+                                'balance' => $account->balance + $amount,
+                            ]);
+                        }
+                    }
+
+                    $serviceJobController->recalcTotals($job->fresh());
+
+                    $paid_amount_total -= $amount;
+                }
+            }
         }
 
         return response()->json(['success' => true]);
@@ -1002,6 +1059,72 @@ class ClientController extends BaseController
      * Params: id (client_id, required), limit, page, search
      * Returns: { totalRows, payments: [] }
      */
+    // ------------- Service jobs of a customer (customer details tab) -------------\\
+
+    public function serviceJobsByClient(Request $request)
+    {
+        $request->validate([
+            'id' => 'required|integer|exists:clients,id',
+            'limit' => 'sometimes|integer',
+            'page' => 'sometimes|integer',
+            'search' => 'sometimes|string|nullable',
+        ]);
+
+        $this->authorizeForUser($request->user('api'), 'view', Client::class);
+
+        $perPage = (int) ($request->input('limit', 10));
+        $page = max(1, (int) $request->input('page', 1));
+        $offSet = ($page - 1) * ($perPage > 0 ? $perPage : 0);
+
+        $q = ServiceJob::query()
+            ->whereNull('deleted_at')
+            ->with('technician:id,name')
+            ->where('client_id', $request->id)
+            ->when($request->filled('search'), function ($query) use ($request) {
+                $s = $request->input('search');
+                $query->where(function ($qr) use ($s) {
+                    $qr->where('Ref', 'LIKE', "%{$s}%")
+                        ->orWhere('service_item', 'LIKE', "%{$s}%")
+                        ->orWhere('status', 'LIKE', "%{$s}%")
+                        ->orWhere('payment_status', 'LIKE', "%{$s}%");
+                });
+            });
+
+        $totalRows = (clone $q)->count();
+
+        if ($perPage === -1) {
+            $perPage = $totalRows;
+            $offSet = 0;
+        }
+
+        $rows = $q->orderByDesc('id')
+            ->offset($offSet)
+            ->limit($perPage)
+            ->get();
+
+        $data = [];
+        foreach ($rows as $job) {
+            $data[] = [
+                'id' => $job->id,
+                'date' => $job->created_at ? $job->created_at->format('Y-m-d') : null,
+                'Ref' => $job->Ref,
+                'service_item' => $job->service_item,
+                'technician_name' => optional($job->technician)->name,
+                'statut' => $job->status,
+                'counts_toward_due' => in_array($job->status, ServiceJob::DUE_STATUSES, true),
+                'GrandTotal' => (float) $job->total_amount,
+                'paid_amount' => (float) $job->paid_amount,
+                'due' => (float) $job->total_amount - (float) $job->paid_amount,
+                'payment_status' => $job->payment_status,
+            ];
+        }
+
+        return response()->json([
+            'totalRows' => $totalRows,
+            'service_jobs' => $data,
+        ]);
+    }
+
     public function paymentsByClient(Request $request)
     {
         $request->validate([
@@ -1072,9 +1195,39 @@ class ClientController extends BaseController
             return (array) $item;
         });
 
-        // Combine and sort all payments
+        // Get service job payments (payment method is optional on those rows)
+        $servicePayments = DB::table('service_job_payments')
+            ->join('service_jobs', 'service_job_payments.service_job_id', '=', 'service_jobs.id')
+            ->leftJoin('payment_methods', 'service_job_payments.payment_method_id', '=', 'payment_methods.id')
+            ->whereNull('service_job_payments.deleted_at')
+            ->whereNull('service_jobs.deleted_at')
+            ->where('service_jobs.client_id', $request->id)
+            ->when($request->filled('search'), function ($query) use ($request) {
+                $s = $request->input('search');
+                $query->where(function ($qr) use ($s) {
+                    $qr->where('service_job_payments.Ref', 'LIKE', "%{$s}%")
+                        ->orWhere('service_job_payments.date', 'LIKE', "%{$s}%")
+                        ->orWhere('service_jobs.Ref', 'LIKE', "%{$s}%")
+                        ->orWhere('payment_methods.name', 'LIKE', "%{$s}%");
+                });
+            })
+            ->select(
+                'service_job_payments.id',
+                'service_job_payments.date',
+                'service_job_payments.Ref as Ref',
+                'service_jobs.Ref as Sale_Ref',
+                'payment_methods.name as payment_method',
+                'service_job_payments.montant',
+                DB::raw("'service' as payment_type")
+            )
+            ->get()->map(function ($item) {
+                return (array) $item;
+            });
+
+        // Combine and sort all payments (three tables share no id space, so sort by date)
         $allPayments = $salesPayments->merge($openingBalancePayments)
-            ->sortByDesc('id')
+            ->merge($servicePayments)
+            ->sortBy([['date', 'desc'], ['id', 'desc']])
             ->values()
             ->all();
 
@@ -1147,13 +1300,19 @@ class ClientController extends BaseController
             ->where('sales.client_id', $client->id)
             ->sum('payment_sales.montant');
 
+        // -------- SERVICE JOBS TOTALS --------
+        $service = ServiceJob::dueTotalsForClient($client->id);
+
         // -------- ATTACH STATS TO CLIENT --------
         $client->salesGrand = $total_amount;
         $client->salesPaid = $total_paid;
         $client->sale_due = $sale_due;
         $client->return_due = $return_due;
+        $client->serviceGrand = $service['total'];
+        $client->servicePaid = $service['paid'];
+        $client->service_due = $service['due'];
         $client->paymentsTotal = $payments_total;
-        $client->netBalance = ($client->opening_balance ?? 0) + $sale_due - $return_due;
+        $client->netBalance = ($client->opening_balance ?? 0) + $sale_due + $service['due'] - $return_due;
 
         // -------- WALLET & LOYALTY --------
         $walletService = new \App\Services\WalletService();
@@ -1214,14 +1373,19 @@ class ClientController extends BaseController
             ->where('client_id', $client->id)
             ->sum('GrandTotal');
 
+        $service = ServiceJob::dueTotalsForClient($client->id);
+
         // Attach stats to client
         $client->salesGrand = $total_amount;
         $client->salesPaid = $total_paid;
         $client->sale_due = $sale_due;
         $client->return_due = $return_due;
+        $client->serviceGrand = $service['total'];
+        $client->servicePaid = $service['paid'];
+        $client->service_due = $service['due'];
         $client->paymentsTotal = $payments_total;
         $client->quotationsTotal = $quotations_total;
-        $client->netBalance = ($client->opening_balance ?? 0) + $sale_due - $return_due;
+        $client->netBalance = ($client->opening_balance ?? 0) + $sale_due + $service['due'] - $return_due;
 
         // ---------------- FULL DATA (NO FILTERS) ----------------
         $sales = Sale::with('warehouse:id,name')
@@ -1260,12 +1424,35 @@ class ClientController extends BaseController
             )
             ->orderByDesc('client_opening_balance_payments.id')->get();
 
-        // Combine both payment types
+        // Get service job payments (payment method is optional on those rows)
+        $servicePayments = DB::table('service_job_payments')
+            ->join('service_jobs', 'service_job_payments.service_job_id', '=', 'service_jobs.id')
+            ->leftJoin('payment_methods', 'service_job_payments.payment_method_id', '=', 'payment_methods.id')
+            ->whereNull('service_job_payments.deleted_at')
+            ->whereNull('service_jobs.deleted_at')
+            ->where('service_jobs.client_id', $client->id)
+            ->select(
+                'service_job_payments.date',
+                'service_job_payments.Ref',
+                'service_jobs.Ref as Sale_Ref',
+                'payment_methods.name as payment_method',
+                'service_job_payments.montant',
+                DB::raw("'service' as payment_type")
+            )
+            ->orderByDesc('service_job_payments.id')->get();
+
+        // Combine all payment types
         $payments = $salesPayments->merge($openingBalancePayments)
+            ->merge($servicePayments)
             ->sortByDesc(function($payment) {
                 return $payment->date;
             })
             ->values();
+
+        $serviceJobs = ServiceJob::with('technician:id,name')
+            ->whereNull('deleted_at')
+            ->where('client_id', $client->id)
+            ->orderByDesc('id')->get();
 
         $quotations = Quotation::with('warehouse:id,name')
             ->whereNull('deleted_at')
@@ -1280,7 +1467,7 @@ class ClientController extends BaseController
         // ---------------- PDF ----------------
         $settings = Setting::where('deleted_at', '=', null)->first();
         $html = view('pdf.customer_ledger', compact(
-            'client', 'sales', 'payments', 'quotations', 'returns', 'settings'
+            'client', 'sales', 'payments', 'quotations', 'returns', 'serviceJobs', 'settings'
         ))->render();
 
         $arabic = new Arabic;

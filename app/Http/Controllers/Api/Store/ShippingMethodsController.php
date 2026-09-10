@@ -31,7 +31,12 @@ class ShippingMethodsController extends Controller
             'countries' => $m->regions->pluck('country')->values(),
         ]);
 
-        return response()->json(['methods' => $methods]);
+        return response()->json([
+            'methods' => $methods,
+            // The canonical list the region matcher understands, so the picker
+            // cannot produce a country checkout will fail to recognise.
+            'country_options' => \App\Services\CountryService::options(),
+        ]);
     }
 
     public function store(Request $request)

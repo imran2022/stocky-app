@@ -920,6 +920,20 @@ class AutoUpdateController extends Controller
             81 => 'loyalty_rewards',
             82 => 'ewallet',
             83 => 'business_modules',
+            84 => 'products_sold_summary',
+            85 => 'zatca_settings',
+            // Multi-Currency: change the currency of a document
+            // (sale/purchase/quotation/POS pickers)
+            86 => 'multi_currency',
+            // Integrations platform
+            87 => 'slack_settings',
+            88 => 'telegram_settings',
+            89 => 'salla_settings',
+            90 => 'xero_settings',
+            91 => 'prestashop_settings',
+            92 => 'google_sheets_settings',
+            93 => 'mailchimp_settings',
+            94 => 'jumia_settings',
         ];
 
         foreach ($permissions as $permission_slug) {
@@ -1099,6 +1113,11 @@ class AutoUpdateController extends Controller
 
     private function restoreDatabaseFromSql(string $sqlPath): bool
     {
+        // Shared hosting often removes these through disable_functions.
+        if (! function_exists('exec') || ! function_exists('escapeshellarg')) {
+            return false;
+        }
+
         $dbUser = env('DB_USERNAME');
         $dbPass = env('DB_PASSWORD');
         $dbHost = env('DB_HOST', '127.0.0.1');

@@ -4,7 +4,8 @@
  * Goals:
  *   - Make the POS installable and bootable offline (app shell).
  *   - NEVER interfere with the existing offline-sync logic in
- *     resources/src/utils/globalOfflineSync.js or resources/src/utils/index.js.
+ *     resources/src/pos-compat/util.js (offlinePos + shadowStock) and
+ *     resources/src/pages/pos/PosPage.vue (trySyncOfflineSales).
  *
  * Non-negotiable rules:
  *   1. Only GET requests are intercepted. All POST/PUT/PATCH/DELETE pass
@@ -18,7 +19,30 @@
  */
 
 // Bump this when deploying changes so old caches are purged.
-const VERSION = 'stocky-pwa-v6';
+const VERSION = 'stocky-pwa-v9';
+
+// Configurable storefront base path, passed on the registration URL as
+// ?store_base=/shop (or '/' when the store runs from the root domain).
+// Old registrations without the param keep the legacy default.
+const STORE_BASE = (() => {
+  try {
+    const raw = new URL(self.location.href).searchParams.get('store_base');
+    if (!raw) return '/online_store';
+    const clean = '/' + raw.replace(/^\/+|\/+$/g, '');
+    return clean; // '/' means root-domain mode
+  } catch (e) {
+    return '/online_store';
+  }
+})();
+
+// In root-domain mode the store owns every path except these system prefixes
+// (mirrors store_reserved_paths() in app/Support/store_settings.php).
+const NON_STORE_PREFIXES = [
+  '/api', '/setup', '/update', '/system-update', '/password', '/login', '/logout',
+  '/next', '/dashboard-next', '/portal', '/recruit', '/api-docs', '/csrf-token',
+  '/session', '/invoice', '/customer-display', '/quickbooks', '/google-calendar',
+  '/pwa', '/storage', '/vendor', '/images', '/css', '/js', '/fonts', '/pwa_images',
+];
 const STATIC_CACHE = `${VERSION}-static`;
 const SHELL_CACHE = `${VERSION}-shell`;
 
@@ -56,9 +80,21 @@ const NETWORK_ONLY_PREFIXES = [
   '/livewire/',
 ];
 
+// Vite's build manifest must never be served from cache: swWarm.js reads it to
+// learn which files the CURRENT build produced. A cached copy from an earlier
+// build makes the page ask the worker to warm chunk URLs that no longer exist,
+// producing a burst of 404s whose HTTP referer is this script's URL.
+const MANIFEST_PATH = '/js/.vite/manifest.json';
+
+// Content-hashed output of the admin (Stocky Next) Vite build. Everything the
+// build emits under /js/ lands in one of these; /js/portal/, /js/customer-display/
+// and /js/storefront.* come from other builds and are deliberately excluded.
+const BUILD_OUTPUT_RE = /^\/js\/(chunks\/|assets\/|app\.)/;
+
 // Static asset patterns that are safe to cache (cache-first).
 function isStaticAsset(url) {
   const p = url.pathname;
+  if (p === MANIFEST_PATH || p.startsWith('/js/.vite/')) return false;
   return (
     p.startsWith('/js/') ||
     p.startsWith('/css/') ||
@@ -134,6 +170,66 @@ self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }
+  // Cache-warming request from the page: the SPA posts the full list of built
+  // asset URLs (from /js/.vite/manifest.json) after boot, so lazily-loaded
+  // chunks that were never visited still open offline. GET, same-origin,
+  // static-path URLs only — everything else is ignored.
+  if (event.data && event.data.type === 'CACHE_URLS' && Array.isArray(event.data.urls)) {
+    const urls = event.data.urls.filter((u) => {
+      if (typeof u !== 'string') return false;
+      try {
+        const parsed = new URL(u, self.location.origin);
+        return parsed.origin === self.location.origin && isStaticAsset(parsed);
+      } catch (e) {
+        return false;
+      }
+    });
+    if (!urls.length) return;
+    event.waitUntil(
+      (async () => {
+        const cache = await caches.open(STATIC_CACHE);
+        await Promise.all(
+          urls.map(async (u) => {
+            try {
+              const request = new Request(u);
+              if (await cache.match(request)) return;
+              const resp = await fetch(request);
+              if (resp && resp.ok && resp.status === 200 && resp.type === 'basic') {
+                await cache.put(request, resp);
+              }
+            } catch (e) {
+              // Best-effort: a missing chunk just stays uncached.
+            }
+          })
+        );
+
+        // The manifest the page just read is the authoritative file list for
+        // the build that is live RIGHT NOW, so any build output still cached
+        // but absent from it belongs to a previous build. Vite deletes those
+        // files on rebuild, so keeping them means serving code that no longer
+        // exists and re-requesting URLs that can only 404.
+        const keep = new Set();
+        urls.forEach((u) => {
+          try { keep.add(new URL(u, self.location.origin).pathname); } catch (e) { /* skip */ }
+        });
+        let pruned = 0;
+        for (const req of await cache.keys()) {
+          let path;
+          try { path = new URL(req.url).pathname; } catch (e) { continue; }
+          if (BUILD_OUTPUT_RE.test(path) && !keep.has(path)) {
+            await cache.delete(req);
+            pruned++;
+          }
+        }
+        if (pruned) {
+          // The stored HTML shells reference the files just deleted, so
+          // replaying one offline would boot a build that is gone — a blank
+          // screen. Drop them; the next online navigation stores a fresh one.
+          await caches.delete(SHELL_CACHE);
+        }
+      })()
+    );
+  }
 });
 
 self.addEventListener('fetch', (event) => {
@@ -181,8 +277,20 @@ function shellKeyFor(url) {
   const p = url.pathname;
   if (p === '/portal' || p.startsWith('/portal/')) return '/__shell_portal__';
   if (p === '/customer-display' || p.startsWith('/customer-display/')) return '/__shell_customer_display__';
-  if (p === '/online_store' || p.startsWith('/online_store/')) return '/__shell_store__';
-  return '/__shell_app__';
+  // The Vue 3 admin SPA is served by exactly ONE route: /next/{any?}. Every
+  // other authenticated document (invoice prints, /pwa, setup screens, the
+  // legacy dashboard) is a page in its own right — letting one of those
+  // overwrite '/__shell_app__' means a later offline hit on /next/pos restores
+  // an invoice, i.e. a blank app. Returning null = "cache no shell for this".
+  if (p === '/next' || p.startsWith('/next/')) return '/__shell_app__';
+  if (STORE_BASE === '/') {
+    // Root-domain store: everything except system prefixes is the storefront.
+    // (/customer/* hosts the store auth pages in this mode.)
+    const isSystem = NON_STORE_PREFIXES.some(pre => p === pre || p.startsWith(pre + '/'));
+    return isSystem ? null : '/__shell_store__';
+  }
+  if (p === STORE_BASE || p.startsWith(STORE_BASE + '/')) return '/__shell_store__';
+  return null;
 }
 
 async function handleNavigation(request) {
@@ -194,19 +302,19 @@ async function handleNavigation(request) {
       networkResponse &&
       networkResponse.ok &&
       networkResponse.status === 200 &&
-      networkResponse.type === 'basic'
+      networkResponse.type === 'basic' &&
+      shellKey
     ) {
       const cache = await caches.open(SHELL_CACHE);
       cache.put(shellKey, networkResponse.clone()).catch(() => {});
     }
     return networkResponse;
   } catch (e) {
-    const cache = await caches.open(SHELL_CACHE);
-    // Try the surface-specific shell first, then fall back to the generic
-    // app shell, then to the offline page.
-    const shell =
-      (await cache.match(shellKey)) ||
-      (await cache.match('/__shell_app__'));
+    // A page with no shell of its own (see shellKeyFor) must not be answered
+    // with some other surface's HTML — go straight to the offline page.
+    const shell = shellKey
+      ? await (await caches.open(SHELL_CACHE)).match(shellKey)
+      : null;
     if (shell) return shell;
     const staticCache = await caches.open(STATIC_CACHE);
     const offline = await staticCache.match(OFFLINE_URL);
