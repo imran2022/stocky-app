@@ -26,6 +26,7 @@ use App\Models\WarehouseLocation;
 use App\Models\ProductWarehouseLocation;
 use App\Models\PurchaseDetail;
 use App\Models\SaleDetail;
+use App\Models\SaleReturnDetails;
 use App\Services\ProductGalleryService;
 use App\utils\helpers;
 use Carbon\Carbon;
@@ -334,10 +335,36 @@ class ProductsController extends BaseController
                 ->where('sales.statut', 'completed')
                 ->where('sale_details.date', '>=', now()->subDays(30)->format('Y-m-d'))
                 ->sum('sale_details.quantity');
+            // Previous 30-day window (day 31-60 ago) — purely so the frontend can
+            // show a trend arrow against the current 30-day figure above.
+            $item['total_sold_prev30d'] = (float) SaleDetail::join('sales', 'sales.id', '=', 'sale_details.sale_id')
+                ->where('sale_details.product_id', $product->id)
+                ->where('sales.statut', 'completed')
+                ->whereBetween('sale_details.date', [
+                    now()->subDays(60)->format('Y-m-d'),
+                    now()->subDays(31)->format('Y-m-d'),
+                ])
+                ->sum('sale_details.quantity');
             $item['last_sold_date'] = SaleDetail::join('sales', 'sales.id', '=', 'sale_details.sale_id')
                 ->where('sale_details.product_id', $product->id)
                 ->where('sales.statut', 'completed')
                 ->max('sale_details.date');
+
+            // Return Rate: lifetime returned quantity vs lifetime sold quantity —
+            // a 30-day window is too small a sample for most products to make this
+            // percentage meaningful, so this deliberately uses all-time totals
+            // rather than the 30-day figures above.
+            $lifetimeSold = (float) SaleDetail::join('sales', 'sales.id', '=', 'sale_details.sale_id')
+                ->where('sale_details.product_id', $product->id)
+                ->where('sales.statut', 'completed')
+                ->sum('sale_details.quantity');
+            $lifetimeReturned = (float) SaleReturnDetails::join('sale_returns', 'sale_returns.id', '=', 'sale_return_details.sale_return_id')
+                ->where('sale_return_details.product_id', $product->id)
+                ->whereNull('sale_returns.deleted_at')
+                ->sum('sale_return_details.quantity');
+            $item['return_rate'] = $lifetimeSold > 0
+                ? round(($lifetimeReturned / $lifetimeSold) * 100, 1)
+                : null;
 
             // Warehouse Count: how many of the warehouses this user can see actually
             // carry stock (qty > 0) of this product right now — same warehouse

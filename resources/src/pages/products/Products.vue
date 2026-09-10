@@ -213,6 +213,25 @@
         <template v-else-if="column.key === 'total_sold_30d'">
           {{ record.total_sold_30d ? record.total_sold_30d : 0 }}
         </template>
+        <template v-else-if="column.key === 'sales_trend'">
+          <a-tooltip v-if="salesTrend(record).direction === 'up'" :title="`${record.total_sold_30d} vs ${record.total_sold_prev30d} pcs (previous 30 days)`">
+            <span style="color: #389e0d; font-weight: 600"><ArrowUpOutlined /> {{ salesTrend(record).pct }}%</span>
+          </a-tooltip>
+          <a-tooltip v-else-if="salesTrend(record).direction === 'down'" :title="`${record.total_sold_30d} vs ${record.total_sold_prev30d} pcs (previous 30 days)`">
+            <span style="color: #cf1322; font-weight: 600"><ArrowDownOutlined /> {{ salesTrend(record).pct }}%</span>
+          </a-tooltip>
+          <span v-else class="muted">—</span>
+        </template>
+        <template v-else-if="column.key === 'revenue_30d'">
+          <span v-if="revenue30d(record) === null" class="muted">—</span>
+          <span v-else>{{ money(revenue30d(record)) }}</span>
+        </template>
+        <template v-else-if="column.key === 'return_rate'">
+          <span v-if="record.return_rate === null" class="muted">—</span>
+          <span v-else :style="{ color: record.return_rate >= 10 ? '#cf1322' : undefined, fontWeight: record.return_rate >= 10 ? 600 : undefined }">
+            {{ record.return_rate }}%
+          </span>
+        </template>
         <template v-else-if="column.key === 'last_sold_date'">
           <span v-if="record.last_sold_date">{{ date(record.last_sold_date) }}</span>
           <span v-else class="muted">—</span>
@@ -273,6 +292,7 @@ import {
   FilePdfOutlined, FileExcelOutlined, UploadOutlined, ExclamationCircleOutlined,
   CarOutlined, BarcodeOutlined, QrcodeOutlined,
   AppstoreOutlined, UnorderedListOutlined,
+  ArrowUpOutlined, ArrowDownOutlined,
 } from '@ant-design/icons-vue';
 import PageHeader from '../../components/PageHeader.vue';
 import DataTable from '../../components/DataTable.vue';
@@ -334,8 +354,11 @@ const columns = computed(() => [
   { title: t('Quantity'), dataIndex: 'quantity', key: 'quantity', align: 'right', sorter: true },
   // Business-insight columns — off by default (see the Wholesale/Min Price
   // pair above), enable from the table's columns dropdown.
-  { title: 'Last Purchase', key: 'last_purchase', align: 'right', defaultHidden: true },
-  { title: 'Sold (30d)', dataIndex: 'total_sold_30d', key: 'total_sold_30d', align: 'right', sorter: true, defaultHidden: true },
+  { title: 'Last Purchase', key: 'last_purchase', align: 'right' },
+  { title: 'Sold (30d)', dataIndex: 'total_sold_30d', key: 'total_sold_30d', align: 'right', sorter: true },
+  { title: 'Trend', key: 'sales_trend', align: 'center', defaultHidden: true },
+  { title: 'Revenue (30d)', key: 'revenue_30d', align: 'right', sorter: true, defaultHidden: true },
+  { title: 'Return Rate', dataIndex: 'return_rate', key: 'return_rate', align: 'right', defaultHidden: true },
   { title: 'Last Sold', dataIndex: 'last_sold_date', key: 'last_sold_date', align: 'right', sorter: true, defaultHidden: true },
   { title: 'Warehouses', dataIndex: 'warehouse_count', key: 'warehouse_count', align: 'right', defaultHidden: true },
   { title: t('Action'), key: 'actions', width: 160, align: 'center' },
@@ -343,6 +366,28 @@ const columns = computed(() => [
 
 // Variant rows arrive newline-joined from the API; blank/null means "no value".
 const moneyLines = v => String(v ?? '').split('\n').filter(s => s !== '');
+
+// Sales Trend: compares this 30-day window to the one immediately before it.
+// No trend (dash) when there's nothing to compare — either window is zero —
+// since a percentage against zero is meaningless, not "0% change".
+function salesTrend(record) {
+  const curr = Number(record.total_sold_30d) || 0;
+  const prev = Number(record.total_sold_prev30d) || 0;
+  if (prev <= 0 || curr === prev) return { direction: null, pct: 0 };
+  const pct = Math.round(((curr - prev) / prev) * 100);
+  return { direction: pct > 0 ? 'up' : 'down', pct: Math.abs(pct) };
+}
+
+// Revenue Contribution (30d) = units sold in the last 30 days × current retail
+// price. An estimate (uses today's price, not the price at each sale's own
+// time), good enough for "which products matter most right now" ranking.
+// Variant products carry multiple newline-joined prices (one per variant) —
+// there's no single "the" price to multiply by, so this returns null for them
+// rather than silently multiplying by NaN or the wrong variant's price.
+function revenue30d(record) {
+  if (String(record.price ?? '').includes('\n')) return null;
+  return (Number(record.total_sold_30d) || 0) * (Number(record.price) || 0);
+}
 
 /* ---------- card / table view (choice persists per device) */
 const VIEW_KEY = 'products_view_mode';
@@ -422,6 +467,22 @@ const exportColumns = computed(() => [
     exportValue: (r) => r.last_purchase_date ?? '',
   },
   { title: 'Sold (30d)', dataIndex: 'total_sold_30d' },
+  {
+    title: 'Trend',
+    exportValue: (r) => {
+      const t = salesTrend(r);
+      if (!t.direction) return '';
+      return (t.direction === 'up' ? '+' : '-') + t.pct + '%';
+    },
+  },
+  {
+    title: 'Revenue (30d)',
+    exportValue: (r) => {
+      const v = revenue30d(r);
+      return v === null ? '' : v;
+    },
+  },
+  { title: 'Return Rate', exportValue: (r) => (r.return_rate === null ? '' : r.return_rate + '%') },
   { title: 'Last Sold', dataIndex: 'last_sold_date' },
   { title: 'Warehouses', dataIndex: 'warehouse_count' },
 ]);

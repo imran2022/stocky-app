@@ -742,6 +742,63 @@ is real, separate work — not implemented yet. Do not backfill Inventory
 Value/Potential Profit with `products.cost` or the lifetime-average as a
 stand-in; that was explicitly discussed and rejected as misleading.
 
+## 15. Products list: Sales Trend, Revenue Contribution, Return Rate; Last Purchase/Sold(30d) now always visible
+
+**Why:** Continuation of section 14's business-insight discussion. "Last
+Purchase" and "Sold (30d)" proved valuable enough to no longer be
+`defaultHidden`; three more metrics added, all derivable from data
+already on hand (no FIFO-cost dependency, consistent with section 14's
+explicit deferral of that work).
+
+**Backend** (`ProductsController@index`, same shared per-product block as
+section 14):
+- `total_sold_prev30d` — sum of `sale_details.quantity` for the *prior*
+  30-day window (61-31 days ago, i.e. immediately before the existing
+  `total_sold_30d` window), completed sales only. Exists purely so the
+  frontend can compute a trend; not shown as its own column.
+- `return_rate` — `SaleReturnDetails` (joined to `sale_returns` for the
+  soft-delete check — `SaleReturnDetails`'s own relation to its parent is
+  named `SaleReturn`, not `return`; used an explicit join instead of
+  relying on that relation name) summed lifetime, divided by lifetime
+  `sale_details.quantity` (completed sales) for the same product, ×100,
+  rounded to 1 decimal. **Deliberately lifetime, not a 30-day window** —
+  most products don't sell/return enough in any given 30 days for a
+  percentage over that window to mean anything; `null` (not `0`) when
+  lifetime sold is zero, so the frontend can show "—" rather than a
+  misleading "0%".
+- Verified against a clean, isolated test product (6 sold in the current
+  30-day window, 3 in the prior one, 3 of 9 lifetime-sold returned):
+  `total_sold_30d=6`, `total_sold_prev30d=3`, `return_rate=33.3` — all
+  exact.
+
+**Frontend** (`resources/src/pages/products/Products.vue`):
+- "Last Purchase" and "Sold (30d)" columns lost `defaultHidden: true`.
+- New "Trend" column (`defaultHidden: true`) — a `salesTrend()` helper
+  compares `total_sold_30d` vs `total_sold_prev30d` and renders an up/down
+  arrow with a percentage; shows a dash (not a misleading 0%/∞%) when the
+  prior window was zero or the two are equal, since a percentage change
+  against a zero baseline isn't a real number.
+- New "Revenue (30d)" column (`defaultHidden: true`) — `total_sold_30d ×
+  price`, computed client-side (both inputs already present, no reason to
+  round-trip a third backend field for a one-line multiplication). Uses
+  **today's** price, not the price at each historical sale's own time —
+  an estimate for "which products matter most right now" ranking, not a
+  reconstruction of actual historical revenue. Variant products carry a
+  newline-joined multi-price string in `price` (one line per variant) with
+  no single value to multiply against `total_sold_30d`'s single combined
+  number — `revenue30d()` detects the `\n` and returns `null` (rendered as
+  "—") rather than silently computing a meaningless number against `NaN`
+  or one arbitrary variant's price.
+- New "Return Rate" column (`defaultHidden: true`) — the backend
+  percentage, highlighted in red/bold at ≥10% (a made-up-but-reasonable
+  "worth a look" threshold — revisit if the business has its own
+  standard).
+- All 3 new derived metrics (`salesTrend`, `revenue30d`, and the return
+  rate formatting) were also added to this file's separate,
+  hand-maintained `exportColumns` array (see section 14's note on why
+  that list isn't derived from `columns`) so Excel/PDF export includes
+  them too.
+
 ## Known follow-ups (not done, intentionally)
 
 - "Zone / Courier Report" menu label (`Zone_Courier_Report`) has no
