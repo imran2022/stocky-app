@@ -651,6 +651,22 @@ being asked to clean up as much as the visual bug. Hover states
 
 No backend changes; no other page touched.
 
+## 13. Fix: Recent Invoices modal still needed horizontal scroll
+
+**Why:** Section 12's table fix stopped content from being clipped/
+inaccessible, but the `size="xl"` BootstrapVue modal still wasn't wide
+enough for the table's 5 no-wrap columns to fit without triggering the
+`.ri-table-wrap` horizontal scrollbar — an improvement over invisible
+clipped content, but the user reasonably wanted it to just fit.
+
+**Fix**: added `modal-class="ri-modal"` to the `<b-modal>` and a rule in
+this file's existing **unscoped** `<style>` block (not the scoped one) —
+`.ri-modal .modal-dialog { max-width: 900px; }`, with a `max-width:
+calc(100vw - 32px)` fallback under 960px viewports. Has to be the
+unscoped block: BootstrapVue modals render their `.modal-dialog` outside
+this component's own DOM subtree (already documented at the top of that
+block, re: the mobile tab dropdown), so scoped rules can never reach it.
+
 ## Known follow-ups (not done, intentionally)
 
 - "Zone / Courier Report" menu label (`Zone_Courier_Report`) has no

@@ -1152,7 +1152,7 @@
 
   <!-- Recent Invoices: quick reprint/relabel for a recently completed sale
        without leaving the register. -->
-  <b-modal id="RecentInvoicesModal" hide-footer title="Recent Invoices" size="xl">
+  <b-modal id="RecentInvoicesModal" hide-footer title="Recent Invoices" size="xl" modal-class="ri-modal">
     <div v-if="recentInvoicesError" class="text-danger" style="margin-bottom: 12px;">{{ recentInvoicesError }}</div>
     <div v-if="recentInvoicesLoading" style="text-align: center; padding: 32px 0;"><b-spinner /></div>
     <div v-else-if="recentInvoices.length === 0" style="text-align: center; color: #6b7280; padding: 32px 0;">
@@ -18237,6 +18237,25 @@ $transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
      and the document chain (html → body → #app → .pos-codecanyon) doesn't
      guarantee 100% height, leaving the layout misaligned in fullscreen. -->
 <style>
+/* ============================================
+   Recent Invoices modal — wide enough that its
+   table (Date/Reference/Customer/Amount/Actions,
+   all no-wrap) fits without horizontal scrolling
+   at normal desktop widths. BootstrapVue's own
+   `size="xl"` modal wasn't reliably wide enough
+   here, and its .modal-dialog is rendered outside
+   this component's scoped styles (teleported to
+   <body>), so this has to be unscoped too.
+   ============================================ */
+.ri-modal .modal-dialog {
+  max-width: 900px;
+}
+@media (max-width: 960px) {
+  .ri-modal .modal-dialog {
+    max-width: calc(100vw - 32px);
+  }
+}
+
 /* ============================================
    Mobile tab bar — the "More" dropup menu
    The .dropdown / .dropdown-menu wrappers are created inside the BDropdown
