@@ -104,7 +104,12 @@ class SerialNumberReportController extends BaseController
         $pageStart = \Request::get('page', 1);
         $offSet = ($pageStart * $perPage) - $perPage;
 
+        // The movement log is the stock history of serialised units: keep it
+        // inside the caller's warehouses.
+        $allowed = $this->warehouseScopeIds();
+
         $query = ProductSerialMovement::query()
+            ->when($allowed !== null, fn ($q) => $q->whereIn('warehouse_id', $allowed))
             ->when($request->filled('search'), fn ($q) => $q->where('serial_number', 'LIKE', "%{$request->search}%"))
             ->when($request->filled('action'), fn ($q) => $q->where('action', $request->action))
             ->when($request->filled('from_date'), fn ($q) => $q->whereDate('created_at', '>=', $request->from_date))

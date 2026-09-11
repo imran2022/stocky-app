@@ -89,7 +89,7 @@ class PurchasesController extends BaseController
         $total = 0;
 
         // Check If User Has Permission View  All Records
-        $Purchases = Purchase::with('facture', 'provider', 'warehouse')
+        $Purchases = Purchase::with('facture', 'provider', 'warehouse', 'currency')
             ->where('deleted_at', '=', null)
             ->where(function ($query) use ($view_records) {
                 if (! $view_records) {
@@ -163,6 +163,9 @@ class PurchasesController extends BaseController
             $item['paid_amount'] = number_format($Purchase->paid_amount, helpers::price_decimals(), '.', '');
             $item['due'] = number_format($item['GrandTotal'] - $item['paid_amount'], helpers::price_decimals(), '.', '');
             $item['payment_status'] = $Purchase->payment_statut;
+            // Multi-Currency badge: the document's currency code, null for
+            // base-currency documents (amounts in this list are always base).
+            $item['currency_code'] = optional($Purchase['currency'])->code ? strtoupper($Purchase['currency']->code) : null;
 
             if (PurchaseReturn::where('purchase_id', $Purchase['id'])->where('deleted_at', '=', null)->exists()) {
                 $PurchaseReturn = PurchaseReturn::where('purchase_id', $Purchase['id'])->where('deleted_at', '=', null)->first();
@@ -193,7 +196,7 @@ class PurchasesController extends BaseController
             $warehouses = Warehouse::where('deleted_at', '=', null)->whereIn('id', $warehouses_id)->get(['id', 'name']);
         }
 
-        $payment_methods = PaymentMethod::whereNull('deleted_at')->get(['id', 'name']);
+        $payment_methods = PaymentMethod::active()->whereNull('deleted_at')->get(['id', 'name']);
 
         return response()->json([
             'totalRows' => $totalRows,
@@ -234,6 +237,11 @@ class PurchasesController extends BaseController
             $order->payment_statut = 'unpaid';
             $order->notes = $request->notes;
             $order->user_id = Auth::user()->id;
+            // Multi-Currency snapshot (NULL/NULL = base currency); amounts on
+            // the purchase are always stored in the base currency.
+            $docCurrency = helpers::resolve_request_currency($request);
+            $order->currency_id = $docCurrency['currency_id'];
+            $order->exchange_rate = $docCurrency['exchange_rate'];
 
             $order->save();
 
@@ -385,6 +393,10 @@ class PurchasesController extends BaseController
             } else {
 
                 // Check If User Has Permission view All Records
+                // Warehouse half of the same rule: record_view says whose documents,
+                // the assigned warehouses say which warehouses they may come from.
+                $this->abortIfDocumentWarehouseDenied($current_Purchase);
+
                 if (! $view_records) {
                     // Check If User->id === Purchase->id
                     $this->authorizeForUser($request->user('api'), 'check_record', $current_Purchase);
@@ -569,7 +581,7 @@ class PurchasesController extends BaseController
                     'statut' => $request['statut'],
                     'GrandTotal' => $request['GrandTotal'],
                     'payment_statut' => $payment_statut,
-                ]);
+                ] + helpers::resolve_request_currency($request, $current_Purchase->currency_id, $current_Purchase->exchange_rate));
 
                 // Pharmacy: re-apply batches to the now-persisted PurchaseDetail rows.
                 if ($batchService->isSupported() && $current_Purchase->statut == 'received') {
@@ -669,6 +681,10 @@ class PurchasesController extends BaseController
             } else {
 
                 // Check If User Has Permission view All Records
+                // Warehouse half of the same rule: record_view says whose documents,
+                // the assigned warehouses say which warehouses they may come from.
+                $this->abortIfDocumentWarehouseDenied($current_Purchase);
+
                 if (! $view_records) {
                     // Check If User->id === current_Purchase->id
                     $this->authorizeForUser($request->user('api'), 'check_record', $current_Purchase);
@@ -806,6 +822,10 @@ class PurchasesController extends BaseController
 
                     $old_purchase_details = PurchaseDetail::where('purchase_id', $purchase_id)->get();
                     // Check If User Has Permission view All Records
+                    // Warehouse half of the same rule: record_view says whose documents,
+                    // the assigned warehouses say which warehouses they may come from.
+                    $this->abortIfDocumentWarehouseDenied($current_Purchase);
+
                     if (! $view_records) {
                         // Check If User->id === current_Purchase->id
                         $this->authorizeForUser($request->user('api'), 'check_record', $current_Purchase);
@@ -909,9 +929,16 @@ class PurchasesController extends BaseController
             ->where('deleted_at', '=', null)
             ->findOrFail($id);
 
+        // Document currency: stored amounts are base currency, display = stored * rate.
+        $docCurrency = helpers::Get_Document_Currency($purchase);
+
         $details = [];
 
         // Check If User Has Permission view All Records
+        // Warehouse half of the same rule: record_view says whose documents,
+        // the assigned warehouses say which warehouses they may come from.
+        $this->abortIfDocumentWarehouseDenied($purchase);
+
         if (! $view_records) {
             // Check If User->id === purchase->id
             $this->authorizeForUser($request->user('api'), 'check_record', $purchase);
@@ -921,21 +948,27 @@ class PurchasesController extends BaseController
         // so the payload has to identify the record it describes.
         $purchase_data['id'] = $purchase->id;
         $purchase_data['Ref'] = $purchase->Ref;
+        // Multi-Currency: amounts in this payload are converted into the
+        // document currency — the page must render them with THIS symbol.
+        $purchase_data['currency_symbol'] = $docCurrency['symbol'];
+        $purchase_data['currency_code'] = $docCurrency['code'];
+        $purchase_data['currency_id'] = $docCurrency['id'];
+        $purchase_data['currency_rate'] = $docCurrency['rate'];
         $purchase_data['date'] = $purchase->date.' '.$purchase->time;
         $purchase_data['statut'] = $purchase->statut;
         $purchase_data['note'] = $purchase->notes;
-        $purchase_data['discount'] = $purchase->discount;
-        $purchase_data['shipping'] = $purchase->shipping;
+        $purchase_data['discount'] = $purchase->discount * $docCurrency['rate'];
+        $purchase_data['shipping'] = $purchase->shipping * $docCurrency['rate'];
         $purchase_data['tax_rate'] = $purchase->tax_rate;
-        $purchase_data['TaxNet'] = $purchase->TaxNet;
+        $purchase_data['TaxNet'] = $purchase->TaxNet * $docCurrency['rate'];
         $purchase_data['supplier_name'] = $purchase['provider']->name;
         $purchase_data['supplier_email'] = $purchase['provider']->email;
         $purchase_data['supplier_phone'] = $purchase['provider']->phone;
         $purchase_data['supplier_adr'] = $purchase['provider']->adresse;
         $purchase_data['supplier_tax'] = $purchase['provider']->tax_number;
         $purchase_data['warehouse'] = $purchase['warehouse']->name;
-        $purchase_data['GrandTotal'] = number_format($purchase->GrandTotal, helpers::price_decimals(), '.', '');
-        $purchase_data['paid_amount'] = number_format($purchase->paid_amount, helpers::price_decimals(), '.', '');
+        $purchase_data['GrandTotal'] = number_format($purchase->GrandTotal * $docCurrency['rate'], helpers::price_decimals(), '.', '');
+        $purchase_data['paid_amount'] = number_format($purchase->paid_amount * $docCurrency['rate'], helpers::price_decimals(), '.', '');
         $purchase_data['due'] = number_format($purchase_data['GrandTotal'] - $purchase_data['paid_amount'], helpers::price_decimals(), '.', '');
         $purchase_data['payment_status'] = $purchase->payment_statut;
 
@@ -972,35 +1005,39 @@ class PurchasesController extends BaseController
                 $data['name'] = $detail['product']['name'];
             }
 
+            // unit cost in document currency; the whole line stays consistent from here on
+            $cost = $detail->cost * $docCurrency['rate'];
+
             $data['quantity'] = $detail->quantity;
-            $data['total'] = $detail->total;
-            $data['cost'] = $detail->cost;
+            $data['total'] = $detail->total * $docCurrency['rate'];
+            $data['cost'] = $cost;
             $data['unit_purchase'] = $unit->ShortName;
 
             if ($detail->discount_method == '2') {
-                $data['DiscountNet'] = $detail->discount;
+                $data['DiscountNet'] = $detail->discount * $docCurrency['rate'];
             } else {
-                $data['DiscountNet'] = $detail->cost * $detail->discount / 100;
+                $data['DiscountNet'] = $cost * $detail->discount / 100;
             }
 
-            $tax_cost = $detail->TaxNet * (($detail->cost - $data['DiscountNet']) / 100);
-            $data['Unit_cost'] = $detail->cost;
-            $data['discount'] = $detail->discount;
+            $tax_cost = $detail->TaxNet * (($cost - $data['DiscountNet']) / 100);
+            $data['Unit_cost'] = $cost;
+            // fixed discounts are amounts (convert); percentage discounts stay as-is
+            $data['discount'] = $detail->discount_method == '2' ? $detail->discount * $docCurrency['rate'] : $detail->discount;
 
             if ($detail->tax_method == '1') {
 
-                $data['Net_cost'] = $detail->cost - $data['DiscountNet'];
+                $data['Net_cost'] = $cost - $data['DiscountNet'];
                 $data['taxe'] = $tax_cost;
             } else {
-                $data['Net_cost'] = ($detail->cost - $data['DiscountNet'] - $tax_cost);
-                $data['taxe'] = $detail->cost - $data['Net_cost'] - $data['DiscountNet'];
+                $data['Net_cost'] = ($cost - $data['DiscountNet'] - $tax_cost);
+                $data['taxe'] = $cost - $data['Net_cost'] - $data['DiscountNet'];
             }
 
             $data['is_imei'] = $detail['product']['is_imei'];
             $data['imei_number'] = $detail->imei_number;
 
             $data['is_batch_tracked'] = (bool) ($detail['product']['is_batch_tracked'] ?? false);
-            $data['batches'] = $detail->batches->map(function ($b) {
+            $data['batches'] = $detail->batches->map(function ($b) use ($docCurrency) {
                 $expiry = optional($b->batch)->expiry_date;
                 $mfg = optional($b->batch)->mfg_date;
 
@@ -1009,7 +1046,7 @@ class PurchasesController extends BaseController
                     'expiry_date' => $expiry ? (is_string($expiry) ? $expiry : $expiry->toDateString()) : null,
                     'mfg_date'    => $mfg ? (is_string($mfg) ? $mfg : $mfg->toDateString()) : null,
                     'qty'         => $b->qty,
-                    'unit_cost'   => $b->unit_cost,
+                    'unit_cost'   => $b->unit_cost !== null ? $b->unit_cost * $docCurrency['rate'] : null,
                     'barcode'     => optional($b->batch)->barcode,
                     'notes'       => optional($b->batch)->notes,
                 ];
@@ -1041,6 +1078,10 @@ class PurchasesController extends BaseController
         $purchase = Purchase::findOrFail($id);
 
         // Check If User Has Permission view All Records
+        // Warehouse half of the same rule: record_view says whose documents,
+        // the assigned warehouses say which warehouses they may come from.
+        $this->abortIfDocumentWarehouseDenied($purchase);
+
         if (! $view_records) {
             // Check If User->id === purchase->id
             $this->authorizeForUser($request->user('api'), 'check_record', $purchase);
@@ -1097,10 +1138,12 @@ class PurchasesController extends BaseController
     public function Purchase_pdf(Request $request, $id)
     {
         $details = [];
-        $helpers = new helpers;
         $Purchase_data = Purchase::with('details.product.unitPurchase')
             ->where('deleted_at', '=', null)
             ->findOrFail($id);
+
+        // Document currency: stored amounts are base currency, display = stored * rate.
+        $docCurrency = helpers::Get_Document_Currency($Purchase_data);
 
         $purchaseBatchesByDetail = app(BatchService::class)
             ->batchesForPurchaseDetails($Purchase_data['details']);
@@ -1110,14 +1153,14 @@ class PurchasesController extends BaseController
         $purchase['supplier_adr'] = $Purchase_data['provider']->adresse;
         $purchase['supplier_email'] = $Purchase_data['provider']->email;
         $purchase['supplier_tax'] = $Purchase_data['provider']->tax_number;
-        $purchase['TaxNet'] = number_format($Purchase_data->TaxNet, helpers::price_decimals(), '.', '');
-        $purchase['discount'] = number_format($Purchase_data->discount, helpers::price_decimals(), '.', '');
-        $purchase['shipping'] = number_format($Purchase_data->shipping, helpers::price_decimals(), '.', '');
+        $purchase['TaxNet'] = number_format($Purchase_data->TaxNet * $docCurrency['rate'], helpers::price_decimals(), '.', '');
+        $purchase['discount'] = number_format($Purchase_data->discount * $docCurrency['rate'], helpers::price_decimals(), '.', '');
+        $purchase['shipping'] = number_format($Purchase_data->shipping * $docCurrency['rate'], helpers::price_decimals(), '.', '');
         $purchase['statut'] = $Purchase_data->statut;
         $purchase['Ref'] = $Purchase_data->Ref;
         $purchase['date'] = $Purchase_data->date.' '.$Purchase_data->time;
-        $purchase['GrandTotal'] = number_format($Purchase_data->GrandTotal, helpers::price_decimals(), '.', '');
-        $purchase['paid_amount'] = number_format($Purchase_data->paid_amount, helpers::price_decimals(), '.', '');
+        $purchase['GrandTotal'] = number_format($Purchase_data->GrandTotal * $docCurrency['rate'], helpers::price_decimals(), '.', '');
+        $purchase['paid_amount'] = number_format($Purchase_data->paid_amount * $docCurrency['rate'], helpers::price_decimals(), '.', '');
         $purchase['due'] = number_format($purchase['GrandTotal'] - $purchase['paid_amount'], helpers::price_decimals(), '.', '');
         $purchase['payment_status'] = $Purchase_data->payment_statut;
 
@@ -1148,39 +1191,48 @@ class PurchasesController extends BaseController
 
             $data['detail_id'] = $detail_id += 1;
             $data['quantity'] = number_format($detail->quantity, helpers::price_decimals(), '.', '');
-            $data['total'] = number_format($detail->total, helpers::price_decimals(), '.', '');
+            $data['total'] = number_format($detail->total * $docCurrency['rate'], helpers::price_decimals(), '.', '');
             $data['unit_purchase'] = $unit->ShortName;
-            $data['cost'] = number_format($detail->cost, helpers::price_decimals(), '.', '');
+            // unit cost in document currency; the whole line stays consistent from here on
+            $cost = $detail->cost * $docCurrency['rate'];
+            $data['cost'] = number_format($cost, helpers::price_decimals(), '.', '');
 
             if ($detail->discount_method == '2') {
-                $data['DiscountNet'] = number_format($detail->discount, helpers::price_decimals(), '.', '');
+                $data['DiscountNet'] = number_format($detail->discount * $docCurrency['rate'], helpers::price_decimals(), '.', '');
             } else {
-                $data['DiscountNet'] = number_format($detail->cost * $detail->discount / 100, helpers::price_decimals(), '.', '');
+                $data['DiscountNet'] = number_format($cost * $detail->discount / 100, helpers::price_decimals(), '.', '');
             }
 
-            $tax_cost = $detail->TaxNet * (($detail->cost - $data['DiscountNet']) / 100);
-            $data['Unit_cost'] = number_format($detail->cost, helpers::price_decimals(), '.', '');
-            $data['discount'] = number_format($detail->discount, helpers::price_decimals(), '.', '');
+            $tax_cost = $detail->TaxNet * (($cost - $data['DiscountNet']) / 100);
+            $data['Unit_cost'] = number_format($cost, helpers::price_decimals(), '.', '');
+            // fixed discounts are amounts (convert); percentage discounts stay as-is
+            $data['discount'] = number_format($detail->discount_method == '2' ? $detail->discount * $docCurrency['rate'] : $detail->discount, helpers::price_decimals(), '.', '');
 
             if ($detail->tax_method == '1') {
 
-                $data['Net_cost'] = $detail->cost - $data['DiscountNet'];
+                $data['Net_cost'] = $cost - $data['DiscountNet'];
                 $data['taxe'] = number_format($tax_cost, helpers::price_decimals(), '.', '');
             } else {
-                $data['Net_cost'] = ($detail->cost - $data['DiscountNet'] - $tax_cost);
-                $data['taxe'] = number_format($detail->cost - $data['Net_cost'] - $data['DiscountNet'], helpers::price_decimals(), '.', '');
+                $data['Net_cost'] = ($cost - $data['DiscountNet'] - $tax_cost);
+                $data['taxe'] = number_format($cost - $data['Net_cost'] - $data['DiscountNet'], helpers::price_decimals(), '.', '');
             }
 
             $data['is_imei'] = $detail['product']['is_imei'];
             $data['imei_number'] = $detail->imei_number;
             $data['is_batch_tracked'] = (bool) ($detail['product']['is_batch_tracked'] ?? false);
-            $data['batches'] = $purchaseBatchesByDetail[(int) $detail->id] ?? [];
+            $data['batches'] = array_map(function ($b) use ($docCurrency) {
+                if (isset($b['unit_cost'])) {
+                    $b['unit_cost'] *= $docCurrency['rate'];
+                }
+
+                return $b;
+            }, $purchaseBatchesByDetail[(int) $detail->id] ?? []);
 
             $details[] = $data;
         }
 
         $settings = Setting::where('deleted_at', '=', null)->first();
-        $symbol = $helpers->Get_Currency_Code();
+        $symbol = $docCurrency['code'];
 
         $Html = view('pdf.purchase_pdf', [
             'symbol' => $symbol,
@@ -1212,10 +1264,12 @@ class PurchasesController extends BaseController
     public function Purchase_PDF_Inline(Request $request, $id)
     {
         $details = [];
-        $helpers = new helpers;
         $Purchase_data = Purchase::with('details.product.unitPurchase')
             ->where('deleted_at', '=', null)
             ->findOrFail($id);
+
+        // Document currency: stored amounts are base currency, display = stored * rate.
+        $docCurrency = helpers::Get_Document_Currency($Purchase_data);
 
         $purchaseBatchesByDetail = app(BatchService::class)
             ->batchesForPurchaseDetails($Purchase_data['details']);
@@ -1225,14 +1279,14 @@ class PurchasesController extends BaseController
         $purchase['supplier_adr'] = $Purchase_data['provider']->adresse;
         $purchase['supplier_email'] = $Purchase_data['provider']->email;
         $purchase['supplier_tax'] = $Purchase_data['provider']->tax_number;
-        $purchase['TaxNet'] = number_format($Purchase_data->TaxNet, helpers::price_decimals(), '.', '');
-        $purchase['discount'] = number_format($Purchase_data->discount, helpers::price_decimals(), '.', '');
-        $purchase['shipping'] = number_format($Purchase_data->shipping, helpers::price_decimals(), '.', '');
+        $purchase['TaxNet'] = number_format($Purchase_data->TaxNet * $docCurrency['rate'], helpers::price_decimals(), '.', '');
+        $purchase['discount'] = number_format($Purchase_data->discount * $docCurrency['rate'], helpers::price_decimals(), '.', '');
+        $purchase['shipping'] = number_format($Purchase_data->shipping * $docCurrency['rate'], helpers::price_decimals(), '.', '');
         $purchase['statut'] = $Purchase_data->statut;
         $purchase['Ref'] = $Purchase_data->Ref;
         $purchase['date'] = $Purchase_data->date.' '.$Purchase_data->time;
-        $purchase['GrandTotal'] = number_format($Purchase_data->GrandTotal, helpers::price_decimals(), '.', '');
-        $purchase['paid_amount'] = number_format($Purchase_data->paid_amount, helpers::price_decimals(), '.', '');
+        $purchase['GrandTotal'] = number_format($Purchase_data->GrandTotal * $docCurrency['rate'], helpers::price_decimals(), '.', '');
+        $purchase['paid_amount'] = number_format($Purchase_data->paid_amount * $docCurrency['rate'], helpers::price_decimals(), '.', '');
         $purchase['due'] = number_format($purchase['GrandTotal'] - $purchase['paid_amount'], helpers::price_decimals(), '.', '');
         $purchase['payment_status'] = $Purchase_data->payment_statut;
 
@@ -1263,39 +1317,48 @@ class PurchasesController extends BaseController
 
             $data['detail_id'] = $detail_id += 1;
             $data['quantity'] = number_format($detail->quantity, helpers::price_decimals(), '.', '');
-            $data['total'] = number_format($detail->total, helpers::price_decimals(), '.', '');
+            $data['total'] = number_format($detail->total * $docCurrency['rate'], helpers::price_decimals(), '.', '');
             $data['unit_purchase'] = $unit ? $unit->ShortName : '';
-            $data['cost'] = number_format($detail->cost, helpers::price_decimals(), '.', '');
+            // unit cost in document currency; the whole line stays consistent from here on
+            $cost = $detail->cost * $docCurrency['rate'];
+            $data['cost'] = number_format($cost, helpers::price_decimals(), '.', '');
 
             if ($detail->discount_method == '2') {
-                $data['DiscountNet'] = number_format($detail->discount, helpers::price_decimals(), '.', '');
+                $data['DiscountNet'] = number_format($detail->discount * $docCurrency['rate'], helpers::price_decimals(), '.', '');
             } else {
-                $data['DiscountNet'] = number_format($detail->cost * $detail->discount / 100, helpers::price_decimals(), '.', '');
+                $data['DiscountNet'] = number_format($cost * $detail->discount / 100, helpers::price_decimals(), '.', '');
             }
 
-            $tax_cost = $detail->TaxNet * (($detail->cost - $data['DiscountNet']) / 100);
-            $data['Unit_cost'] = number_format($detail->cost, helpers::price_decimals(), '.', '');
-            $data['discount'] = number_format($detail->discount, helpers::price_decimals(), '.', '');
+            $tax_cost = $detail->TaxNet * (($cost - $data['DiscountNet']) / 100);
+            $data['Unit_cost'] = number_format($cost, helpers::price_decimals(), '.', '');
+            // fixed discounts are amounts (convert); percentage discounts stay as-is
+            $data['discount'] = number_format($detail->discount_method == '2' ? $detail->discount * $docCurrency['rate'] : $detail->discount, helpers::price_decimals(), '.', '');
 
             if ($detail->tax_method == '1') {
 
-                $data['Net_cost'] = $detail->cost - $data['DiscountNet'];
+                $data['Net_cost'] = $cost - $data['DiscountNet'];
                 $data['taxe'] = number_format($tax_cost, helpers::price_decimals(), '.', '');
             } else {
-                $data['Net_cost'] = ($detail->cost - $data['DiscountNet'] - $tax_cost);
-                $data['taxe'] = number_format($detail->cost - $data['Net_cost'] - $data['DiscountNet'], helpers::price_decimals(), '.', '');
+                $data['Net_cost'] = ($cost - $data['DiscountNet'] - $tax_cost);
+                $data['taxe'] = number_format($cost - $data['Net_cost'] - $data['DiscountNet'], helpers::price_decimals(), '.', '');
             }
 
             $data['is_imei'] = $detail['product']['is_imei'];
             $data['imei_number'] = $detail->imei_number;
             $data['is_batch_tracked'] = (bool) ($detail['product']['is_batch_tracked'] ?? false);
-            $data['batches'] = $purchaseBatchesByDetail[(int) $detail->id] ?? [];
+            $data['batches'] = array_map(function ($b) use ($docCurrency) {
+                if (isset($b['unit_cost'])) {
+                    $b['unit_cost'] *= $docCurrency['rate'];
+                }
+
+                return $b;
+            }, $purchaseBatchesByDetail[(int) $detail->id] ?? []);
 
             $details[] = $data;
         }
 
         $settings = Setting::where('deleted_at', '=', null)->first();
-        $symbol = $helpers->Get_Currency_Code();
+        $symbol = $docCurrency['code'];
 
         $Html = view('pdf.purchase_pdf', [
             'symbol' => $symbol,
@@ -1397,6 +1460,10 @@ class PurchasesController extends BaseController
 
             $details = [];
             // Check If User Has Permission view All Records
+            // Warehouse half of the same rule: record_view says whose documents,
+            // the assigned warehouses say which warehouses they may come from.
+            $this->abortIfDocumentWarehouseDenied($Purchase_data);
+
             if (! $view_records) {
                 // Check If User->id === Purchase->id
                 $this->authorizeForUser($request->user('api'), 'check_record', $Purchase_data);
@@ -1429,6 +1496,9 @@ class PurchasesController extends BaseController
             $purchase['shipping'] = $Purchase_data->shipping;
             $purchase['statut'] = $Purchase_data->statut;
             $purchase['notes'] = $Purchase_data->notes;
+            // Multi-Currency snapshot (null = base currency)
+            $purchase['currency_id'] = $Purchase_data->currency_id;
+            $purchase['exchange_rate'] = $Purchase_data->exchange_rate;
 
             // Pharmacy: prefetch batch links keyed by purchase_detail_id.
             $batchService = app(BatchService::class);
@@ -1571,6 +1641,10 @@ class PurchasesController extends BaseController
         $details = [];
 
         // Check If User Has Permission view All Records
+        // Warehouse half of the same rule: record_view says whose documents,
+        // the assigned warehouses say which warehouses they may come from.
+        $this->abortIfDocumentWarehouseDenied($Purchase_data);
+
         if (! $view_records) {
             // Check If User->id === Purchase->id
             $this->authorizeForUser($request->user('api'), 'check_record', $Purchase_data);
@@ -1705,6 +1779,10 @@ class PurchasesController extends BaseController
             ->findOrFail($id);
 
         // Check If User Has Permission view All Records
+        // Warehouse half of the same rule: record_view says whose documents,
+        // the assigned warehouses say which warehouses they may come from.
+        $this->abortIfDocumentWarehouseDenied($purchase);
+
         if (! $view_records) {
             // Check If User->id === Purchase->id
             $this->authorizeForUser($request->user('api'), 'check_record', $purchase);
@@ -1790,8 +1868,9 @@ class PurchasesController extends BaseController
         // purchase
         $purchase = Purchase::with('provider')->where('deleted_at', '=', null)->findOrFail($request->id);
 
-        $helpers = new helpers;
-        $currency = $helpers->Get_Currency();
+        // Document currency: stored amounts are base currency, display = stored * rate.
+        $docCurrency = helpers::Get_Document_Currency($purchase);
+        $currency = $docCurrency['symbol'];
 
         // settings
         $settings = Setting::where('deleted_at', '=', null)->first();
@@ -1812,9 +1891,9 @@ class PurchasesController extends BaseController
 
         $invoice_number = $purchase->Ref;
 
-        $total_amount = $currency.' '.number_format($purchase->GrandTotal, helpers::price_decimals(), '.', ',');
-        $paid_amount = $currency.' '.number_format($purchase->paid_amount, helpers::price_decimals(), '.', ',');
-        $due_amount = $currency.' '.number_format($purchase->GrandTotal - $purchase->paid_amount, helpers::price_decimals(), '.', ',');
+        $total_amount = $currency.' '.number_format($purchase->GrandTotal * $docCurrency['rate'], helpers::price_decimals(), '.', ',');
+        $paid_amount = $currency.' '.number_format($purchase->paid_amount * $docCurrency['rate'], helpers::price_decimals(), '.', ',');
+        $due_amount = $currency.' '.number_format(($purchase->GrandTotal - $purchase->paid_amount) * $docCurrency['rate'], helpers::price_decimals(), '.', ',');
 
         $contact_name = $purchase['provider']->name;
         $business_name = $settings->CompanyName;
@@ -1853,8 +1932,9 @@ class PurchasesController extends BaseController
         // purchase
         $purchase = Purchase::with('provider')->where('deleted_at', '=', null)->findOrFail($request->id);
 
-        $helpers = new helpers;
-        $currency = $helpers->Get_Currency();
+        // Document currency: stored amounts are base currency, display = stored * rate.
+        $docCurrency = helpers::Get_Document_Currency($purchase);
+        $currency = $docCurrency['symbol'];
 
         // settings
         $settings = Setting::where('deleted_at', '=', null)->first();
@@ -1876,9 +1956,9 @@ class PurchasesController extends BaseController
         $invoice_url = url('/api/purchase_pdf/'.$request->id.'?'.$random_number);
         $invoice_number = $purchase->Ref;
 
-        $total_amount = $currency.' '.number_format($purchase->GrandTotal, helpers::price_decimals(), '.', ',');
-        $paid_amount = $currency.' '.number_format($purchase->paid_amount, helpers::price_decimals(), '.', ',');
-        $due_amount = $currency.' '.number_format($purchase->GrandTotal - $purchase->paid_amount, helpers::price_decimals(), '.', ',');
+        $total_amount = $currency.' '.number_format($purchase->GrandTotal * $docCurrency['rate'], helpers::price_decimals(), '.', ',');
+        $paid_amount = $currency.' '.number_format($purchase->paid_amount * $docCurrency['rate'], helpers::price_decimals(), '.', ',');
+        $due_amount = $currency.' '.number_format(($purchase->GrandTotal - $purchase->paid_amount) * $docCurrency['rate'], helpers::price_decimals(), '.', ',');
 
         $contact_name = $purchase['provider']->name;
         $business_name = $settings->CompanyName;
@@ -1996,8 +2076,9 @@ class PurchasesController extends BaseController
         // purchase
         $purchase = Purchase::with('provider')->where('deleted_at', '=', null)->findOrFail($request->id);
 
-        $helpers = new helpers;
-        $currency = $helpers->Get_Currency();
+        // Document currency: stored amounts are base currency, display = stored * rate.
+        $docCurrency = helpers::Get_Document_Currency($purchase);
+        $currency = $docCurrency['symbol'];
 
         // settings
         $settings = Setting::where('deleted_at', '=', null)->first();
@@ -2016,9 +2097,9 @@ class PurchasesController extends BaseController
         $invoice_url = url('/api/purchase_pdf/'.$request->id.'?'.$random_number);
         $invoice_number = $purchase->Ref;
 
-        $total_amount = $currency.' '.number_format($purchase->GrandTotal, helpers::price_decimals(), '.', ',');
-        $paid_amount = $currency.' '.number_format($purchase->paid_amount, helpers::price_decimals(), '.', ',');
-        $due_amount = $currency.' '.number_format($purchase->GrandTotal - $purchase->paid_amount, helpers::price_decimals(), '.', ',');
+        $total_amount = $currency.' '.number_format($purchase->GrandTotal * $docCurrency['rate'], helpers::price_decimals(), '.', ',');
+        $paid_amount = $currency.' '.number_format($purchase->paid_amount * $docCurrency['rate'], helpers::price_decimals(), '.', ',');
+        $due_amount = $currency.' '.number_format(($purchase->GrandTotal - $purchase->paid_amount) * $docCurrency['rate'], helpers::price_decimals(), '.', ',');
 
         $contact_name = $purchase['provider']->name;
         $business_name = $settings->CompanyName;

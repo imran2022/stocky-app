@@ -80,7 +80,7 @@
                  still navigates via the title and the view action. -->
             <div class="pcard-media">
               <a-image
-                :src="'/images/products/' + (p.image || 'no-image.png')"
+                :src="productImg(p.image)"
                 :alt="p.name"
                 :fallback="'/images/products/no-image.png'"
               />
@@ -173,7 +173,7 @@
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'image'">
           <img
-            :src="'/images/products/' + (record.image || 'no-image.png')"
+            :src="productImg(record.image)"
             alt=""
             style="width: 42px; height: 42px; object-fit: cover; border-radius: 6px"
           />
@@ -277,6 +277,13 @@
 </template>
 
 <script setup>
+/** products.image is a filename under /images/products or a pasted absolute URL. */
+function productImg(v) {
+  const f = String(v || '').trim();
+  if (!f) return '/images/products/no-image.png';
+  if (/^https?:\/\//i.test(f)) return f;
+  return '/images/products/' + f;
+}
 /**
  * GET products → {products, warehouses, categories, subcategories, brands,
  * totalRows}; filter params code, name, category_id, brand_id, warehouse_id.

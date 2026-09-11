@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ app()->getLocale() }}" dir="{{ locale_dir() }}">
   <head>
     <meta charset="utf-8" />
     <meta name="csrf-token" content="{{ csrf_token() }}">
@@ -8,12 +8,7 @@
     <link rel="icon" href="{{ asset('images/' . ($app_settings->favicon ?? 'favicon.ico')) }}">
 
     {{-- PWA --}}
-    <link rel="manifest" href="/manifest.webmanifest">
-    <meta name="theme-color" content="#2f3640">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <meta name="apple-mobile-web-app-title" content="{{ $app_settings->app_name ?? 'Stocky' }}">
-    <link rel="apple-touch-icon" href="/pwa_images/pwa-icon-192.png">
+    @include('partials.pwa-head')
 
     <title>{{ $app_settings->app_name ?? 'Stocky | Ultimate Inventory With POS' }}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -294,7 +289,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        padding-left: 0.875rem;
+        padding-inline-start: 0.875rem;
         color: var(--text-muted);
         transition: color var(--transition);
         flex-shrink: 0;
@@ -479,7 +474,7 @@
 
       .auth-alert ul {
         margin: 0;
-        padding-left: 1rem;
+        padding-inline-start: 1rem;
         list-style: none;
       }
 
@@ -487,7 +482,7 @@
         content: '\2022';
         color: currentColor;
         opacity: 0.5;
-        margin-right: 0.4rem;
+        margin-inline-end: 0.4rem;
       }
 
       .auth-alert.error {
@@ -554,7 +549,7 @@
         .form-label { font-size: 0.75rem; }
         /* iOS: 16px+ prevents auto-zoom on focus */
         .form-input { font-size: 16px; padding: 0.75rem 0.75rem; }
-        .input-icon { padding-left: 0.75rem; }
+        .input-icon { padding-inline-start: 0.75rem; }
         .input-icon svg { width: 16px; height: 16px; }
         .toggle-password { padding: 0 0.625rem; }
         .auth-btn {
@@ -594,6 +589,24 @@
         .auth-logo { margin-bottom: 0.5rem; }
         .auth-logo img { max-height: 36px; }
       }
+
+      /* ─── RTL (Arabic) ───────────────────────────────────────────────
+         <html dir> is set from the active locale, so the grid columns, the
+         flex rows (input icon / toggle button) and the text alignment all
+         mirror themselves. What can't mirror on its own is listed here: the
+         arrow glyph and the transform that nudges it. Padding/margins use
+         logical properties above, so they need nothing. */
+
+      /* Inter carries no Arabic glyphs — name the fallbacks instead of
+         leaving the pick to the browser's default serif-ish Arabic face. */
+      [dir="rtl"] body {
+        font-family: 'Segoe UI', Tahoma, 'Geeza Pro', 'Noto Sans Arabic', 'Arabic Typesetting', system-ui, sans-serif;
+      }
+
+      /* Arrows point at the direction of travel — flip them, and flip the
+         nudge with them (scaleX comes last, so the translate is mirrored). */
+      [dir="rtl"] .auth-btn .btn-arrow { transform: scaleX(-1); }
+      [dir="rtl"] .auth-btn:hover .btn-arrow { transform: scaleX(-1) translateX(3px); }
     </style>
 
     @if (!empty($app_settings->login_bg_color) && preg_match('/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/', $app_settings->login_bg_color))
@@ -618,20 +631,20 @@
         <div class="hero-content">
           <div class="hero-badge">
             <span class="hero-badge-dot"></span>
-            {{ $app_settings->login_hero_badge ?? 'Secure & Reliable' }}
+            {{ $app_settings->login_hero_badge ?: tdb('Login_hero_badge', 'Secure & Reliable') }}
           </div>
 
-          <h1 class="hero-title">{{ $app_settings->login_hero_title ?? 'Manage your business smarter.' }}</h1>
+          <h1 class="hero-title">{{ login_text($app_settings->login_hero_title, 'Login_hero_title', 'Manage your business smarter.') }}</h1>
           <p class="hero-subtitle">
-            {{ $app_settings->login_hero_subtitle ?? 'Streamline inventory, track sales, and grow your business — all from one powerful dashboard.' }}
+            {{ login_text($app_settings->login_hero_subtitle, 'Login_hero_subtitle', 'Streamline inventory, track sales, and grow your business — all from one powerful dashboard.') }}
           </p>
 
           <div class="hero-features">
             @php
               $features = [
-                $app_settings->login_hero_feature_1 ?? 'Real-time inventory tracking',
-                $app_settings->login_hero_feature_2 ?? 'Multi-location POS support',
-                $app_settings->login_hero_feature_3 ?? 'Advanced reporting & analytics',
+                $app_settings->login_hero_feature_1 ?? tdb('Login_hero_feature_1', 'Real-time inventory tracking'),
+                $app_settings->login_hero_feature_2 ?? tdb('Login_hero_feature_2', 'Multi-location POS support'),
+                $app_settings->login_hero_feature_3 ?? tdb('Login_hero_feature_3', 'Advanced reporting & analytics'),
               ];
             @endphp
             @foreach ($features as $feature)
@@ -655,9 +668,9 @@
             <div class="auth-logo">
               <img src="{{ asset('images/' . ($app_settings->logo ?? 'logo.png')) }}" alt="{{ $app_settings->app_name ?? 'Stocky' }}">
             </div>
-            <h2 class="auth-card-title">{{ $app_settings->login_panel_title ?? 'Welcome back' }}</h2>
+            <h2 class="auth-card-title">{{ login_text($app_settings->login_panel_title, 'Login_panel_title', 'Welcome back') }}</h2>
             <p class="auth-card-subtitle">
-              {{ $app_settings->login_panel_subtitle ?? 'Sign in to your account to continue' }}
+              {{ login_text($app_settings->login_panel_subtitle, 'Login_panel_subtitle', 'Sign in to your account to continue') }}
             </p>
           </header>
 
@@ -689,23 +702,23 @@
             @csrf
 
             <div class="form-group">
-              <label class="form-label" for="email">Email address</label>
+              <label class="form-label" for="email">{{ tdb('Email_Address', 'Email address') }}</label>
               <div class="input-wrapper">
                 <span class="input-icon">
                   <svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
                 </span>
-                <input id="email" class="form-input" type="email" name="email" value="{{ old('email') }}" placeholder="you@company.com" required autofocus />
+                <input id="email" class="form-input" type="email" name="email" value="{{ old('email') }}" placeholder="{{ tdb('Email_placeholder', 'you@company.com') }}" required autofocus />
               </div>
             </div>
 
             <div class="form-group">
-              <label class="form-label" for="password">Password</label>
+              <label class="form-label" for="password">{{ tdb('Password', 'Password') }}</label>
               <div class="input-wrapper">
                 <span class="input-icon">
                   <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
                 </span>
-                <input id="password" class="form-input" type="password" name="password" placeholder="Enter your password" required />
-                <button type="button" class="toggle-password" data-target="password" aria-label="Toggle password visibility">
+                <input id="password" class="form-input" type="password" name="password" placeholder="{{ tdb('Password_placeholder', 'Enter your password') }}" required />
+                <button type="button" class="toggle-password" data-target="password" aria-label="{{ tdb('Toggle_password_visibility', 'Toggle password visibility') }}">
                   <svg class="eye-open" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                   <svg class="eye-closed" viewBox="0 0 24 24" style="display:none"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
                 </button>
@@ -715,20 +728,20 @@
             <div class="form-row">
               <label class="remember-check">
                 <input type="checkbox" name="remember">
-                Remember me
+                {{ tdb('Remember_me', 'Remember me') }}
               </label>
-              <a class="forgot-link" href="{{ route('password.request') }}">Forgot password?</a>
+              <a class="forgot-link" href="{{ route('password.request') }}">{{ tdb('Forgot_Password', 'Forgot password?') }}</a>
             </div>
 
             <button type="submit" class="auth-btn" id="login_submit_btn">
-              <span class="btn-text">{{ $app_settings->login_btn_text ?? 'Sign in' }}</span>
+              <span class="btn-text">{{ $app_settings->login_btn_text ?: tdb('Sign_in', 'Sign in') }}</span>
               <svg class="btn-arrow btn-text" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-              <span class="btn-loading"><span class="spinner"></span> Signing in...</span>
+              <span class="btn-loading"><span class="spinner"></span> {{ tdb('Signing_in', 'Signing in...') }}</span>
             </button>
           </form>
 
           <div class="auth-footer">
-            {{ $app_settings->login_footer_text ?? '© ' . date('Y') . ' ' . ($app_settings->app_name ?? 'Stocky') . '. All rights reserved.' }}
+            {{ $app_settings->login_footer_text ?: '© ' . date('Y') . ' ' . ($app_settings->app_name ?? 'Stocky') . '. ' . tdb('All_rights_reserved', 'All rights reserved') . '.' }}
           </div>
         </div>
       </section>
@@ -818,21 +831,23 @@
           }
         });
 
-        // Self-heal: unregister any stale service worker on this page. The
-        // login page must always be served fresh — if an older SW is still
-        // holding a cached /login shell, drop it and clear its caches.
+        // Self-heal: drop only service workers that are NOT the one this
+        // install currently ships. /login, /logout and /password are
+        // network-only inside public/sw.js, so the current worker can no
+        // longer hold a stale login shell (the 419-on-submit bug this block
+        // was written for). Unregistering it here anyway meant every single
+        // login tore down the worker and wiped the POS offline shell, then
+        // the app shell re-installed and claimed the page mid-boot — which
+        // is exactly when a lazily-loaded /next/* route chunk goes missing.
         try {
           if ('serviceWorker' in navigator && navigator.serviceWorker.getRegistrations) {
+            var currentSW = new URL(@json(store_sw_url()), location.origin).href;
             navigator.serviceWorker.getRegistrations().then(function(regs) {
-              regs.forEach(function(reg) { reg.unregister().catch(function() {}); });
+              regs.forEach(function(reg) {
+                var script = (reg.active || reg.waiting || reg.installing || {}).scriptURL;
+                if (script && script !== currentSW) reg.unregister().catch(function() {});
+              });
             }).catch(function() {});
-            if (window.caches && caches.keys) {
-              caches.keys().then(function(keys) {
-                keys.forEach(function(k) {
-                  if (k && k.indexOf('shell') !== -1) caches.delete(k).catch(function() {});
-                });
-              }).catch(function() {});
-            }
           }
         } catch (e) {}
       })();

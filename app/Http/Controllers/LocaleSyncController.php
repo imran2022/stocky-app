@@ -2,12 +2,18 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Middleware\SetLocale;
 use Illuminate\Http\Request;
 
 /**
- * Syncs the Vue i18n selected language to a cookie so that Blade PDFs
- * use the same locale. Uses cookie (not session) to avoid adding session
- * to the API group, which would break Passport/auth. Rule: Arabic (ar) -> ar, else -> en.
+ * Syncs the Vue i18n selected language to a cookie, so the server-rendered
+ * pages (Blade PDFs, and every 'web' page through SetLocale) follow the
+ * language picked in the app — including the logged-out /login page, which is
+ * why the cookie outlives the session.
+ *
+ * Cookie, not session: adding session to the API group would break
+ * Passport/auth. The cookie is listed in EncryptCookies::$except so 'web'
+ * routes can read what this 'api' route writes.
  */
 class LocaleSyncController extends Controller
 {
@@ -22,8 +28,10 @@ class LocaleSyncController extends Controller
             return response()->json(['ok' => true, 'locale' => $appLocale]);
         }
 
+        // Any locale the app actually ships (en/fr/es/ar), not just ar vs en
+        // — SetLocale validates against this same list.
         $locale = strtolower(substr($locale, 0, 5));
-        $appLocale = $locale === 'ar' ? 'ar' : 'en';
+        $appLocale = isset(SetLocale::SUPPORTED[$locale]) ? $locale : 'en';
 
         $cookie = cookie(
             self::COOKIE_NAME,

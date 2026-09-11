@@ -25,6 +25,7 @@ class PagesApiController extends Controller
         return response()->json([
             'data' => $pages->items(),
             'meta' => ['total' => $pages->total()],
+            'locales' => store_locales(),
         ]);
     }
 
@@ -37,11 +38,21 @@ class PagesApiController extends Controller
             'seo_title' => 'nullable|string|max:190',
             'seo_description' => 'nullable|string|max:255',
             'published' => 'boolean',
+            'title_translations' => 'nullable|array',
+            'title_translations.*' => 'nullable|string|max:190',
+            'content_translations' => 'nullable|array',
+            'content_translations.*' => 'nullable|string',
+            'seo_title_translations' => 'nullable|array',
+            'seo_title_translations.*' => 'nullable|string|max:190',
+            'seo_description_translations' => 'nullable|array',
+            'seo_description_translations.*' => 'nullable|string|max:255',
         ]);
 
         if (empty($data['slug'])) {
             $data['slug'] = str($data['title'])->slug('-');
         }
+
+        $data = StorePage::applyTranslations($data, $req);
 
         $page = StorePage::create($data);
 
@@ -65,11 +76,21 @@ class PagesApiController extends Controller
             'seo_title' => 'nullable|string|max:190',
             'seo_description' => 'nullable|string|max:255',
             'published' => 'boolean',
+            'title_translations' => 'nullable|array',
+            'title_translations.*' => 'nullable|string|max:190',
+            'content_translations' => 'nullable|array',
+            'content_translations.*' => 'nullable|string',
+            'seo_title_translations' => 'nullable|array',
+            'seo_title_translations.*' => 'nullable|string|max:190',
+            'seo_description_translations' => 'nullable|array',
+            'seo_description_translations.*' => 'nullable|string|max:255',
         ]);
 
         if (empty($data['slug'])) {
             $data['slug'] = str($data['title'])->slug('-');
         }
+
+        $data = StorePage::applyTranslations($data, $req);
 
         $page->fill($data)->save();
 

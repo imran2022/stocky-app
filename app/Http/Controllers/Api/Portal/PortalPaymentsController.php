@@ -22,6 +22,9 @@ class PortalPaymentsController extends Controller
         $perPage = (int) $request->input('limit', 10);
         $page = max(1, (int) $request->input('page', 1));
         $search = $request->input('search');
+        $method = $request->input('method');
+        $dateFrom = $request->input('date_from');
+        $dateTo = $request->input('date_to');
 
         $salesPaymentsQuery = DB::table('payment_sales')
             ->whereNull('payment_sales.deleted_at')
@@ -77,8 +80,21 @@ class PortalPaymentsController extends Controller
                 ->map(fn ($item) => (array) $item);
         }
 
-        $allPayments = $salesPayments->merge($openingBalancePayments)
-            ->sortByDesc('id')
+        $merged = $salesPayments->merge($openingBalancePayments);
+
+        // Payment methods the customer actually used — feeds the filter dropdown.
+        $methods = $merged->pluck('payment_method')->filter()->unique()->sort()->values();
+
+        $merged = $merged
+            ->when($method, fn ($c) => $c->where('payment_method', $method))
+            ->when($dateFrom, fn ($c) => $c->filter(fn ($p) => substr((string) $p['date'], 0, 10) >= $dateFrom))
+            ->when($dateTo, fn ($c) => $c->filter(fn ($p) => substr((string) $p['date'], 0, 10) <= $dateTo));
+
+        $sortable = ['date' => 'date', 'Ref' => 'Ref', 'Sale_Ref' => 'Sale_Ref', 'payment_method' => 'payment_method', 'montant' => 'montant'];
+        $sortKey = $sortable[(string) $request->input('sort', '')] ?? 'date';
+        $desc = strtolower((string) $request->input('dir', 'desc')) !== 'asc';
+        $allPayments = $merged
+            ->sortBy([[$sortKey, $desc ? 'desc' : 'asc'], ['id', 'desc']])
             ->values()
             ->all();
 
@@ -93,6 +109,7 @@ class PortalPaymentsController extends Controller
         return response()->json([
             'totalRows' => $totalRows,
             'payments' => $rows,
+            'methods' => $methods,
         ]);
     }
 

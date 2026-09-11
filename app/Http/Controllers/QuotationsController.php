@@ -210,6 +210,10 @@ class QuotationsController extends BaseController
             $order->shipping = $request->shipping;
             $order->notes = $request->notes;
             $order->user_id = Auth::user()->id;
+            // Multi-Currency snapshot (NULL/NULL = base currency)
+            $docCurrency = helpers::resolve_request_currency($request);
+            $order->currency_id = $docCurrency['currency_id'];
+            $order->exchange_rate = $docCurrency['exchange_rate'];
 
             $order->save();
 
@@ -291,6 +295,10 @@ class QuotationsController extends BaseController
             }
 
             // Check If User Has Permission view All Records
+            // Warehouse half of the same rule: record_view says whose documents,
+            // the assigned warehouses say which warehouses they may come from.
+            $this->abortIfDocumentWarehouseDenied($current_Quotation);
+
             if (! $view_records) {
                 // Check If User->id === Quotation->id
                 $this->authorizeForUser($request->user('api'), 'check_record', $current_Quotation);
@@ -380,7 +388,7 @@ class QuotationsController extends BaseController
                 'discount' => $request['discount'],
                 'shipping' => $request['shipping'],
                 'GrandTotal' => $request['GrandTotal'],
-            ]);
+            ] + helpers::resolve_request_currency($request, $current_Quotation->currency_id, $current_Quotation->exchange_rate));
 
         }, 10);
 
@@ -423,6 +431,10 @@ class QuotationsController extends BaseController
             }
 
             // Check If User Has Permission view All Records
+            // Warehouse half of the same rule: record_view says whose documents,
+            // the assigned warehouses say which warehouses they may come from.
+            $this->abortIfDocumentWarehouseDenied($Quotation);
+
             if (! $view_records) {
                 // Check If User->id === Quotation->id
                 $this->authorizeForUser($request->user('api'), 'check_record', $Quotation);
@@ -485,6 +497,10 @@ class QuotationsController extends BaseController
                 }
 
                 // Check If User Has Permission view All Records
+                // Warehouse half of the same rule: record_view says whose documents,
+                // the assigned warehouses say which warehouses they may come from.
+                $this->abortIfDocumentWarehouseDenied($Quotation);
+
                 if (! $view_records) {
                     // Check If User->id === Quotation->id
                     $this->authorizeForUser($request->user('api'), 'check_record', $Quotation);
@@ -522,9 +538,16 @@ class QuotationsController extends BaseController
             ->where('deleted_at', '=', null)
             ->findOrFail($id);
 
+        // Document currency: stored amounts are base currency, display = stored * rate.
+        $docCurrency = helpers::Get_Document_Currency($quotation_data);
+
         $details = [];
 
         // Check If User Has Permission view All Records
+        // Warehouse half of the same rule: record_view says whose documents,
+        // the assigned warehouses say which warehouses they may come from.
+        $this->abortIfDocumentWarehouseDenied($quotation_data);
+
         if (! $view_records) {
             // Check If User->id === Quotation->id
             $this->authorizeForUser($request->user('api'), 'check_record', $quotation_data);
@@ -534,20 +557,26 @@ class QuotationsController extends BaseController
         // payload has to identify the record it describes.
         $quote['id'] = $quotation_data->id;
         $quote['Ref'] = $quotation_data->Ref;
+        // Multi-Currency: amounts in this payload are converted into the
+        // document currency — the page must render them with THIS symbol.
+        $quote['currency_symbol'] = $docCurrency['symbol'];
+        $quote['currency_code'] = $docCurrency['code'];
+        $quote['currency_id'] = $docCurrency['id'];
+        $quote['currency_rate'] = $docCurrency['rate'];
         $quote['date'] = $quotation_data->date.' '.$quotation_data->time;
         $quote['note'] = $quotation_data->notes;
         $quote['statut'] = $quotation_data->statut;
-        $quote['discount'] = $quotation_data->discount;
-        $quote['shipping'] = $quotation_data->shipping;
+        $quote['discount'] = $quotation_data->discount * $docCurrency['rate'];
+        $quote['shipping'] = $quotation_data->shipping * $docCurrency['rate'];
         $quote['tax_rate'] = $quotation_data->tax_rate;
-        $quote['TaxNet'] = $quotation_data->TaxNet;
+        $quote['TaxNet'] = $quotation_data->TaxNet * $docCurrency['rate'];
         $quote['client_name'] = $quotation_data['client']->name;
         $quote['client_phone'] = $quotation_data['client']->phone;
         $quote['client_adr'] = $quotation_data['client']->adresse;
         $quote['client_email'] = $quotation_data['client']->email;
         $quote['client_tax'] = $quotation_data['client']->tax_number;
         $quote['warehouse'] = $quotation_data['warehouse']->name;
-        $quote['GrandTotal'] = number_format($quotation_data['GrandTotal'], helpers::price_decimals(), '.', '');
+        $quote['GrandTotal'] = number_format($quotation_data['GrandTotal'] * $docCurrency['rate'], helpers::price_decimals(), '.', '');
 
         // Converted flag (null when the linked sale no longer exists, so the
         // quotation becomes convertible again — same rule as the list).
@@ -588,33 +617,43 @@ class QuotationsController extends BaseController
                 $data['name'] = $detail['product']['name'];
             }
 
+            // unit price in document currency; the whole line stays consistent from here on
+            $price = $detail->price * $docCurrency['rate'];
+
             $data['quantity'] = $detail->quantity;
-            $data['total'] = $detail->total;
-            $data['price'] = $detail->price;
+            $data['total'] = $detail->total * $docCurrency['rate'];
+            $data['price'] = $price;
             $data['unit_sale'] = $unit ? $unit->ShortName : '';
 
             if ($detail->discount_method == '2') {
-                $data['DiscountNet'] = $detail->discount;
+                $data['DiscountNet'] = $detail->discount * $docCurrency['rate'];
             } else {
-                $data['DiscountNet'] = $detail->price * $detail->discount / 100;
+                $data['DiscountNet'] = $price * $detail->discount / 100;
             }
 
-            $tax_price = $detail->TaxNet * (($detail->price - $data['DiscountNet']) / 100);
-            $data['Unit_price'] = $detail->price;
-            $data['discount'] = $detail->discount;
+            $tax_price = $detail->TaxNet * (($price - $data['DiscountNet']) / 100);
+            $data['Unit_price'] = $price;
+            // fixed discounts are amounts (convert); percentage discounts stay as-is
+            $data['discount'] = $detail->discount_method == '2' ? $detail->discount * $docCurrency['rate'] : $detail->discount;
 
             if ($detail->tax_method == '1') {
-                $data['Net_price'] = $detail->price - $data['DiscountNet'];
+                $data['Net_price'] = $price - $data['DiscountNet'];
                 $data['taxe'] = $tax_price;
             } else {
-                $data['Net_price'] = ($detail->price - $data['DiscountNet'] - $tax_price);
-                $data['taxe'] = $detail->price - $data['Net_price'] - $data['DiscountNet'];
+                $data['Net_price'] = ($price - $data['DiscountNet'] - $tax_price);
+                $data['taxe'] = $price - $data['Net_price'] - $data['DiscountNet'];
             }
 
             $data['is_imei'] = $detail['product']['is_imei'];
             $data['imei_number'] = $detail->imei_number;
             $data['is_batch_tracked'] = (bool) ($detail['product']['is_batch_tracked'] ?? false);
-            $data['batches'] = $batchesByDetail[(int) $detail->id] ?? [];
+            $data['batches'] = array_map(function ($b) use ($docCurrency) {
+                if (isset($b['unit_cost'])) {
+                    $b['unit_cost'] *= $docCurrency['rate'];
+                }
+
+                return $b;
+            }, $batchesByDetail[(int) $detail->id] ?? []);
 
             $details[] = $data;
         }
@@ -668,23 +707,25 @@ class QuotationsController extends BaseController
     {
 
         $details = [];
-        $helpers = new helpers;
         $Quotation = Quotation::with('details.product.unitSale')
             ->where('deleted_at', '=', null)
             ->findOrFail($id);
+
+        // Document currency: stored amounts are base currency, display = stored * rate.
+        $docCurrency = helpers::Get_Document_Currency($Quotation);
 
         $quote['client_name'] = $Quotation['client']->name;
         $quote['client_phone'] = $Quotation['client']->phone;
         $quote['client_adr'] = $Quotation['client']->adresse;
         $quote['client_email'] = $Quotation['client']->email;
         $quote['client_tax'] = $Quotation['client']->tax_number;
-        $quote['TaxNet'] = number_format($Quotation->TaxNet, helpers::price_decimals(), '.', '');
-        $quote['discount'] = number_format($Quotation->discount, helpers::price_decimals(), '.', '');
-        $quote['shipping'] = number_format($Quotation->shipping, helpers::price_decimals(), '.', '');
+        $quote['TaxNet'] = number_format($Quotation->TaxNet * $docCurrency['rate'], helpers::price_decimals(), '.', '');
+        $quote['discount'] = number_format($Quotation->discount * $docCurrency['rate'], helpers::price_decimals(), '.', '');
+        $quote['shipping'] = number_format($Quotation->shipping * $docCurrency['rate'], helpers::price_decimals(), '.', '');
         $quote['statut'] = $Quotation->statut;
         $quote['Ref'] = $Quotation->Ref;
         $quote['date'] = $Quotation->date.' '.$Quotation->time;
-        $quote['GrandTotal'] = number_format($Quotation->GrandTotal, helpers::price_decimals(), '.', '');
+        $quote['GrandTotal'] = number_format($Quotation->GrandTotal * $docCurrency['rate'], helpers::price_decimals(), '.', '');
 
         $detail_id = 0;
         foreach ($Quotation['details'] as $detail) {
@@ -719,26 +760,29 @@ class QuotationsController extends BaseController
 
             $data['detail_id'] = $detail_id += 1;
             $data['quantity'] = number_format($detail->quantity, helpers::price_decimals(), '.', '');
-            $data['total'] = number_format($detail->total, helpers::price_decimals(), '.', '');
+            $data['total'] = number_format($detail->total * $docCurrency['rate'], helpers::price_decimals(), '.', '');
             $data['unitSale'] = $unit ? $unit->ShortName : '';
-            $data['price'] = number_format($detail->price, helpers::price_decimals(), '.', '');
+            // unit price in document currency; the whole line stays consistent from here on
+            $price = $detail->price * $docCurrency['rate'];
+            $data['price'] = number_format($price, helpers::price_decimals(), '.', '');
 
             if ($detail->discount_method == '2') {
-                $data['DiscountNet'] = number_format($detail->discount, helpers::price_decimals(), '.', '');
+                $data['DiscountNet'] = number_format($detail->discount * $docCurrency['rate'], helpers::price_decimals(), '.', '');
             } else {
-                $data['DiscountNet'] = number_format($detail->price * $detail->discount / 100, helpers::price_decimals(), '.', '');
+                $data['DiscountNet'] = number_format($price * $detail->discount / 100, helpers::price_decimals(), '.', '');
             }
 
-            $tax_price = $detail->TaxNet * (($detail->price - $data['DiscountNet']) / 100);
-            $data['Unit_price'] = number_format($detail->price, helpers::price_decimals(), '.', '');
-            $data['discount'] = number_format($detail->discount, helpers::price_decimals(), '.', '');
+            $tax_price = $detail->TaxNet * (($price - $data['DiscountNet']) / 100);
+            $data['Unit_price'] = number_format($price, helpers::price_decimals(), '.', '');
+            // fixed discounts are amounts (convert); percentage discounts stay as-is
+            $data['discount'] = number_format($detail->discount_method == '2' ? $detail->discount * $docCurrency['rate'] : $detail->discount, helpers::price_decimals(), '.', '');
 
             if ($detail->tax_method == '1') {
-                $data['Net_price'] = $detail->price - $data['DiscountNet'];
+                $data['Net_price'] = $price - $data['DiscountNet'];
                 $data['taxe'] = number_format($tax_price, helpers::price_decimals(), '.', '');
             } else {
-                $data['Net_price'] = ($detail->price - $data['DiscountNet'] - $tax_price);
-                $data['taxe'] = number_format($detail->price - $data['Net_price'] - $data['DiscountNet'], helpers::price_decimals(), '.', '');
+                $data['Net_price'] = ($price - $data['DiscountNet'] - $tax_price);
+                $data['taxe'] = number_format($price - $data['Net_price'] - $data['DiscountNet'], helpers::price_decimals(), '.', '');
             }
 
             $data['is_imei'] = $detail['product']['is_imei'];
@@ -748,7 +792,7 @@ class QuotationsController extends BaseController
         }
 
         $settings = Setting::where('deleted_at', '=', null)->first();
-        $symbol = $helpers->Get_Currency_Code();
+        $symbol = $docCurrency['code'];
 
         $Html = view('pdf.quotation_pdf', [
             'symbol' => $symbol,
@@ -780,23 +824,25 @@ class QuotationsController extends BaseController
     public function Quotation_PDF_Inline(Request $request, $id)
     {
         $details = [];
-        $helpers = new helpers;
         $Quotation = Quotation::with('details.product.unitSale')
             ->where('deleted_at', '=', null)
             ->findOrFail($id);
+
+        // Document currency: stored amounts are base currency, display = stored * rate.
+        $docCurrency = helpers::Get_Document_Currency($Quotation);
 
         $quote['client_name'] = $Quotation['client']->name;
         $quote['client_phone'] = $Quotation['client']->phone;
         $quote['client_adr'] = $Quotation['client']->adresse;
         $quote['client_email'] = $Quotation['client']->email;
         $quote['client_tax'] = $Quotation['client']->tax_number;
-        $quote['TaxNet'] = number_format($Quotation->TaxNet, helpers::price_decimals(), '.', '');
-        $quote['discount'] = number_format($Quotation->discount, helpers::price_decimals(), '.', '');
-        $quote['shipping'] = number_format($Quotation->shipping, helpers::price_decimals(), '.', '');
+        $quote['TaxNet'] = number_format($Quotation->TaxNet * $docCurrency['rate'], helpers::price_decimals(), '.', '');
+        $quote['discount'] = number_format($Quotation->discount * $docCurrency['rate'], helpers::price_decimals(), '.', '');
+        $quote['shipping'] = number_format($Quotation->shipping * $docCurrency['rate'], helpers::price_decimals(), '.', '');
         $quote['statut'] = $Quotation->statut;
         $quote['Ref'] = $Quotation->Ref;
         $quote['date'] = $Quotation->date.' '.$Quotation->time;
-        $quote['GrandTotal'] = number_format($Quotation->GrandTotal, helpers::price_decimals(), '.', '');
+        $quote['GrandTotal'] = number_format($Quotation->GrandTotal * $docCurrency['rate'], helpers::price_decimals(), '.', '');
 
         $detail_id = 0;
         foreach ($Quotation['details'] as $detail) {
@@ -831,26 +877,29 @@ class QuotationsController extends BaseController
 
             $data['detail_id'] = $detail_id += 1;
             $data['quantity'] = number_format($detail->quantity, helpers::price_decimals(), '.', '');
-            $data['total'] = number_format($detail->total, helpers::price_decimals(), '.', '');
+            $data['total'] = number_format($detail->total * $docCurrency['rate'], helpers::price_decimals(), '.', '');
             $data['unitSale'] = $unit ? $unit->ShortName : '';
-            $data['price'] = number_format($detail->price, helpers::price_decimals(), '.', '');
+            // unit price in document currency; the whole line stays consistent from here on
+            $price = $detail->price * $docCurrency['rate'];
+            $data['price'] = number_format($price, helpers::price_decimals(), '.', '');
 
             if ($detail->discount_method == '2') {
-                $data['DiscountNet'] = number_format($detail->discount, helpers::price_decimals(), '.', '');
+                $data['DiscountNet'] = number_format($detail->discount * $docCurrency['rate'], helpers::price_decimals(), '.', '');
             } else {
-                $data['DiscountNet'] = number_format($detail->price * $detail->discount / 100, helpers::price_decimals(), '.', '');
+                $data['DiscountNet'] = number_format($price * $detail->discount / 100, helpers::price_decimals(), '.', '');
             }
 
-            $tax_price = $detail->TaxNet * (($detail->price - $data['DiscountNet']) / 100);
-            $data['Unit_price'] = number_format($detail->price, helpers::price_decimals(), '.', '');
-            $data['discount'] = number_format($detail->discount, helpers::price_decimals(), '.', '');
+            $tax_price = $detail->TaxNet * (($price - $data['DiscountNet']) / 100);
+            $data['Unit_price'] = number_format($price, helpers::price_decimals(), '.', '');
+            // fixed discounts are amounts (convert); percentage discounts stay as-is
+            $data['discount'] = number_format($detail->discount_method == '2' ? $detail->discount * $docCurrency['rate'] : $detail->discount, helpers::price_decimals(), '.', '');
 
             if ($detail->tax_method == '1') {
-                $data['Net_price'] = $detail->price - $data['DiscountNet'];
+                $data['Net_price'] = $price - $data['DiscountNet'];
                 $data['taxe'] = number_format($tax_price, helpers::price_decimals(), '.', '');
             } else {
-                $data['Net_price'] = ($detail->price - $data['DiscountNet'] - $tax_price);
-                $data['taxe'] = number_format($detail->price - $data['Net_price'] - $data['DiscountNet'], helpers::price_decimals(), '.', '');
+                $data['Net_price'] = ($price - $data['DiscountNet'] - $tax_price);
+                $data['taxe'] = number_format($price - $data['Net_price'] - $data['DiscountNet'], helpers::price_decimals(), '.', '');
             }
 
             $data['is_imei'] = $detail['product']['is_imei'];
@@ -860,7 +909,7 @@ class QuotationsController extends BaseController
         }
 
         $settings = Setting::where('deleted_at', '=', null)->first();
-        $symbol = $helpers->Get_Currency_Code();
+        $symbol = $docCurrency['code'];
 
         $Html = view('pdf.quotation_pdf', [
             'symbol' => $symbol,
@@ -961,6 +1010,10 @@ class QuotationsController extends BaseController
 
         $details = [];
         // Check If User Has Permission view All Records
+        // Warehouse half of the same rule: record_view says whose documents,
+        // the assigned warehouses say which warehouses they may come from.
+        $this->abortIfDocumentWarehouseDenied($Quotation);
+
         if (! $view_records) {
             // Check If User->id === Quotation->id
             $this->authorizeForUser($request->user('api'), 'check_record', $Quotation);
@@ -996,6 +1049,9 @@ class QuotationsController extends BaseController
         $quote['shipping'] = $Quotation->shipping;
         $quote['statut'] = $Quotation->statut;
         $quote['notes'] = $Quotation->notes;
+        // Multi-Currency snapshot (null = base currency)
+        $quote['currency_id'] = $Quotation->currency_id;
+        $quote['exchange_rate'] = $Quotation->exchange_rate;
 
         $batchesByDetail = app(BatchService::class)->batchesForQuotationDetails($Quotation['details']);
 
@@ -1136,8 +1192,9 @@ class QuotationsController extends BaseController
         // Quotation
         $quotation = Quotation::with('client')->where('deleted_at', '=', null)->findOrFail($request->id);
 
-        $helpers = new helpers;
-        $currency = $helpers->Get_Currency();
+        // Document currency: stored amounts are base currency, display = stored * rate.
+        $docCurrency = helpers::Get_Document_Currency($quotation);
+        $currency = $docCurrency['symbol'];
 
         // settings
         $settings = Setting::where('deleted_at', '=', null)->first();
@@ -1158,7 +1215,7 @@ class QuotationsController extends BaseController
         $quotation_url = url('/api/quote_pdf/'.$request->id.'?'.$random_number);
         $quotation_number = $quotation->Ref;
 
-        $total_amount = $currency.' '.number_format($quotation->GrandTotal, helpers::price_decimals(), '.', ',');
+        $total_amount = $currency.' '.number_format($quotation->GrandTotal * $docCurrency['rate'], helpers::price_decimals(), '.', ',');
 
         $contact_name = $quotation['client']->name;
         $business_name = $settings->CompanyName;
@@ -1195,8 +1252,9 @@ class QuotationsController extends BaseController
         // Quotation
         $quotation = Quotation::with('client')->where('deleted_at', '=', null)->findOrFail($request->id);
 
-        $helpers = new helpers;
-        $currency = $helpers->Get_Currency();
+        // Document currency: stored amounts are base currency, display = stored * rate.
+        $docCurrency = helpers::Get_Document_Currency($quotation);
+        $currency = $docCurrency['symbol'];
 
         // settings
         $settings = Setting::where('deleted_at', '=', null)->first();
@@ -1218,7 +1276,7 @@ class QuotationsController extends BaseController
         $quotation_url = url('/api/quote_pdf/'.$request->id.'?'.$random_number);
         $quotation_number = $quotation->Ref;
 
-        $total_amount = $currency.' '.number_format($quotation->GrandTotal, helpers::price_decimals(), '.', ',');
+        $total_amount = $currency.' '.number_format($quotation->GrandTotal * $docCurrency['rate'], helpers::price_decimals(), '.', ',');
 
         $contact_name = $quotation['client']->name;
         $business_name = $settings->CompanyName;
@@ -1328,8 +1386,9 @@ class QuotationsController extends BaseController
         // Quotation
         $quotation = Quotation::with('client')->where('deleted_at', '=', null)->findOrFail($request->id);
 
-        $helpers = new helpers;
-        $currency = $helpers->Get_Currency();
+        // Document currency: stored amounts are base currency, display = stored * rate.
+        $docCurrency = helpers::Get_Document_Currency($quotation);
+        $currency = $docCurrency['symbol'];
 
         // settings
         $settings = Setting::where('deleted_at', '=', null)->first();
@@ -1348,7 +1407,7 @@ class QuotationsController extends BaseController
         $quotation_url = url('/api/quote_pdf/'.$request->id.'?'.$random_number);
         $quotation_number = $quotation->Ref;
 
-        $total_amount = $currency.' '.number_format($quotation->GrandTotal, helpers::price_decimals(), '.', ',');
+        $total_amount = $currency.' '.number_format($quotation->GrandTotal * $docCurrency['rate'], helpers::price_decimals(), '.', ',');
 
         $contact_name = $quotation['client']->name;
         $business_name = $settings->CompanyName;

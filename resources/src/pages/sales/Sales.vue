@@ -99,6 +99,9 @@
             {{ statusKey(SALE_STATUSES, record.statut) ? $t(statusKey(SALE_STATUSES, record.statut)) : record.statut }}
           </a-tag>
         </template>
+        <template v-else-if="column.key === 'currency_code'">
+          <a-tag v-if="record.currency_code" color="blue">{{ record.currency_code }}</a-tag>
+        </template>
         <template v-else-if="column.key === 'GrandTotal'">{{ money(record.GrandTotal) }}</template>
         <template v-else-if="column.key === 'paid_amount'">{{ money(record.paid_amount) }}</template>
         <template v-else-if="column.key === 'due'">
@@ -427,9 +430,10 @@
  * - shipment: GET shipments/{sale_id} → {shipment}; POST shipments (upsert)
  * - invoice: GET sale_pdf/{id} (blob) → Sale-{Ref}.pdf; POS receipt data from
  *   GET sales_print_invoice/{id} rendered into a print window styled by
- *   /css/pos_print.css, honoring every pos_settings show_* toggle,
- *   note_customer, logo/paper size, and the ZATCA + invoice-URL QRs
- *   (same flag semantics as the PosPage receipt)
+ *   /css/pos_print.css via lib/posReceiptHtml (all five receipt_layout
+ *   variants from Settings → POS Receipt), honoring every pos_settings
+ *   show_* toggle, note_customer, logo/paper size, and the ZATCA +
+ *   invoice-URL QRs (same flag semantics as the PosPage receipt)
  * - notify: POST sales_send_email|sales_send_sms {id}; WhatsApp POST
  *   sales_send_whatsapp {id} → {phone, message} → web.whatsapp.com link
  * - documents: GET sales/{id}/documents; POST sales/{id}/documents
@@ -462,9 +466,10 @@ import {
 } from './saleVocab';
 import http from '../../lib/http';
 import { receiptFontHeadTags, whenPrintFontsReady } from '../../lib/receiptFont';
+import { buildPosReceiptHtml } from '../../lib/posReceiptHtml';
 
 const { t } = useI18n();
-const { money, dateTime, roundMoney } = useFormat();
+const { money, number, dateTime, roundMoney } = useFormat();
 const auth = useAuthStore();
 const router = useRouter();
 
@@ -539,9 +544,15 @@ const columns = computed(() => [
   { title: t('Reference'), dataIndex: 'Ref', key: 'Ref', sorter: true },
   { title: 'Tracking Ref', dataIndex: 'tracking_ref', key: 'tracking_ref', exportValue: r => r.tracking_ref || '' },
   { title: 'Zone', dataIndex: 'zone_name', key: 'zone_name', exportValue: r => r.zone_name || '' },
+  { title: t('Seller'), dataIndex: 'seller_name', key: 'seller_name' },
   { title: t('Customer'), dataIndex: 'client_name', key: 'client_name', sorter: true },
   { title: t('warehouse'), dataIndex: 'warehouse_name', key: 'warehouse_name', sorter: true },
   { title: t('Status'), dataIndex: 'statut', key: 'statut', sorter: true, exportValue: r => r.statut },
+  // Multi-Currency: badge with the document's currency code (amounts in the
+  // list stay base-currency). Hidden when the module is off.
+  ...(auth.multiCurrencyEnabled
+    ? [{ title: t('Currency'), dataIndex: 'currency_code', key: 'currency_code', width: 90, align: 'center', exportValue: r => r.currency_code || '' }]
+    : []),
   { title: 'Qty', dataIndex: 'total_qty', key: 'total_qty', align: 'right', exportValue: r => r.total_qty ?? 0 },
   { title: t('Total'), dataIndex: 'GrandTotal', key: 'GrandTotal', sorter: true, align: 'right', exportValue: r => money(r.GrandTotal) },
   { title: t('Paid'), dataIndex: 'paid_amount', key: 'paid_amount', sorter: true, align: 'right', exportValue: r => money(r.paid_amount) },
@@ -744,125 +755,39 @@ async function invoicePos(record) {
     const s = data.sale || {};
     const setting = data.setting || {};
     const ps = data.pos_settings || {};
-    const symbol = data.symbol || '';
-    const details = data.details || [];
 
-    // Two flag conventions, mirroring the PosPage receipt exactly: legacy
-    // columns rendered with `!== 0` default ON when absent; the rest are
-    // plain truthy checks.
+    // QR data URLs are rendered up-front — the popup document can't host the
+    // Vue QR refs the POS uses. Skipped silently if the lib can't load.
     const onByDefault = f => Number(ps[f] ?? 1) !== 0;
-    const onIfSet = f => Number(ps[f] || 0) !== 0;
-
-    const esc = v => String(v ?? '')
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-    const num = (v, d = 2) => Number(v || 0).toFixed(d);
-    const cash = v => `${symbol} ${num(v)}`;
-
-    const subtotal = details.reduce((sum, d) => sum + (Number(d.total) || 0), 0);
-    const itemsTax = details.reduce((sum, d) => sum + (Number(d.taxe) || 0) * (Number(d.quantity) || 0), 0);
-    const itemsTaxRate = subtotal - itemsTax > 0 ? (itemsTax / (subtotal - itemsTax)) * 100 : 0;
-    const showItemsTax = Number(ps.show_items_tax ?? 1) !== 0;
-    const manualDiscount = String(s.discount_Method || '2') === '1'
-      ? subtotal * (Number(s.discount) || 0) / 100
-      : Math.min(Number(s.discount) || 0, subtotal);
-
-    const headerLines = [
-      onByDefault('show_store_name') && setting.CompanyName ? `<strong>${esc(setting.CompanyName)}</strong>` : '',
-      onByDefault('show_reference') && s.Ref ? `${t('Reference')} : ${esc(s.Ref)}` : '',
-      onByDefault('show_date') ? `${t('date')} : ${esc(s.date)}` : '',
-      onByDefault('show_seller') ? `${t('Seller')} : ${esc(s.seller_name)}` : '',
-      onIfSet('show_address') ? `${t('Adress')} : ${esc(setting.CompanyAdress)}` : '',
-      onIfSet('show_email') ? `${t('Email')} : ${esc(setting.email)}` : '',
-      onIfSet('show_phone') ? `${t('Phone')} : ${esc(setting.CompanyPhone)}` : '',
-      onIfSet('show_customer') ? `${t('Customer')} : ${esc(s.client_name)}` : '',
-      onIfSet('show_Warehouse') ? `${t('warehouse')} : ${esc(s.warehouse_name)}` : '',
-    ].filter(Boolean);
-
-    const line = d => {
-      const qty = Number(d.quantity) || 1;
-      const packs = d.pack_name && Number(d.pack_multiplier) > 1
-        ? `<br><small style="color:#666;">(×${esc(d.pack_multiplier)}) = ${num(qty * Number(d.pack_multiplier))} ${esc(d.unit_sale || t('Pcs'))}</small>`
-        : '';
-      const discount = onByDefault('show_product_discount') && Number(d.DiscountNet || 0) > 0
-        ? `<br><small style="color:#888;font-style:italic;">${t('Discount')}: -${num(Number(d.DiscountNet) * qty)}</small>`
-        : '';
-      const imei = d.is_imei && d.imei_number ? `<br><span>${t('IMEI_SN')} : ${esc(d.imei_number)}</span>` : '';
-      return `<tr><td colspan="3">${esc(d.name)}${imei}<br>
-        <span>${num(qty)} ${esc(d.unit_sale || '')} x ${num(Number(d.total) / qty)}</span>${packs}${discount}</td>
-        <td style="text-align:right;vertical-align:bottom">${num(d.total)}</td></tr>`;
-    };
-
-    const totalRow = (label, value) =>
-      `<tr><td colspan="3" class="total">${label}</td><td style="text-align:right;" class="total">${value}</td></tr>`;
-
-    const promotions = Array.isArray(s.promotions) ? s.promotions : [];
-    const totalsRows = [
-      totalRow(t('pos.Subtotal'), cash(showItemsTax ? subtotal - itemsTax : subtotal)),
-      showItemsTax && itemsTax > 0
-        ? totalRow(t('TotalProductTax'), `${cash(itemsTax)} (${num(itemsTaxRate)} %)`) : '',
-      onIfSet('show_tax')
-        ? totalRow(t('OrderTax'), `${cash(s.taxe)} (${num(s.tax_rate)} %)`) : '',
-      onIfSet('show_discount')
-        ? totalRow(t('Discount'), String(s.discount_Method || '2') === '1'
-            ? `${num(s.discount)}% (${cash(manualDiscount)})`
-            : cash(manualDiscount)) : '',
-      onIfSet('show_discount') && Number(s.discount_from_points || 0) > 0
-        ? totalRow(t('Discount_from_Points'), cash(s.discount_from_points)) : '',
-      ...(promotions.length
-        ? promotions.map(p => totalRow(
-            `${t('Promotions')} — ${esc(p.name || '')}${p.code ? ` (${esc(p.code)})` : ''}`,
-            `−${cash(p.amount)}`))
-        : (Number(s.promotion_discount || 0) > 0
-            ? [totalRow(`${t('Promotions')}${s.promotion_code ? ` (${esc(s.promotion_code)})` : ''}`, `−${cash(s.promotion_discount)}`)]
-            : [])),
-      onIfSet('show_shipping') ? totalRow(t('Shipping'), cash(s.shipping)) : '',
-      totalRow(t('Total'), cash(s.GrandTotal)),
-      onByDefault('show_paid') ? totalRow(t('Paid'), cash(s.paid_amount)) : '',
-      onByDefault('show_due') ? totalRow(t('Due'), cash(Number(s.GrandTotal) - Number(s.paid_amount))) : '',
-      Number(s.previous_dues) > 0 ? totalRow(t('Previous_Dues'), cash(s.previous_dues)) : '',
-      Number(s.previous_dues) > 0
-        ? totalRow(t('Net_Balance'), cash(Number(s.previous_dues) + Number(s.GrandTotal) - Number(s.paid_amount))) : '',
-    ].filter(Boolean).join('');
-
-    const pay = p => `<tr>
-        <td style="text-align:left;" colspan="1">${p.payment_method ? esc(p.payment_method.name) : '---'}</td>
-        <td style="text-align:center;" colspan="2">${num(p.montant)}</td>
-        <td style="text-align:right;" colspan="1">${num(p.change)}</td></tr>` +
-      (p.notes ? `<tr><td colspan="4" style="font-size:9px;font-style:italic;padding-bottom:4px;white-space:pre-line;">${t('Payment_note')}: ${esc(p.notes)}</td></tr>` : '');
-    const paymentsTable = onByDefault('show_payments') && Number(s.paid_amount) > 0 && (data.payments || []).length
-      ? `<table class="change mt-3" style="font-size:10px;width:100%;">
-          <thead><tr style="background:#eee;">
-            <th style="text-align:left;" colspan="1">${t('PayeBy')}:</th>
-            <th style="text-align:center;" colspan="2">${t('Amount')}:</th>
-            <th style="text-align:right;" colspan="1">${t('Change')}:</th>
-          </tr></thead><tbody>${data.payments.map(pay).join('')}</tbody></table>`
-      : '';
-
-    // QR blocks need the qrcodejs lib; skipped silently if it can't load.
     const wantZatca = setting.zatca_enabled && data.zatca_qr && onByDefault('show_zatca_qr');
     const wantInvoiceQr = onByDefault('show_barcode') && s.Ref;
-    let qrRow = '';
+    let zatcaUrl = null;
+    let invoiceUrl = null;
     if (wantZatca || wantInvoiceQr) {
       await loadQrLib();
-      const qrBlock = (title, url) => url
-        ? `<div class="receipt-qr-block"><div class="receipt-qr-title">${title}</div>
-           <div class="receipt-qr-canvas"><img src="${url}" width="100" height="100" alt=""></div></div>`
-        : '';
-      const blocks =
-        qrBlock('ZATCA QR', wantZatca ? qrDataUrl(data.zatca_qr) : null) +
-        qrBlock('Invoice QR', wantInvoiceQr ? qrDataUrl(data.public_invoice_url || s.Ref) : null);
-      if (blocks) qrRow = `<div class="receipt-qr-row mt-2">${blocks}</div>`;
+      if (wantZatca) zatcaUrl = qrDataUrl(data.zatca_qr);
+      if (wantInvoiceQr) invoiceUrl = qrDataUrl(data.public_invoice_url || s.Ref);
     }
+
+    // Same layout the POS prints (Settings → POS Receipt → layout 1-5),
+    // via the shared string port of PosPage's receipt DOM.
+    const body = buildPosReceiptHtml({
+      t,
+      sale: s,
+      setting,
+      ps,
+      symbol: data.symbol || '',
+      details: data.details || [],
+      payments: data.payments || [],
+      formatPrice: v => number(v),
+      qr: { zatca: zatcaUrl, invoice: invoiceUrl },
+    });
 
     const paperSize = [58, 80, 88].includes(Number(ps.receipt_paper_size)) ? Number(ps.receipt_paper_size) : 80;
     const fontTags = receiptFontHeadTags(ps, '#invoice-POS');
+    const title = String(s.Ref ?? '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-    const logo = onByDefault('show_logo') && setting.logo
-      ? `<div class="invoice_logo text-center mb-2"><img src="/images/${esc(setting.logo)}" alt width="${Number(ps.logo_size) || 60}" height="${Number(ps.logo_size) || 60}"></div>`
-      : '';
-
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(s.Ref)}</title>
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>
 <link rel="stylesheet" href="/css/pos_print.css">
 <style>
   #invoice-POS .receipt-qr-row{display:flex;flex-direction:row;flex-wrap:nowrap;justify-content:center;align-items:flex-start;gap:10px;width:100%;margin-top:8px;}
@@ -870,22 +795,7 @@ async function invoicePos(record) {
   #invoice-POS .receipt-qr-title{font-weight:700;font-size:10px;letter-spacing:1px;text-transform:uppercase;text-align:center;margin:0 0 4px;line-height:1.2;display:block;width:100%;}
   #invoice-POS .receipt-qr-canvas img{display:block;margin:0 auto;width:100px;height:100px;}
 </style>${fontTags}</head><body class="receipt-${paperSize}"><div id="invoice-POS">
-<div style="max-width:400px;margin:0px auto">
-  <div class="info">
-    ${logo}
-    <p>${headerLines.join('<br>')}</p>
-  </div>
-  <table class="table_data" style="width:100%;"><tbody>
-    ${details.map(line).join('')}
-    ${totalsRows}
-  </tbody></table>
-  ${paymentsTable}
-  <div id="legalcopy" class="ml-2">
-    ${s.notes ? `<p style="font-size:9px;font-style:italic;padding-bottom:4px;white-space:pre-line;margin:0;">${t('sale_note')}: ${esc(s.notes)}</p>` : ''}
-    ${onIfSet('show_note') && ps.note_customer ? `<p class="legal" style="white-space:pre-line;"><strong>${esc(ps.note_customer)}</strong></p>` : ''}
-    ${qrRow}
-  </div>
-</div>
+<div style="max-width:400px;margin:0px auto">${body}</div>
 </div></body></html>`;
     const w = window.open('', '_blank', 'width=420,height=640');
     if (!w) return;

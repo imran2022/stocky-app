@@ -20,6 +20,8 @@ export const TOGGLEABLE_MODULES = [
     { key: 'promotions', label: 'Promotions', description: 'Discount promotions applied at the POS checkout.', pathPrefixes: ['promotions'] },
     { key: 'woocommerce_settings', label: 'WooCommerce', description: 'WooCommerce store synchronization.', pathPrefixes: [] },
     { key: 'shopify', label: 'Shopify', description: 'Shopify store synchronization and logs.', pathPrefixes: ['shopify'] },
+    { key: 'salla', label: 'Salla', description: 'Salla store synchronization: products, stock and orders.', pathPrefixes: [] },
+    { key: 'jumia', label: 'Jumia', description: 'Jumia marketplace: price & stock push, order import.', pathPrefixes: [] },
     { key: 'documents', label: 'Document Archive', description: 'Central document storage and archiving.', pathPrefixes: ['documents'] },
     { key: 'subscription_product', label: 'Subscription Products', description: 'Recurring product subscriptions.', pathPrefixes: ['subscriptions'] },
     { key: 'manufacturing', label: 'Manufacturing (MRP)', description: 'Bills of materials, production orders, work centers, quality and planning.', pathPrefixes: ['mrp'] },

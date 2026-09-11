@@ -32,6 +32,16 @@ class DashboardController extends Controller
 
     public function dashboard_data(Request $request)
     {
+        // Callers may omit the header date range (the mobile app's first
+        // load, direct API use); the COGS/expense queries below require
+        // concrete dates, so default to "today".
+        if (empty($request->from) || empty($request->to)) {
+            $request->merge([
+                'from' => Carbon::today()->toDateString(),
+                'to' => Carbon::today()->toDateString(),
+            ]);
+        }
+
         $user_auth = auth()->user();
         if ($user_auth->is_all_warehouses) {
             $array_warehouses_id = Warehouse::where('deleted_at', '=', null)->pluck('id')->toArray();
@@ -41,10 +51,11 @@ class DashboardController extends Controller
             $warehouses = Warehouse::where('deleted_at', '=', null)->whereIn('id', $array_warehouses_id)->get(['id', 'name']);
         }
 
-        if (empty($request->warehouse_id)) {
+        // ✅ A warehouse_id outside the user's scope must not replace it — every
+        // chart below falls back to $array_warehouses_id when this is 0.
+        $warehouse_id = (int) ($request->warehouse_id ?? 0);
+        if ($warehouse_id !== 0 && ! in_array($warehouse_id, array_map('intval', $array_warehouses_id), true)) {
             $warehouse_id = 0;
-        } else {
-            $warehouse_id = $request->warehouse_id;
         }
 
         // Sales & Purchases chart: use header date range + warehouse filter

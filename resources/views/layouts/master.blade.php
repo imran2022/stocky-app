@@ -10,13 +10,7 @@
     <link rel="stylesheet" href="/css/dashboard-tw.css">
     <link rel="icon" href="{{ asset('images/' . ($app_settings->favicon ?? 'favicon.ico')) }}">
 
-    {{-- PWA: manifest + theme + apple touch icon. Pure addition, no effect on existing behavior. --}}
-    <link rel="manifest" href="/manifest.webmanifest">
-    <meta name="theme-color" content="#2f3640">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <meta name="apple-mobile-web-app-title" content="{{ $app_settings->app_name ?? 'Stocky' }}">
-    <link rel="apple-touch-icon" href="/pwa_images/pwa-icon-192.png">
+    @include('partials.pwa-head')
 
     <title>{{ $app_settings->app_name ?? 'Stocky | Ultimate Inventory With POS' }}</title>
 
@@ -72,23 +66,7 @@
 
     <script src="/js/main.min.js?v=5.7&v={{ time() }}"></script>
 
-    {{-- PWA: register service worker. Silently no-ops on unsupported browsers, http (non-localhost),
-         or if registration fails. Does not block app boot. --}}
-    <script>
-      (function () {
-        try {
-          if (!('serviceWorker' in navigator)) return;
-          var isSecure = window.isSecureContext === true
-            || location.protocol === 'https:'
-            || location.hostname === 'localhost'
-            || location.hostname === '127.0.0.1';
-          if (!isSecure) return;
-          window.addEventListener('load', function () {
-            navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function () {});
-          });
-        } catch (e) { /* never break the app because of PWA */ }
-      })();
-    </script>
+    @include('partials.pwa-sw')
 
   </body>
 </html>

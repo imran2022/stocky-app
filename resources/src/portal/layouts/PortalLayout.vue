@@ -1,126 +1,296 @@
 <template>
-  <div class="portal-layout">
-    <header class="pc-header">
-      <div class="pc-header-inner">
-        <router-link to="/dashboard" class="pc-brand">
-          <span class="pc-brand-mark">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M3 7h18M3 12h18M3 17h12"/>
-            </svg>
-          </span>
-          <span class="pc-brand-text">Client Portal</span>
-        </router-link>
-
-        <nav class="pc-nav pc-nav-desktop">
-          <router-link v-for="item in desktopNavItems" :key="item.to" :to="item.to" class="pc-nav-link">
-            <span class="pc-nav-icon" v-html="item.icon"></span>
-            <span>{{ item.label }}</span>
+  <!-- Portal shell, as a Vue layout -->
+  <div class="page">
+    <!-- ── Side navigation ── -->
+    <aside class="navbar navbar-vertical navbar-expand-lg rst-sidenav">
+      <div class="container-fluid">
+        <div class="navbar-brand navbar-brand-autodark py-3 d-flex align-items-center justify-content-between">
+          <router-link to="/dashboard" class="text-decoration-none d-flex align-items-center gap-2" @click="closeDrawer">
+            <BrandMark />
           </router-link>
-        </nav>
+          <button type="button" class="btn btn-icon rst-tool d-lg-none" :aria-label="tr('close_menu', 'Close menu')" :title="tr('close_menu', 'Close menu')" @click="closeDrawer">
+            <i class="ti ti-x"></i>
+          </button>
+        </div>
 
-        <div class="pc-header-actions">
-          <div class="pc-user" @click.stop="menuOpen = !menuOpen" :class="{ open: menuOpen }">
-            <div class="pc-avatar" :title="clientName">{{ initials }}</div>
-            <span class="pc-user-name">{{ clientName }}</span>
-            <svg class="pc-caret" viewBox="0 0 20 20" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 7l5 5 5-5"/></svg>
-            <div v-if="menuOpen" class="pc-menu" @click.stop>
-              <div class="pc-menu-header">
-                <div class="pc-avatar pc-avatar-lg">{{ initials }}</div>
-                <div>
-                  <div class="pc-menu-name">{{ clientName }}</div>
-                  <div class="pc-menu-sub">Signed in</div>
+        <div class="collapse navbar-collapse" id="rst-sidenav-menu">
+          <ul class="navbar-nav pt-lg-2 pb-4">
+            <template v-for="group in navGroups" :key="group.heading || 'main'">
+              <li v-if="group.heading" class="rst-nav-heading">{{ tr(group.heading, group.fallback) }}</li>
+              <li v-for="item in group.items" :key="item.to" class="nav-item">
+                <router-link :to="item.to" class="nav-link" :class="{ active: isActive(item.to) }" @click="closeDrawer">
+                  <i :class="`ti ti-${item.icon}`"></i>
+                  <span>{{ $t(item.label) }}</span>
+                  <span v-if="item.badge" class="badge bg-orange-lt ms-auto">{{ item.badge }}</span>
+                </router-link>
+              </li>
+            </template>
+          </ul>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Dims the page while the mobile drawer is open; click to close. -->
+    <div class="rst-sidenav-backdrop d-print-none" aria-hidden="true" @click="closeDrawer"></div>
+
+    <div class="page-wrapper">
+      <!-- ── Topbar ── -->
+      <header class="navbar navbar-expand-md d-print-none">
+        <div class="container-xl">
+          <button
+            type="button"
+            class="btn btn-icon rst-tool me-2"
+            :aria-label="toggleLabel"
+            :title="toggleLabel"
+            aria-controls="rst-sidenav-menu"
+            :aria-expanded="sidenavOpen ? 'true' : 'false'"
+            @click="toggleSidenav"
+          >
+            <i class="ti ti-menu-2"></i>
+          </button>
+
+          <router-link to="/dashboard" class="rst-topbar-brand d-lg-none me-2">
+            <BrandMark />
+          </router-link>
+
+          <form class="rst-search d-none d-md-block" role="search" @submit.prevent="submitSearch">
+            <div class="input-icon">
+              <span class="input-icon-addon"><i class="ti ti-search"></i></span>
+              <input v-model="search" type="search" class="form-control" :placeholder="tr('search_placeholder', 'Search…')" :aria-label="tr('search', 'Search')">
+            </div>
+          </form>
+
+          <div class="ms-auto d-flex align-items-center gap-1">
+            <router-link v-if="Number(alerts.due_total) > 0" to="/invoices" class="btn btn-primary btn-sm d-none d-md-inline-flex me-2">
+              <i class="ti ti-cash me-1"></i>{{ tr('pay_now', 'Pay now') }}
+            </router-link>
+
+            <LanguageMenu />
+
+            <button type="button" class="btn btn-icon rst-tool d-none d-md-inline-flex" :title="tr('toggle_fullscreen', 'Toggle fullscreen')" :aria-label="tr('toggle_fullscreen', 'Toggle fullscreen')" @click="toggleFullscreen">
+              <i class="ti ti-arrows-maximize"></i>
+            </button>
+
+            <button type="button" class="btn btn-icon rst-tool" :title="tr('toggle_theme', 'Toggle theme')" :aria-label="tr('toggle_theme', 'Toggle theme')" @click="toggleTheme">
+              <i class="ti ti-moon-stars"></i>
+            </button>
+
+            <!-- Notifications -->
+            <div class="dropdown">
+              <button type="button" class="btn btn-icon rst-tool rst-bell" data-bs-toggle="dropdown" data-bs-auto-close="outside" :aria-label="tr('notifications', 'Notifications')" :title="tr('notifications', 'Notifications')">
+                <i class="ti ti-bell"></i>
+                <span v-if="alerts.items.length" class="rst-bell-dot">{{ alerts.items.length > 9 ? '9+' : alerts.items.length }}</span>
+              </button>
+              <div class="dropdown-menu dropdown-menu-end rst-menu rst-menu-wide">
+                <div class="rst-menu-head">
+                  <span class="rst-menu-title">{{ tr('notifications', 'Notifications') }}</span>
+                  <span v-if="alerts.items.length" class="rst-menu-count">{{ alerts.items.length }} {{ tr('new', 'new') }}</span>
+                </div>
+                <template v-if="alerts.items.length">
+                  <router-link v-for="(alert, i) in alerts.items" :key="i" :to="alert.url" class="rst-alert">
+                    <span class="rst-alert-icon" :class="`rst-alert-${alert.tone}`"><i :class="`ti ${alert.icon}`"></i></span>
+                    <span class="rst-alert-body">
+                      <span class="rst-alert-title">{{ alert.title }}</span>
+                      <span class="rst-alert-meta">{{ alert.meta }}</span>
+                    </span>
+                  </router-link>
+                </template>
+                <div v-else class="rst-menu-empty">
+                  <i class="ti ti-bell-check"></i>
+                  <div>{{ tr('all_caught_up', 'You are all caught up.') }}</div>
                 </div>
               </div>
-              <router-link to="/profile" class="pc-menu-item" @click="menuOpen = false">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.5-4 5-6 8-6s6.5 2 8 6"/></svg>
-                Profile
-              </router-link>
-              <button type="button" class="pc-menu-item pc-menu-danger" @click="logout">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
-                Logout
-              </button>
+            </div>
+
+            <div class="vr mx-2 d-none d-md-block opacity-25"></div>
+
+            <!-- Account -->
+            <div class="dropdown">
+              <a href="#" class="rst-user-chip" data-bs-toggle="dropdown" :aria-label="tr('open_user_menu', 'Open user menu')" @click.prevent>
+                <span class="avatar avatar-sm rounded-circle rst-avatar-accent">{{ initials }}</span>
+                <span class="rst-user-meta d-none d-md-flex flex-column">
+                  <span class="fw-semibold">{{ clientName }}</span>
+                  <small class="text-secondary">{{ clientEmail }}</small>
+                </span>
+                <i class="ti ti-chevron-down text-secondary d-none d-md-inline"></i>
+              </a>
+              <div class="dropdown-menu dropdown-menu-end rst-menu">
+                <div class="rst-menu-user">
+                  <span class="avatar rounded-circle rst-avatar-accent">{{ initials }}</span>
+                  <span class="rst-menu-user-body">
+                    <span class="rst-menu-user-name">{{ clientName }}</span>
+                    <span class="rst-menu-user-mail">{{ clientEmail }}</span>
+                    <span class="rst-menu-role">{{ $t('client') }}</span>
+                  </span>
+                </div>
+                <div class="dropdown-divider"></div>
+                <router-link class="dropdown-item" to="/profile"><i class="ti ti-user"></i>{{ $t('profile') }}</router-link>
+                <router-link class="dropdown-item" to="/statement"><i class="ti ti-report-money"></i>{{ $t('nav_statement') }}</router-link>
+                <button type="button" class="dropdown-item" @click="openCustomizer"><i class="ti ti-palette"></i>{{ tr('customize', 'Customize') }}</button>
+                <div class="dropdown-divider"></div>
+                <button type="button" class="dropdown-item rst-item-danger" @click="logout"><i class="ti ti-logout"></i>{{ $t('logout') }}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <!-- ── Page header: pretitle, title, breadcrumbs, actions ── -->
+      <div class="page-header d-print-none">
+        <div class="container-xl">
+          <div class="row g-2 align-items-center">
+            <div class="col">
+              <div v-if="page.pretitle" class="rst-pretitle">{{ page.pretitle }}</div>
+              <h2 class="page-title">{{ page.title }}</h2>
+            </div>
+            <div class="col-auto d-none d-sm-block">
+              <nav aria-label="breadcrumbs">
+                <ol class="rst-crumbs">
+                  <li>
+                    <router-link to="/dashboard"><i class="ti ti-home"></i>{{ $t('nav_home') }}</router-link>
+                  </li>
+                  <template v-for="(crumb, i) in page.crumbs" :key="i">
+                    <li><i class="ti ti-chevron-right rst-crumb-sep"></i></li>
+                    <li><router-link :to="crumb.to || '#'">{{ crumb.label }}</router-link></li>
+                  </template>
+                  <li v-if="page.title"><i class="ti ti-chevron-right rst-crumb-sep"></i></li>
+                  <li v-if="page.title" aria-current="page"><span class="rst-crumb-now">{{ page.title }}</span></li>
+                </ol>
+              </nav>
+            </div>
+            <div class="col-auto d-print-none">
+              <div id="portal-page-actions" class="pc-page-actions btn-list"></div>
             </div>
           </div>
         </div>
       </div>
-    </header>
 
-    <main class="pc-main">
-      <router-view />
-    </main>
+      <div class="page-body">
+        <div class="container-xl">
+          <router-view />
+        </div>
+      </div>
 
-    <!-- Mobile bottom tab bar -->
-    <nav class="pc-bottom-nav">
-      <router-link v-for="item in navItems" :key="'bn-' + item.to" :to="item.to" class="pc-bottom-link">
-        <span class="pc-bottom-icon" v-html="item.icon"></span>
-        <span class="pc-bottom-label">{{ item.label }}</span>
-      </router-link>
-    </nav>
+      <footer class="rst-footer d-print-none">
+        <div class="container-xl d-flex flex-wrap align-items-center justify-content-between gap-2 py-3 small">
+          <span class="text-secondary">© {{ year }} {{ brand.name }} — {{ tr('all_rights_reserved', 'All rights reserved.') }}</span>
+          <span class="d-flex align-items-center gap-3">
+            <span class="rst-footer-tag">{{ $t('client_portal') }}</span>
+            <router-link to="/help" class="text-secondary text-decoration-none">{{ $t('nav_help') }}</router-link>
+          </span>
+        </div>
+      </footer>
+    </div>
+
+    <Customizer />
   </div>
 </template>
 
 <script>
 import http from '../lib/http';
-
-const ICONS = {
-  home: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>',
-  invoice: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l5 5v13a1 1 0 01-1 1H6a1 1 0 01-1-1V4a1 1 0 011-1z"/><path d="M14 3v6h6"/><path d="M9 14h6M9 18h4"/></svg>',
-  payment: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 11h20"/><path d="M6 15h4"/></svg>',
-  statement: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>',
-  quotation: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h9"/></svg>',
-  appointment: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>',
-  contract: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h4"/></svg>',
-  help: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.1 9.1A3 3 0 0112 7a3 3 0 011 5.83V14"/><circle cx="12" cy="17.5" r="0.5" fill="currentColor"/></svg>',
-  profile: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.5-4 5-6 8-6s6.5 2 8 6"/></svg>',
-};
+import { page } from '../lib/page';
+import { brand, initials } from '../lib/ui';
+import { themeState, toggleTheme, setSidenavCollapsed } from '../lib/theme';
+import BrandMark from '../components/BrandMark.vue';
+import LanguageMenu from '../components/LanguageMenu.vue';
+import Customizer from '../components/Customizer.vue';
 
 export default {
+  components: { BrandMark, LanguageMenu, Customizer },
   data() {
     return {
+      page,
+      brand: brand(),
+      theme: themeState,
       clientName: '',
-      menuOpen: false,
-      navItems: [
-        { to: '/dashboard', label: 'Home', icon: ICONS.home },
-        { to: '/invoices', label: 'Invoices', icon: ICONS.invoice },
-        { to: '/quotations', label: 'Quotations', icon: ICONS.quotation },
-        { to: '/appointments', label: 'Appointments', icon: ICONS.appointment },
-        { to: '/contracts', label: 'Contracts', icon: ICONS.contract },
-        { to: '/payments', label: 'Payments', icon: ICONS.payment },
-        { to: '/statement', label: 'Statement', icon: ICONS.statement },
-        { to: '/help', label: 'Help', icon: ICONS.help },
-        { to: '/profile', label: 'Profile', icon: ICONS.profile },
+      clientEmail: '',
+      search: '',
+      drawerOpen: false,
+      isDesktop: window.matchMedia('(min-width: 992px)').matches,
+      year: new Date().getFullYear(),
+      alerts: { items: [], due_total: 0 },
+      // Sidebar navigation groups; labels are portal.php keys.
+      navGroups: [
+        { heading: null, items: [{ to: '/dashboard', label: 'nav_home', icon: 'layout-dashboard' }] },
+        { heading: 'nav_billing', fallback: 'Billing', items: [
+          { to: '/invoices', label: 'nav_invoices', icon: 'file-invoice' },
+          { to: '/payments', label: 'nav_payments', icon: 'credit-card' },
+          { to: '/statement', label: 'nav_statement', icon: 'report-money' },
+        ] },
+        { heading: 'nav_services', fallback: 'Services', items: [
+          { to: '/quotations', label: 'nav_quotations', icon: 'file-description' },
+          { to: '/appointments', label: 'nav_appointments', icon: 'calendar-event' },
+          { to: '/contracts', label: 'nav_contracts', icon: 'file-certificate' },
+        ] },
+        { heading: 'nav_support', fallback: 'Support', items: [
+          { to: '/help', label: 'nav_help', icon: 'help-circle' },
+          { to: '/profile', label: 'nav_profile', icon: 'user-circle' },
+        ] },
       ],
     };
   },
   computed: {
-    initials() {
-      const name = this.clientName || 'A';
-      return name
-        .split(/\s+/)
-        .filter(Boolean)
-        .slice(0, 2)
-        .map(w => w.charAt(0).toUpperCase())
-        .join('') || 'A';
-    },
-    desktopNavItems() {
-      return this.navItems.filter(i => i.to !== '/profile');
+    initials() { return initials(this.clientName || 'A'); },
+    sidenavOpen() { return this.isDesktop ? !this.theme.collapsed : this.drawerOpen; },
+    toggleLabel() {
+      if (!this.isDesktop) return this.tr('open_menu', 'Open menu');
+      return this.theme.collapsed ? this.tr('expand_sidebar', 'Expand sidebar') : this.tr('collapse_sidebar', 'Collapse sidebar');
     },
   },
-  async mounted() {
-    document.addEventListener('click', this.closeMenu);
-    try {
-      const { data } = await http.get('/portal/me');
-      this.clientName = (data && data.portal_client && data.portal_client.client && data.portal_client.client.name) || 'Account';
-    } catch (_) {
-      this.clientName = 'Account';
-    }
+  watch: {
+    '$route.fullPath'() { this.closeDrawer(); },
+    drawerOpen(v) { document.documentElement.classList.toggle('rst-sidenav-open', v); },
+  },
+  mounted() {
+    this.mq = window.matchMedia('(min-width: 992px)');
+    this.onMq = (e) => { this.isDesktop = e.matches; this.closeDrawer(); };
+    this.mq.addEventListener('change', this.onMq);
+    document.addEventListener('keydown', this.onKeydown);
+    this.loadMe();
+    this.loadAlerts();
   },
   beforeUnmount() {
-    document.removeEventListener('click', this.closeMenu);
+    this.mq.removeEventListener('change', this.onMq);
+    document.removeEventListener('keydown', this.onKeydown);
+    document.documentElement.classList.remove('rst-sidenav-open');
   },
   methods: {
-    closeMenu() {
-      this.menuOpen = false;
+    toggleTheme,
+    isActive(to) {
+      const p = this.$route.path;
+      return p === to || p.startsWith(to + '/');
+    },
+    toggleSidenav() {
+      if (this.isDesktop) setSidenavCollapsed(!this.theme.collapsed);
+      else this.drawerOpen = !this.drawerOpen;
+    },
+    closeDrawer() { this.drawerOpen = false; },
+    onKeydown(e) { if (e.key === 'Escape' && this.drawerOpen) this.closeDrawer(); },
+    toggleFullscreen() {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else document.documentElement.requestFullscreen();
+    },
+    openCustomizer() { document.dispatchEvent(new CustomEvent('portal:open-customizer')); },
+    submitSearch() {
+      const q = this.search.trim();
+      if (!q) return;
+      this.$router.push({ path: '/invoices', query: { q } });
+    },
+    async loadMe() {
+      try {
+        const { data } = await http.get('/portal/me');
+        const pc = data && data.portal_client;
+        this.clientName = (pc && pc.client && pc.client.name) || this.$t('account');
+        this.clientEmail = (pc && (pc.email || pc.portal_email)) || (pc && pc.client && pc.client.email) || '';
+      } catch (_) {
+        this.clientName = this.$t('account');
+      }
+    },
+    async loadAlerts() {
+      try {
+        const { data } = await http.get('/portal/notifications');
+        this.alerts = { items: Array.isArray(data.items) ? data.items : [], due_total: Number(data.due_total) || 0 };
+      } catch (_) { /* the bell just stays quiet */ }
     },
     async logout() {
       await http.post('/portal/logout');
@@ -129,296 +299,3 @@ export default {
   },
 };
 </script>
-
-<style scoped>
-.portal-layout {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  background: var(--pc-bg);
-}
-
-/* Header */
-.pc-header {
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  background: var(--pc-header-bg);
-  backdrop-filter: saturate(180%) blur(14px);
-  -webkit-backdrop-filter: saturate(180%) blur(14px);
-  border-bottom: 1px solid var(--pc-border);
-}
-.pc-header-inner {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 0.75rem 1.25rem;
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  min-width: 0;
-}
-.pc-brand {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  text-decoration: none;
-  color: var(--pc-text);
-  font-weight: 700;
-  font-size: 1.05rem;
-  letter-spacing: -0.01em;
-  flex-shrink: 0;
-  min-width: 0;
-}
-.pc-brand-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.pc-brand-mark {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, var(--pc-primary) 0%, #6366f1 100%);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 4px 12px -2px rgba(79, 70, 229, 0.45);
-}
-
-.pc-nav {
-  display: flex;
-  gap: 0.1rem;
-  flex: 1 1 auto;
-  justify-content: center;
-  min-width: 0;
-  flex-wrap: nowrap;
-  overflow: hidden;
-}
-.pc-nav-link {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.5rem 0.7rem;
-  border-radius: 10px;
-  color: var(--pc-text-muted);
-  font-weight: 500;
-  font-size: 0.85rem;
-  text-decoration: none;
-  white-space: nowrap;
-  transition: background 0.15s, color 0.15s;
-}
-.pc-nav-link:hover { color: var(--pc-text); background: var(--pc-surface-alt); }
-.pc-nav-link.router-link-active {
-  color: var(--pc-primary);
-  background: var(--pc-primary-50);
-}
-.pc-nav-icon { display: inline-flex; }
-.pc-nav-icon :deep(svg) { width: 16px; height: 16px; }
-
-.pc-header-actions { margin-left: auto; flex-shrink: 0; }
-.pc-user {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  padding: 0.3rem 0.55rem 0.3rem 0.3rem;
-  border-radius: 999px;
-  cursor: pointer;
-  border: 1px solid transparent;
-  transition: border-color 0.15s, background 0.15s;
-  max-width: 100%;
-  min-width: 0;
-}
-.pc-user:hover { border-color: var(--pc-border); background: var(--pc-surface); }
-.pc-user.open { border-color: var(--pc-border); background: var(--pc-surface); }
-.pc-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #4f46e5, #7c3aed);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 600;
-  font-size: 0.82rem;
-  flex-shrink: 0;
-}
-.pc-avatar-lg { width: 42px; height: 42px; font-size: 0.95rem; }
-.pc-user-name {
-  font-size: 0.88rem;
-  font-weight: 500;
-  color: var(--pc-text);
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.pc-caret { color: var(--pc-text-soft); }
-
-.pc-menu {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  min-width: 220px;
-  max-width: calc(100vw - 1.5rem);
-  background: var(--pc-surface);
-  border: 1px solid var(--pc-border);
-  border-radius: var(--pc-radius);
-  box-shadow: var(--pc-shadow-lg);
-  padding: 0.35rem;
-  z-index: 200;
-  animation: pc-fade-down 0.15s ease-out;
-}
-@keyframes pc-fade-down {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-.pc-menu-header {
-  display: flex;
-  align-items: center;
-  gap: 0.7rem;
-  padding: 0.7rem 0.7rem 0.85rem;
-  border-bottom: 1px solid var(--pc-border);
-  margin-bottom: 0.35rem;
-  min-width: 0;
-}
-.pc-menu-header > div:not(.pc-avatar) { min-width: 0; flex: 1; }
-.pc-menu-name { font-weight: 600; color: var(--pc-text); font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pc-menu-sub { font-size: 0.78rem; color: var(--pc-text-muted); }
-.pc-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  width: 100%;
-  padding: 0.55rem 0.7rem;
-  border: none;
-  background: transparent;
-  color: var(--pc-text);
-  font-size: 0.88rem;
-  text-align: left;
-  text-decoration: none;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.pc-menu-item:hover { background: var(--pc-surface-alt); }
-.pc-menu-danger { color: var(--pc-danger); }
-.pc-menu-danger:hover { background: var(--pc-danger-bg); }
-
-/* Main */
-.pc-main {
-  flex: 1;
-  width: 100%;
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 1.75rem 1.5rem 2rem;
-  box-sizing: border-box;
-}
-
-/* Bottom nav (mobile only) */
-.pc-bottom-nav {
-  display: none;
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  z-index: 100;
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: saturate(180%) blur(14px);
-  -webkit-backdrop-filter: saturate(180%) blur(14px);
-  border-top: 1px solid var(--pc-border);
-  padding: 0.35rem 0.25rem calc(0.35rem + env(safe-area-inset-bottom, 0px));
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-  -webkit-overflow-scrolling: touch;
-  scroll-snap-type: x proximity;
-  gap: 0.1rem;
-}
-.pc-bottom-nav::-webkit-scrollbar { display: none; }
-.pc-bottom-link {
-  flex: 1 1 auto;
-  min-width: 56px;
-  max-width: 96px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.18rem;
-  padding: 0.4rem 0.2rem;
-  text-decoration: none;
-  color: var(--pc-text-soft);
-  font-size: 0.68rem;
-  font-weight: 500;
-  border-radius: 10px;
-  transition: color 0.15s, background 0.15s;
-  scroll-snap-align: center;
-}
-.pc-bottom-link:hover { color: var(--pc-text-muted); }
-.pc-bottom-link.router-link-active {
-  color: var(--pc-primary);
-  background: var(--pc-primary-50);
-}
-.pc-bottom-link.router-link-active .pc-bottom-icon {
-  transform: translateY(-1px) scale(1.05);
-}
-.pc-bottom-icon {
-  display: inline-flex;
-  transition: transform 0.2s;
-}
-.pc-bottom-icon :deep(svg) { width: 22px; height: 22px; }
-.pc-bottom-label {
-  line-height: 1;
-  letter-spacing: 0.01em;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Collapse to icon-only nav before items can overflow the 1200px container */
-@media (max-width: 1280px) {
-  .pc-nav-desktop .pc-nav-link span:not(.pc-nav-icon) { display: none; }
-  .pc-nav-link { padding: 0.5rem; }
-  .pc-nav-icon :deep(svg) { width: 18px; height: 18px; }
-}
-
-/* Narrow tablet: hide user name in header pill to free space for icon nav */
-@media (max-width: 820px) {
-  .pc-user-name { display: none; }
-  .pc-caret { display: none; }
-  .pc-user { padding: 0.25rem; }
-}
-
-/* Mobile: hide top nav, show bottom nav */
-@media (max-width: 640px) {
-  .pc-header-inner { padding: 0.55rem 0.85rem; gap: 0.5rem; }
-  .pc-nav-desktop { display: none; }
-  .pc-main { padding: 1rem 1rem 5.5rem; }
-  .pc-bottom-nav { display: flex; }
-  .pc-brand { font-size: 1rem; }
-  .pc-brand-mark { width: 30px; height: 30px; border-radius: 9px; }
-  .pc-bottom-link { min-width: 52px; font-size: 0.66rem; padding: 0.35rem 0.15rem; }
-  .pc-bottom-icon :deep(svg) { width: 21px; height: 21px; }
-}
-
-@media (max-width: 480px) {
-  .pc-header-inner { padding: 0.5rem 0.75rem; }
-  .pc-bottom-nav { padding-left: 0.15rem; padding-right: 0.15rem; gap: 0.05rem; }
-  .pc-bottom-link { min-width: 44px; font-size: 0.62rem; padding: 0.3rem 0.1rem; gap: 0.12rem; }
-  .pc-bottom-icon :deep(svg) { width: 20px; height: 20px; }
-  .pc-bottom-label { letter-spacing: 0; font-size: 0.6rem; }
-}
-
-@media (max-width: 380px) {
-  .pc-brand-text { display: none; }
-  .pc-main { padding: 0.85rem 0.85rem 5rem; }
-  .pc-bottom-link { min-width: 38px; }
-  .pc-bottom-label { display: none; }
-  .pc-bottom-link { padding: 0.45rem 0.1rem; }
-  .pc-bottom-icon :deep(svg) { width: 22px; height: 22px; }
-}
-</style>

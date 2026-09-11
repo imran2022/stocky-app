@@ -48,6 +48,17 @@
               />
             </a-form-item>
           </a-col>
+          <!-- Multi-Currency: entered/displayed amounts are in this currency;
+               the model (and the payload) stays in the base currency. -->
+          <a-col v-if="mcEnabled" :xs="24" :md="8">
+            <a-form-item :label="$t('Currency')">
+              <a-select
+                v-model:value="docCurrencyId"
+                show-search option-filter-prop="label"
+                :options="currencyOptions"
+              />
+            </a-form-item>
+          </a-col>
         </a-row>
       </a-card>
 
@@ -106,7 +117,7 @@
                 {{ $t('Price_below_min_not_allowed') }}
               </div>
             </template>
-            <template v-else-if="column.key === 'net_price'">{{ money(record.Net_price) }}</template>
+            <template v-else-if="column.key === 'net_price'">{{ docMoney(record.Net_price) }}</template>
             <template v-else-if="column.key === 'box_qty'">
               <a-input-number
                 :value="record.box_qty"
@@ -128,10 +139,10 @@
                 @update:value="v => setQty(record, v)"
               />
             </template>
-            <template v-else-if="column.key === 'discount'">{{ money(record.DiscountNet * record.quantity) }}</template>
-            <template v-else-if="column.key === 'tax'">{{ money(record.taxe * record.quantity) }}</template>
+            <template v-else-if="column.key === 'discount'">{{ docMoney(record.DiscountNet * record.quantity) }}</template>
+            <template v-else-if="column.key === 'tax'">{{ docMoney(record.taxe * record.quantity) }}</template>
             <template v-else-if="column.key === 'subtotal'">
-              <strong>{{ money(record.subtotal) }}</strong>
+              <strong>{{ docMoney(record.subtotal) }}</strong>
             </template>
             <template v-else-if="column.key === 'actions'">
               <a-space>
@@ -168,7 +179,7 @@
               </a-col>
               <a-col :xs="12" :md="8">
                 <a-form-item :label="$t('Discount')">
-                  <a-input-number v-model:value="sale.discount" style="width: 100%" :min="0" />
+                  <a-input-number v-model:value="discountInput" style="width: 100%" :min="0" />
                 </a-form-item>
               </a-col>
               <a-col :xs="12" :md="8">
@@ -184,7 +195,7 @@
               </a-col>
               <a-col :xs="12" :md="8">
                 <a-form-item :label="$t('Shipping')">
-                  <a-input-number v-model:value="sale.shipping" style="width: 100%" :min="0" />
+                  <a-input-number v-model:value="shippingInput" style="width: 100%" :min="0" />
                 </a-form-item>
               </a-col>
               <a-col :xs="12" :md="8">
@@ -199,11 +210,23 @@
                   />
                 </a-form-item>
               </a-col>
-              <a-col :xs="24" :md="8">
+              <!-- Sales agents belong to the Commissions module; hide the field
+                   when the module is toggled off (Settings → Modules). -->
+              <a-col v-if="auth.moduleEnabled('commissions')" :xs="24" :md="8">
                 <a-form-item :label="$t('Sales_Agent') || 'Sales Agent'">
                   <a-select
                     v-model:value="sale.sales_agent_id" allow-clear show-search
                     option-filter-prop="label" :options="agentOptions"
+                  />
+                </a-form-item>
+              </a-col>
+              <!-- Change Salesperson (same opt-in feature as the POS picker) -->
+              <a-col v-if="salesSwitchEnabled" :xs="24" :md="8">
+                <a-form-item :label="$t('Seller')">
+                  <a-select
+                    v-model:value="sale.seller_id" allow-clear show-search
+                    option-filter-prop="label" :options="salespersonOptions"
+                    :placeholder="$t('Select_Salesperson')"
                   />
                 </a-form-item>
               </a-col>
@@ -264,7 +287,7 @@
                     Enter a value from 1 to your available points.
                   </div>
                   <div v-if="pointsState.discount_from_points > 0" style="margin-top: 4px; color: #52c41a">
-                    Discount of <strong>{{ money(pointsState.discount_from_points) }}</strong> will be applied
+                    Discount of <strong>{{ docMoney(pointsState.discount_from_points) }}</strong> will be applied
                   </div>
                 </a-form-item>
               </a-col>
@@ -304,7 +327,7 @@
                       style="flex: 1 1 160px"
                     />
                     <a-input-number
-                      :value="line.amount"
+                      :value="toDocAmt(line.amount)"
                       :min="0"
                       :placeholder="$t('Paying_Amount')"
                       style="flex: 1 1 140px"
@@ -332,9 +355,9 @@
                   </a-button>
 
                   <div class="pay-summary">
-                    <span><strong>{{ $t('Paying') }}:</strong> {{ money(totalPaidLines) }}</span>
-                    <span><strong>{{ $t('Balance') }}:</strong> {{ money(paymentDue) }}</span>
-                    <span><strong>{{ $t('Change') }}:</strong> {{ money(paymentChange) }}</span>
+                    <span><strong>{{ $t('Paying') }}:</strong> {{ docMoney(totalPaidLines) }}</span>
+                    <span><strong>{{ $t('Balance') }}:</strong> {{ docMoney(paymentDue) }}</span>
+                    <span><strong>{{ $t('Change') }}:</strong> {{ docMoney(paymentChange) }}</span>
                   </div>
                 </a-form-item>
               </a-col>
@@ -344,14 +367,18 @@
 
         <a-col :xs="24" :lg="10">
           <a-card size="small">
-            <div class="sum-row"><span>{{ $t('Total') }}</span><span>{{ money(totals.total) }}</span></div>
-            <div class="sum-row"><span>{{ $t('OrderTax') }}</span><span>{{ money(totals.TaxNet) }} ({{ Number(sale.tax_rate) || 0 }}%)</span></div>
+            <div class="sum-row"><span>{{ $t('Total') }}</span><span>{{ docMoney(totals.total) }}</span></div>
+            <div class="sum-row"><span>{{ $t('OrderTax') }}</span><span>{{ docMoney(totals.TaxNet) }} ({{ Number(sale.tax_rate) || 0 }}%)</span></div>
             <div class="sum-row">
               <span>{{ $t('Discount') }}</span>
-              <span style="color: #ff4d4f">- {{ money(totals.discountAmount) }}</span>
+              <span style="color: #ff4d4f">- {{ docMoney(totals.discountAmount) }}</span>
             </div>
-            <div class="sum-row"><span>{{ $t('Shipping') }}</span><span>{{ money(sale.shipping) }}</span></div>
-            <div class="sum-row grand"><span>{{ $t('Total') }}</span><span>{{ money(totals.GrandTotal) }}</span></div>
+            <div class="sum-row"><span>{{ $t('Shipping') }}</span><span>{{ docMoney(sale.shipping) }}</span></div>
+            <div class="sum-row grand"><span>{{ $t('Total') }}</span><span>{{ docMoney(totals.GrandTotal) }}</span></div>
+            <!-- When a foreign currency is active, keep the base total visible -->
+            <div v-if="!dcIsBase" class="sum-row" style="border-bottom: none; font-size: 12px; color: rgba(128,128,128,.85)">
+              <span>{{ $t('Base_Currency_Equivalent') }}</span><span>{{ moneyBase(totals.GrandTotal) }}</span>
+            </div>
           </a-card>
 
           <!-- Disabled conditions mirror each legacy form: create also gates
@@ -488,6 +515,7 @@ import SerialPicker from '../../components/SerialPicker.vue';
 import BatchAllocator from '../../components/BatchAllocator.vue';
 import ProductScanModal from '../../components/ProductScanModal.vue';
 import { useFormat } from '../../composables/useFormat';
+import { useDocCurrency } from '../../composables/useDocCurrency';
 import { useAuthStore } from '../../stores/auth';
 import { recomputeLine, computeTotals } from '../../lib/lineCalc';
 import { hasBatchSelectErrors, firstBatchSelectError } from '../../lib/batchValidation';
@@ -497,8 +525,24 @@ import http from '../../lib/http';
 const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
-const { money } = useFormat();
+// moneyBase: forms always show base-currency values as base, ignoring the
+// report pages' display-currency selector.
+const { moneyBase } = useFormat();
 const auth = useAuthStore();
+
+// Multi-Currency: display/input conversion only — the model stays base.
+const {
+  enabled: mcEnabled,
+  currencyId: docCurrencyId,
+  options: currencyOptions,
+  isBase: dcIsBase,
+  toDoc: toDocAmt,
+  toBase: toBaseAmt,
+  docMoney,
+  loadCurrencies,
+  setFromDocument: setDocCurrency,
+  payloadFields: currencyPayload,
+} = useDocCurrency();
 
 const id = computed(() => route.params.id);
 /**
@@ -517,6 +561,20 @@ const submitting = ref(false);
 const clients = ref([]);
 const warehouses = ref([]);
 const agents = ref([]);
+// Change Salesperson (same opt-in feature as the POS picker): attribution only,
+// the sale's owner stays the logged-in user.
+const salespeople = ref([]);
+const salesSwitchEnabled = ref(false);
+
+// New sales start credited to the authenticated user (matches the POS
+// default); edit mode keeps whatever the sale already stores.
+function defaultSellerToSelf() {
+  if (!salesSwitchEnabled.value || sale.value.seller_id) return;
+  const uid = Number(auth.user?.id);
+  if (uid && salespeople.value.some(s => Number(s.id) === uid)) {
+    sale.value.seller_id = uid;
+  }
+}
 const accounts = ref([]);
 const paymentMethods = ref([]);
 const products = ref([]);
@@ -553,6 +611,7 @@ const sale = ref({
   client_id: undefined,
   warehouse_id: undefined,
   sales_agent_id: undefined,
+  seller_id: undefined,
   statut: 'completed',
   notes: '',
   tax_rate: 0,
@@ -568,6 +627,23 @@ const sale = ref({
 // Zone / Courier — small user-managed lookup lists (see CreatableSelect).
 const zoneOptions = ref([]);
 const courierOptions = ref([]);
+
+// Monetary inputs are typed in the document currency but stored in base.
+// Percentage discounts are unit-less and pass through untouched.
+const discountInput = computed({
+  get: () => (String(sale.value.discount_Method) === '2'
+    ? toDocAmt(sale.value.discount)
+    : Number(sale.value.discount) || 0),
+  set: (v) => {
+    sale.value.discount = String(sale.value.discount_Method) === '2'
+      ? toBaseAmt(v)
+      : (Number(v) || 0);
+  },
+});
+const shippingInput = computed({
+  get: () => toDocAmt(sale.value.shipping),
+  set: (v) => { sale.value.shipping = toBaseAmt(v); },
+});
 
 // Preserved verbatim on edit — zeroing them would strip an existing
 // loyalty-points discount from the sale.
@@ -714,6 +790,9 @@ function convertPointsToDiscount() {
 }
 const warehouseOptions = computed(() => warehouses.value.map(w => ({ value: w.id, label: w.name })));
 const agentOptions = computed(() => agents.value.map(a => ({ value: a.id, label: a.name })));
+const salespersonOptions = computed(() =>
+  salespeople.value.map(s => ({ value: s.id, label: s.name || s.username }))
+);
 const accountOptions = computed(() => accounts.value.map(a => ({ value: a.id, label: a.account_name })));
 const paymentMethodOptions = computed(() => paymentMethods.value.map(m => ({ value: m.id, label: m.name })));
 
@@ -835,7 +914,9 @@ async function onProductPicked(idx) {
       code: d.code || p.code,
       name: d.name,
       stock: d.product_type !== 'is_service' ? d.qte_sale : '---',
-      quantity: d.qte_sale !== undefined && d.qte_sale < 1 ? d.qte_sale : 1,
+      // Overselling: never seed the line with the (zero/negative) stock —
+      // always start at 1 so the product can actually be sold.
+      quantity: !isOversellingAllowed.value && d.qte_sale !== undefined && d.qte_sale < 1 ? d.qte_sale : 1,
       box_qty: null,
       Unit_price: d.Unit_price,
       Net_price: d.Net_price,
@@ -1039,8 +1120,9 @@ function removePaymentLine(idx) {
 }
 
 function onPaymentLineInput(line, value) {
+  // Typed in the document currency; stored in base like every other amount.
   const v = Number(value);
-  line.amount = !Number.isFinite(v) || v < 0 ? 0 : v;
+  line.amount = !Number.isFinite(v) || v < 0 ? 0 : toBaseAmt(v);
 }
 
 // ---------------- line edit modal ----------------
@@ -1054,11 +1136,13 @@ const units = ref([]);
 async function openLineEdit(line) {
   editingLine.value = line;
   lineDraft.value = {
-    Unit_price: line.Unit_price,
+    // The modal is typed in the document currency (fixed amounts only —
+    // percentages pass through); applyLineEdit converts back to base.
+    Unit_price: toDocAmt(line.Unit_price),
     tax_method: String(line.tax_method || '1'),
     tax_percent: line.tax_percent,
     discount_Method: String(line.discount_Method || '2'),
-    discount: line.discount,
+    discount: String(line.discount_Method || '2') === '2' ? toDocAmt(line.discount) : line.discount,
     sale_unit_id: line.sale_unit_id,
   };
   units.value = [];
@@ -1077,11 +1161,13 @@ async function openLineEdit(line) {
 function applyLineEdit() {
   const line = editingLine.value;
   Object.assign(line, {
-    Unit_price: Number(lineDraft.value.Unit_price) || 0,
+    Unit_price: toBaseAmt(lineDraft.value.Unit_price),
     tax_method: lineDraft.value.tax_method,
     tax_percent: Number(lineDraft.value.tax_percent) || 0,
     discount_Method: lineDraft.value.discount_Method,
-    discount: Number(lineDraft.value.discount) || 0,
+    discount: String(lineDraft.value.discount_Method) === '2'
+      ? toBaseAmt(lineDraft.value.discount)
+      : (Number(lineDraft.value.discount) || 0),
     sale_unit_id: lineDraft.value.sale_unit_id,
     // serial_numbers / imei_number / batches are managed by SerialPicker
     // and BatchAllocator, which mutate the line directly.
@@ -1189,7 +1275,7 @@ function validateForm() {
         if (newTotalDue > selectedClientCreditLimit.value) {
           const exceeded = newTotalDue - selectedClientCreditLimit.value;
           message.error(
-            `${t('Credit_Limit_Exceeded')}: ${money(exceeded)} ${t('exceeds_credit_limit_of')} ${money(selectedClientCreditLimit.value)}`
+            `${t('Credit_Limit_Exceeded')}: ${moneyBase(exceeded)} ${t('exceeds_credit_limit_of')} ${moneyBase(selectedClientCreditLimit.value)}`
           );
           return false;
         }
@@ -1251,6 +1337,8 @@ async function submit() {
     client_id: sale.value.client_id,
     warehouse_id: sale.value.warehouse_id,
     sales_agent_id: sale.value.sales_agent_id || null,
+    // Always present (null clears the attribution back to the creator).
+    seller_id: sale.value.seller_id || null,
     statut: sale.value.statut,
     notes: sale.value.notes,
     tax_rate: Number(sale.value.tax_rate) || 0,
@@ -1266,6 +1354,8 @@ async function submit() {
     consignment_id: sale.value.consignment_id || '',
     zone_id: sale.value.zone_id || null,
     courier_id: sale.value.courier_id || null,
+    // Multi-Currency snapshot ({} when the module is off)
+    ...currencyPayload(),
   };
 
   try {
@@ -1327,6 +1417,7 @@ async function loadPosSettings() {
 
 onMounted(async () => {
   loadPosSettings();
+  loadCurrencies();
   try {
     if (isConvert.value) {
       // The quotation payload carries the document + lines but NOT the
@@ -1339,6 +1430,8 @@ onMounted(async () => {
       clients.value = conv.clients || create.clients || [];
       warehouses.value = conv.warehouses || create.warehouses || [];
       agents.value = conv.sales_agents || create.sales_agents || [];
+      salespeople.value = create.salespeople || [];
+      salesSwitchEnabled.value = create.enable_pos_salesperson_switch === true;
       accounts.value = create.accounts || [];
       paymentMethods.value = create.payment_methods || [];
       point_to_amount_rate.value = Number(create.point_to_amount_rate) || 0;
@@ -1353,6 +1446,7 @@ onMounted(async () => {
         client_id: q.client_id || undefined,
         warehouse_id: q.warehouse_id || undefined,
         sales_agent_id: q.sales_agent_id || undefined,
+        seller_id: undefined,
         statut: q.statut || 'completed',
         notes: q.notes || '',
         tax_rate: Number(q.tax_rate) || 0,
@@ -1364,6 +1458,9 @@ onMounted(async () => {
         zone_id: undefined,
         courier_id: undefined,
       };
+      // The converted sale keeps the quotation's currency snapshot.
+      setDocCurrency(q.currency_id, q.exchange_rate);
+      defaultSellerToSelf();
       lines.value = (conv.details || []).map(d => {
         const line = {
           ...d,
@@ -1392,6 +1489,9 @@ onMounted(async () => {
       clients.value = data.clients || [];
       warehouses.value = data.warehouses || [];
       agents.value = data.sales_agents || [];
+      salespeople.value = data.salespeople || [];
+      salesSwitchEnabled.value = data.enable_pos_salesperson_switch === true;
+      enableBoxQty.value = data.enable_box_qty !== undefined ? !!data.enable_box_qty : true;
       zoneOptions.value = (data.zones || []).map(z => ({ value: z.id, label: z.name }));
       courierOptions.value = (data.couriers || []).map(c => ({ value: c.id, label: c.name }));
       const s = data.sale || {};
@@ -1401,6 +1501,7 @@ onMounted(async () => {
         client_id: s.client_id,
         warehouse_id: s.warehouse_id,
         sales_agent_id: s.sales_agent_id || undefined,
+        seller_id: s.seller_id || undefined,
         statut: s.statut,
         notes: s.notes || '',
         tax_rate: Number(s.tax_rate) || 0,
@@ -1416,6 +1517,8 @@ onMounted(async () => {
         discount_from_points: Number(s.discount_from_points) || 0,
         used_points: Number(s.used_points) || 0,
       };
+      // Reopen the sale in its stored currency at its stored rate.
+      setDocCurrency(s.currency_id, s.exchange_rate);
       lines.value = (data.details || []).map(d => {
         const line = {
           ...d,
@@ -1447,6 +1550,9 @@ onMounted(async () => {
       clients.value = data.clients || [];
       warehouses.value = data.warehouses || [];
       agents.value = data.sales_agents || [];
+      salespeople.value = data.salespeople || [];
+      salesSwitchEnabled.value = data.enable_pos_salesperson_switch === true;
+      defaultSellerToSelf();
       accounts.value = data.accounts || [];
       paymentMethods.value = data.payment_methods || [];
       point_to_amount_rate.value = Number(data.point_to_amount_rate) || 0;

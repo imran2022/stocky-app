@@ -19,10 +19,12 @@
         : '';
 
     if (is_file($manifestPath)) {
-        $manifest = json_decode(file_get_contents($manifestPath), true) ?: [];
+        // Named $viteManifest, not $manifest: @include shares these variables
+        // with partials.pwa-head, whose optional $manifest is a URL string.
+        $viteManifest = json_decode(file_get_contents($manifestPath), true) ?: [];
 
         // The entry is keyed by its source path (e.g. "src/main.js").
-        foreach ($manifest as $item) {
+        foreach ($viteManifest as $item) {
             if (!empty($item['isEntry'])) {
                 $entry = $item;
                 break;
@@ -34,7 +36,7 @@
         // so handle both layouts.
         $cssFiles = $entry['css'] ?? [];
         if (!$cssFiles) {
-            foreach ($manifest as $key => $item) {
+            foreach ($viteManifest as $key => $item) {
                 if (!empty($item['file']) && str_ends_with($item['file'], '.css')) {
                     $cssFiles[] = $item['file'];
                 }
@@ -50,6 +52,9 @@
     <meta name="app-version" content="{{ $appVersion }}">
     <meta name="viewport" content="width=device-width,initial-scale=1.0" />
     <link rel="icon" href="{{ asset('images/' . ($app_settings->favicon ?? 'favicon.ico')) }}">
+
+    @include('partials.pwa-head')
+
     {{-- Self-hosted receipt fonts (Inter / Ubuntu / Roboto) offered by
          Settings → POS Receipt, so the on-screen invoice modal and the
          receipt designer preview render the chosen font — offline, no
@@ -110,5 +115,7 @@
         Stocky Next assets are not built yet. Run <code>npm run vue3:build</code>.
       </p>
     @endif
+
+    @include('partials.pwa-sw')
   </body>
 </html>

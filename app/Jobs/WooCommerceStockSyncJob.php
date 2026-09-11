@@ -7,6 +7,8 @@ use App\Models\product_warehouse;
 use App\Models\WooCommerceLog;
 use App\Models\WooCommerceSetting;
 use App\Services\WooCommerce\Client;
+use App\Services\WooCommerce\SyncQueue;
+use App\Services\WooCommerce\SyncOptions;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -83,7 +85,7 @@ class WooCommerceStockSyncJob implements ShouldQueue
             return;
         }
 
-        $batchSize = (int) env('WOO_STOCK_PRODUCTS_PER_JOB', 1);
+        $batchSize = SyncOptions::int('stock_products_per_job');
         $batchSize = max(1, min(100, $batchSize));
         $startAfterId = (int) ($state['last_product_id'] ?? 0);
         $state['processed_this_run'] = 0;
@@ -192,7 +194,7 @@ class WooCommerceStockSyncJob implements ShouldQueue
                                         if ($imgName !== '' && strtolower($imgName) !== 'no-image.png') {
                                             $public = public_path('images/products/'.$imgName);
                                             if (is_file($public)) {
-                                                $payloadVar['image'] = ['src' => asset('images/products/'.$imgName)];
+                                                $payloadVar['image'] = ['src' => product_image_url($imgName)];
                                             }
                                         }
                                     } catch (\Throwable $e) {
@@ -238,7 +240,7 @@ class WooCommerceStockSyncJob implements ShouldQueue
                                     if ($imgName !== '' && strtolower($imgName) !== 'no-image.png') {
                                         $public = public_path('images/products/'.$imgName);
                                         if (is_file($public)) {
-                                            $payload['images'] = [['src' => asset('images/products/'.$imgName)]];
+                                            $payload['images'] = [['src' => product_image_url($imgName)]];
                                         }
                                     }
                                 } catch (\Throwable $e) {
@@ -265,7 +267,7 @@ class WooCommerceStockSyncJob implements ShouldQueue
                                     if ($imgName !== '' && strtolower($imgName) !== 'no-image.png') {
                                         $public = public_path('images/products/'.$imgName);
                                         if (is_file($public)) {
-                                            $payload['images'] = [['src' => asset('images/products/'.$imgName)]];
+                                            $payload['images'] = [['src' => product_image_url($imgName)]];
                                         }
                                     }
                                 } catch (\Throwable $e) {
@@ -327,8 +329,7 @@ class WooCommerceStockSyncJob implements ShouldQueue
             unset($state['processed_this_run'], $state['max_this_run']);
             $cache->put($this->progressKey, $state, 3600);
 
-            $queue = (string) ($state['queue'] ?? ('woocommerce-stock-'.$this->progressKey));
-            self::dispatch($this->progressKey)->onConnection('database')->onQueue($queue);
+            self::dispatch($this->progressKey)->onConnection(SyncQueue::CONNECTION)->onQueue(SyncQueue::NAME);
             return;
         }
 
@@ -484,9 +485,9 @@ class WooCommerceStockSyncJob implements ShouldQueue
                 };
 
                 $trySearch = function (string $term) use ($baseUrl, $username, $appPass, $matches): ?array {
-                    $searchTimeout = (int) env('WOO_WP_MEDIA_SEARCH_TIMEOUT', 15);
-                    $retries = (int) env('WOO_WP_MEDIA_RETRIES', 2);
-                    $sleepMs = (int) env('WOO_WP_MEDIA_RETRY_SLEEP_MS', 500);
+                    $searchTimeout = SyncOptions::int('media_search_timeout', 15);
+                    $retries = SyncOptions::int('media_retries', 2);
+                    $sleepMs = SyncOptions::int('media_retry_sleep_ms', 500);
                     $searchTimeout = max(1, min(60, $searchTimeout));
                     $retries = max(0, min(5, $retries));
                     $sleepMs = max(0, min(5000, $sleepMs));
@@ -521,9 +522,9 @@ class WooCommerceStockSyncJob implements ShouldQueue
                 };
 
                 $trySlug = function (string $slug) use ($baseUrl, $username, $appPass, $matches): ?array {
-                    $searchTimeout = (int) env('WOO_WP_MEDIA_SEARCH_TIMEOUT', 15);
-                    $retries = (int) env('WOO_WP_MEDIA_RETRIES', 2);
-                    $sleepMs = (int) env('WOO_WP_MEDIA_RETRY_SLEEP_MS', 500);
+                    $searchTimeout = SyncOptions::int('media_search_timeout', 15);
+                    $retries = SyncOptions::int('media_retries', 2);
+                    $sleepMs = SyncOptions::int('media_retry_sleep_ms', 500);
                     $searchTimeout = max(1, min(60, $searchTimeout));
                     $retries = max(0, min(5, $retries));
                     $sleepMs = max(0, min(5000, $sleepMs));
@@ -586,9 +587,9 @@ class WooCommerceStockSyncJob implements ShouldQueue
                 }
             }
 
-            $uploadTimeout = (int) env('WOO_WP_MEDIA_UPLOAD_TIMEOUT', 120);
-            $retries = (int) env('WOO_WP_MEDIA_RETRIES', 2);
-            $sleepMs = (int) env('WOO_WP_MEDIA_RETRY_SLEEP_MS', 800);
+            $uploadTimeout = SyncOptions::int('media_upload_timeout', 120);
+            $retries = SyncOptions::int('media_retries', 2);
+            $sleepMs = SyncOptions::int('media_retry_sleep_ms', 800);
             $uploadTimeout = max(1, min(300, $uploadTimeout));
             $retries = max(0, min(5, $retries));
             $sleepMs = max(0, min(5000, $sleepMs));

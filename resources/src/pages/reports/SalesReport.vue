@@ -9,6 +9,10 @@
     :export-params="filterParams"
     export-rows-key="sales"
   >
+    <template #actions>
+      <!-- Multi-Currency: view amounts converted (display-only) -->
+      <ViewCurrencySelect />
+    </template>
     <!-- Summary over the whole filtered set (backend `summary`), not just the page. -->
     <template #chart>
       <a-row :gutter="[16, 16]" style="margin-bottom: 16px">
@@ -115,6 +119,7 @@ import { useUiStore } from '../../stores/ui';
 import { t as tf } from '../../i18n';
 import { docStatusColor, payStatusColor } from '../../lib/statusColors';
 import DateRangePicker from '../../components/DateRangePicker.vue';
+import ViewCurrencySelect from '../../components/ViewCurrencySelect.vue';
 
 const { t } = useI18n();
 const { money, date } = useFormat();
@@ -234,7 +239,7 @@ const columns = computed(() => [
   { title: t('Paid'), key: 'paid_amount', dataIndex: 'paid_amount', sorter: true, align: 'right', sum: 'money', exportValue: r => money(r.paid_amount) },
   { title: t('Due'), key: 'due', dataIndex: 'due', sorter: true, align: 'right', sum: 'money', exportValue: r => money(r.due) },
   { title: t('PaymentStatus'), key: 'payment_status', dataIndex: 'payment_status', exportValue: r => r.payment_status },
-  { title: t('AddedBy'), dataIndex: 'user_name', key: 'user_name' },
+  { title: t('Seller'), dataIndex: 'seller_name', key: 'seller_name' },
 ]);
 
 onMounted(crud.fetchRows);

@@ -1,6 +1,11 @@
 <template>
   <div class="page">
-    <PageHeader :title="product.name || $t('stock_report')" :breadcrumb="[$t('Reports'), $t('stock_report')]" />
+    <PageHeader :title="product.name || $t('stock_report')" :breadcrumb="[$t('Reports'), $t('stock_report')]">
+      <template #actions>
+        <!-- Multi-Currency: view amounts converted (display-only) -->
+        <ViewCurrencySelect />
+      </template>
+    </PageHeader>
 
     <a-row :gutter="[16, 16]" style="margin-bottom: 16px">
       <a-col v-if="product.type === 'is_single'" :xs="24" :lg="10">
@@ -86,6 +91,7 @@ import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import PageHeader from '../../components/PageHeader.vue';
 import ReportTab from '../../components/ReportTab.vue';
+import ViewCurrencySelect from '../../components/ViewCurrencySelect.vue';
 import { useFormat } from '../../composables/useFormat';
 import http from '../../lib/http';
 

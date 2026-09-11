@@ -238,6 +238,10 @@ class DamageController extends BaseController
         $view_records = $user->hasRecordView();
         $current_damage = Damage::findOrFail($id);
 
+        // Warehouse half of the same rule: record_view says whose documents,
+        // the assigned warehouses say which warehouses they may come from.
+        $this->abortIfDocumentWarehouseDenied($current_damage);
+
         if (! $view_records) {
             $this->authorizeForUser($request->user('api'), 'check_record', $current_damage);
         }
@@ -453,6 +457,10 @@ class DamageController extends BaseController
             $current_damage = Damage::findOrFail($id);
             $old_details = DamageDetail::where('damage_id', $id)->get();
 
+            // Warehouse half of the same rule: record_view says whose documents,
+            // the assigned warehouses say which warehouses they may come from.
+            $this->abortIfDocumentWarehouseDenied($current_damage);
+
             if (! $view_records) {
                 $this->authorizeForUser($request->user('api'), 'check_record', $current_damage);
             }
@@ -559,6 +567,10 @@ class DamageController extends BaseController
             ->findOrFail($id);
         $details = [];
 
+        // Warehouse half of the same rule: record_view says whose documents,
+        // the assigned warehouses say which warehouses they may come from.
+        $this->abortIfDocumentWarehouseDenied($Damage_data);
+
         if (! $view_records) {
             $this->authorizeForUser($request->user('api'), 'check_record', $Damage_data);
         }
@@ -658,6 +670,10 @@ class DamageController extends BaseController
             ->where('deleted_at', '=', null)
             ->findOrFail($id);
         $details = [];
+
+        // Warehouse half of the same rule: record_view says whose documents,
+        // the assigned warehouses say which warehouses they may come from.
+        $this->abortIfDocumentWarehouseDenied($Damage_data);
 
         if (! $view_records) {
             $this->authorizeForUser($request->user('api'), 'check_record', $Damage_data);

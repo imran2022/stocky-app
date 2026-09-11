@@ -37,6 +37,9 @@ class AssetWorkspaceController extends BaseController
         // asset_categories, which has a deleted_at of its own.
         $live = Asset::whereNull('assets.deleted_at')->whereNull('assets.disposal_date');
 
+        // Assets sit in a warehouse; one with none belongs to the whole company.
+        $this->scopeToWarehouses($live, 'assets.warehouse_id', true);
+
         $counts = (clone $live)->selectRaw("
             COUNT(*) as total,
             SUM(CASE WHEN assets.status = 'in_use' THEN 1 ELSE 0 END) as in_use,
@@ -283,6 +286,7 @@ class AssetWorkspaceController extends BaseController
         $asset = Asset::leftJoin('asset_categories', 'asset_categories.id', '=', 'assets.asset_category_id')
             ->leftJoin('warehouses', 'warehouses.id', '=', 'assets.warehouse_id')
             ->leftJoin('users', 'users.id', '=', 'assets.assigned_to_id')
+            ->tap(fn ($q) => $this->scopeToWarehouses($q, 'assets.warehouse_id', true))
             ->whereNull('assets.deleted_at')
             ->select(
                 'assets.*',
@@ -454,6 +458,7 @@ class AssetWorkspaceController extends BaseController
 
         $query = Asset::leftJoin('asset_categories', 'asset_categories.id', '=', 'assets.asset_category_id')
             ->leftJoin('warehouses', 'warehouses.id', '=', 'assets.warehouse_id')
+            ->tap(fn ($q) => $this->scopeToWarehouses($q, 'assets.warehouse_id', true))
             ->whereNull('assets.deleted_at')
             ->select('assets.*', 'asset_categories.name as category_name', 'warehouses.name as warehouse_name')
             ->when($request->filled('category_id'), fn ($q) => $q->where('assets.asset_category_id', $request->category_id))

@@ -1,5 +1,5 @@
 @php
-  $currency = $currency ?? (isset($s) ? ($s->currency_code ?? '$') : '$');
+  $currency = $currency ?? store_currency()['symbol'];
   $nlBtn    = $nlBtn ?? __('messages.Subscribe');
 @endphp
 
@@ -84,6 +84,7 @@
   const NOIMG = @json(asset('images/products/no-image.png'));
   const CURRENCY = @json($currency);
   const PRICE_DECIMALS = parseInt(document.querySelector('meta[name="price-decimals"]')?.content, 10) || 2;
+  const CURRENCY_RATE = parseFloat(document.querySelector('meta[name="currency-rate"]')?.content) || 1;
   const ALLOW_OVERSELLING = window.__ALLOW_OVERSELLING__ !== false;
   const OUT_OF_STOCK_MSG = @json(__('messages.OutOfStock'));
   const PREORDER_MSG = @json(__('messages.PreOrderNow'));
@@ -95,7 +96,7 @@
   function safeParse(str){ try { return JSON.parse(str || '[]'); } catch(e){ return []; } }
   function formatPrice(amount, currency) {
     const sym = currency || CURRENCY;
-    const num = Number(amount || 0);
+    const num = Number(amount || 0) * CURRENCY_RATE;
     return sym + num.toLocaleString('en-US', { minimumFractionDigits: PRICE_DECIMALS, maximumFractionDigits: PRICE_DECIMALS });
   }
   const money = (v, c) => formatPrice(v, c);
@@ -166,7 +167,7 @@
     qvRatingEl.classList.add('hidden'); qvReviewsEl.classList.add('hidden');
     qvRatingEl.innerHTML = ''; qvReviewsEl.innerHTML = '';
     try {
-      const res = await fetch(`/online_store/products/${pid}/reviews`, { headers:{'Accept':'application/json'} });
+      const res = await fetch(`{{ url('/'.store_path_to('products')) }}/${pid}/reviews`, { headers:{'Accept':'application/json'} });
       if (!res.ok) return;
       const d = await res.json();
       if (d.count > 0){
@@ -556,7 +557,7 @@
 
   // Reflect saved state on load for logged-in customers.
   if (window.__LOGGED_IN__){
-    fetch('/online_store/wishlist/ids', { headers:{'Accept':'application/json'} })
+    fetch('{{ route('store.wishlist.ids') }}', { headers:{'Accept':'application/json'} })
       .then(function(r){ return r.ok ? r.json() : null; })
       .then(function(d){
         if (!d || !d.ids) return;
@@ -574,7 +575,7 @@
     var pid = btn.getAttribute('data-product-id');
     if (!pid || btn.dataset.busy === '1') return;
     btn.dataset.busy = '1';
-    fetch('/online_store/wishlist/toggle', {
+    fetch('{{ route('store.wishlist.toggle') }}', {
       method:'POST',
       headers:{ 'Content-Type':'application/json', 'X-CSRF-TOKEN': CSRF, 'Accept':'application/json' },
       body: JSON.stringify({ product_id: Number(pid) })

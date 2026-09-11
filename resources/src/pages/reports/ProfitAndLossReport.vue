@@ -3,6 +3,8 @@
     <PageHeader :title="$t('ProfitandLoss')" :breadcrumb="[$t('Reports'), $t('ProfitandLoss')]">
       <template #actions>
         <a-space :size="8" wrap>
+          <!-- Multi-Currency: view amounts converted (display-only) -->
+          <ViewCurrencySelect />
           <a-button :loading="exporting" @click="doExport">
             <template #icon><FileExcelOutlined /></template>
             {{ $t('Export') }} Excel
@@ -268,6 +270,7 @@ import { useUiStore } from '../../stores/ui';
 import { exportExcel, exportPdf, printRows } from '../../lib/exporters';
 import http from '../../lib/http';
 import DateRangePicker from '../../components/DateRangePicker.vue';
+import ViewCurrencySelect from '../../components/ViewCurrencySelect.vue';
 
 const { t } = useI18n();
 const { money, number } = useFormat();

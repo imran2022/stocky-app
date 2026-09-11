@@ -2,7 +2,7 @@
 
 @section('content')
 @php
-  $currency   = $s->currency_code ?? '$';
+  $currency   = store_currency()['symbol'];
   $total      = $products->total();
   $hasFilters = filled($q ?? null) || filled($cat ?? null) || filled($collection ?? null) || filled($min ?? null) || filled($max ?? null);
 @endphp

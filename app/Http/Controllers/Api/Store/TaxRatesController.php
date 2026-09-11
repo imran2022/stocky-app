@@ -33,7 +33,12 @@ class TaxRatesController extends Controller
             'active' => (bool) $r->active,
         ]);
 
-        return response()->json(['rates' => $rates]);
+        return response()->json([
+            'rates' => $rates,
+            // The canonical list + subdivisions the location matcher understands.
+            'country_options' => \App\Services\CountryService::options(),
+            'subdivisions' => \App\Services\CountryService::subdivisionMap(),
+        ]);
     }
 
     public function store(Request $request)

@@ -68,14 +68,17 @@ class ServiceJobController extends BaseController
                 return $q->when($request->filled('search'), function ($q) use ($request) {
                     $s = $request->search;
 
-                    return $q->where('service_item', 'LIKE', "%{$s}%")
-                        ->orWhere('job_type', 'LIKE', "%{$s}%")
-                        ->orWhere('notes', 'LIKE', "%{$s}%")
-                        ->orWhere('device_brand', 'LIKE', "%{$s}%")
-                        ->orWhere('device_model', 'LIKE', "%{$s}%")
-                        ->orWhere('device_serial', 'LIKE', "%{$s}%")
-                        ->orWhere('device_imei', 'LIKE', "%{$s}%")
-                        ->orWhere('Ref', 'LIKE', "%{$s}%");
+                    // Qualified: the technicians join also carries a `notes`
+                    // column, and an unqualified name makes MySQL reject the query.
+                    return $q->where('service_jobs.service_item', 'LIKE', "%{$s}%")
+                        ->orWhere('service_jobs.job_type', 'LIKE', "%{$s}%")
+                        ->orWhere('service_jobs.notes', 'LIKE', "%{$s}%")
+                        ->orWhere('service_jobs.device_brand', 'LIKE', "%{$s}%")
+                        ->orWhere('service_jobs.device_model', 'LIKE', "%{$s}%")
+                        ->orWhere('service_jobs.device_serial', 'LIKE', "%{$s}%")
+                        ->orWhere('service_jobs.device_imei', 'LIKE', "%{$s}%")
+                        ->orWhere('service_jobs.Ref', 'LIKE', "%{$s}%")
+                        ->orWhere('clients.name', 'LIKE', "%{$s}%");
                 });
             })
             ->when($request->filled('client_id'), function ($q) use ($request) {
@@ -160,7 +163,7 @@ class ServiceJobController extends BaseController
             ->orderBy('name')
             ->get(['id', 'name']);
 
-        $payment_methods = PaymentMethod::where('deleted_at', '=', null)
+        $payment_methods = PaymentMethod::active()->where('deleted_at', '=', null)
             ->get(['id', 'name']);
 
         return response()->json([

@@ -42,6 +42,7 @@ class MrpBomController extends BaseController
         $order = $sortable[$request->SortField ?? 'id'] ?? 'id';
 
         $query = MrpWorkCenter::whereNull('deleted_at')
+            ->tap(fn ($q) => $this->scopeToWarehouses($q, 'warehouse_id', true))
             ->when($request->filled('warehouse_id'), fn ($q) => $q->where('warehouse_id', $request->warehouse_id))
             ->when($request->filled('search'), function ($q) use ($request) {
                 $s = $request->search;
@@ -88,6 +89,13 @@ class MrpBomController extends BaseController
             'overhead_rate' => 'nullable|numeric|min:0',
         ]);
 
+
+        // A record tied to a warehouse must name one the caller is assigned to;
+        // leaving it empty keeps the record company-wide.
+        if ($request->filled('warehouse_id')) {
+            $this->abortIfWarehouseDenied($request->warehouse_id);
+        }
+
         MrpWorkCenter::create($this->workCenterPayload($request));
 
         return response()->json(['success' => true], 200);
@@ -98,6 +106,9 @@ class MrpBomController extends BaseController
         $this->authorizeForUser($request->user('api'), 'update', MrpBom::class);
 
         $centre = MrpWorkCenter::whereNull('deleted_at')->findOrFail($id);
+        if ($centre->warehouse_id) {
+            $this->abortIfWarehouseDenied($centre->warehouse_id);
+        }
 
         $request->validate([
             'code' => 'required|string|max:60|unique:mrp_work_centers,code,'.$id,
@@ -118,6 +129,9 @@ class MrpBomController extends BaseController
         $this->authorizeForUser($request->user('api'), 'delete', MrpBom::class);
 
         $centre = MrpWorkCenter::whereNull('deleted_at')->findOrFail($id);
+        if ($centre->warehouse_id) {
+            $this->abortIfWarehouseDenied($centre->warehouse_id);
+        }
 
         // Work already booked against a centre must keep its costing basis.
         $inUse = DB::table('mrp_work_orders')->where('work_center_id', $id)
@@ -220,6 +234,12 @@ class MrpBomController extends BaseController
         $this->authorizeForUser($request->user('api'), 'view', MrpBom::class);
 
         $bom = MrpBom::whereNull('deleted_at')->with(['lines', 'operations'])->findOrFail($id);
+
+        // A BOM with no warehouse is company-wide; one that names a warehouse
+        // is only visible to users assigned to it.
+        if ($bom->warehouse_id) {
+            $this->abortIfWarehouseDenied($bom->warehouse_id);
+        }
         $product = Product::find($bom->product_id);
 
         $lines = $bom->lines->map(function ($line) {
@@ -315,6 +335,12 @@ class MrpBomController extends BaseController
             'scrap_pct' => 'nullable|numeric|min:0|max:99',
             'lines' => 'nullable|array',
         ]);
+        // A record tied to a warehouse must name one the caller is assigned to;
+        // leaving it empty keeps the record company-wide.
+        if ($request->filled('warehouse_id')) {
+            $this->abortIfWarehouseDenied($request->warehouse_id);
+        }
+
 
         $error = $this->validateComponents((int) $request->product_id, $request->lines ?: []);
         if ($error) {
@@ -362,6 +388,12 @@ class MrpBomController extends BaseController
             'status' => 'nullable|in:draft,active,archived',
             'scrap_pct' => 'nullable|numeric|min:0|max:99',
         ]);
+        // A record tied to a warehouse must name one the caller is assigned to;
+        // leaving it empty keeps the record company-wide.
+        if ($request->filled('warehouse_id')) {
+            $this->abortIfWarehouseDenied($request->warehouse_id);
+        }
+
 
         $error = $this->validateComponents((int) $request->product_id, $request->lines ?: [], (int) $id);
         if ($error) {
@@ -427,6 +459,9 @@ class MrpBomController extends BaseController
         $this->authorizeForUser($request->user('api'), 'create', MrpBom::class);
 
         $source = MrpBom::whereNull('deleted_at')->with(['lines', 'operations'])->findOrFail($id);
+        if ($source->warehouse_id) {
+            $this->abortIfWarehouseDenied($source->warehouse_id);
+        }
         $copy = null;
 
         DB::transaction(function () use ($source, $request, &$copy) {

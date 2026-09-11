@@ -186,7 +186,7 @@
                   >
                     <img
                       v-if="record.imagePreview || (record.image && record.image !== 'no-image.png')"
-                      :src="record.imagePreview || `/images/products/${record.image}`"
+                      :src="record.imagePreview || (isRemoteImage(record.image) ? record.image : `/images/products/${record.image}`)"
                       class="variant-thumb"
                     />
                     <a-button v-else size="small"><UploadOutlined /></a-button>
@@ -249,7 +249,8 @@
           </a-card>
 
           <!-- Units -->
-          <a-card v-if="product.type === 'is_single' || product.type === 'is_variant'" size="small" :title="$t('Unit')" style="margin-bottom: 16px">
+          <!-- Every type except service needs a base unit (backend: unit_id requiredIf type != is_service). -->
+          <a-card v-if="product.type !== 'is_service'" size="small" :title="$t('Unit')" style="margin-bottom: 16px">
             <a-row :gutter="16">
               <a-col :xs="24" :md="8">
                 <a-form-item :label="$t('BaseUnit')" name="unit_id">
@@ -396,6 +397,50 @@
             </template>
           </a-card>
 
+          <!-- Wholesale pricing by quantity — quantity breaks that override the
+               retail price once the ordered quantity reaches them (POS + store) -->
+          <a-card
+            v-if="enableWholesalePricing"
+            size="small" :title="$t('Wholesale_Pricing_By_Quantity')" style="margin-bottom: 16px"
+          >
+            <template #extra>
+              <a-button size="small" @click="addPriceTier">
+                <template #icon><PlusOutlined /></template>
+                {{ $t('Add') }}
+              </a-button>
+            </template>
+            <a-alert
+              type="info" show-icon
+              :message="$t('Wholesale_Pricing_By_Quantity_Hint')"
+              :description="product.type === 'is_variant' ? $t('Wholesale_Pricing_Variants_Hint') : undefined"
+              style="margin-bottom: 12px"
+            />
+            <a-table
+              :columns="priceTierColumns" :data-source="priceTiers" :pagination="false"
+              size="small" :row-key="(_r, i) => i" :scroll="{ x: 'max-content' }"
+            >
+              <template #bodyCell="{ column, record, index }">
+                <template v-if="column.key === 'min_qty'">
+                  <a-input-number v-model:value="record.min_qty" :min="1" size="small" style="width: 100%" />
+                </template>
+                <template v-else-if="column.key === 'max_qty'">
+                  <a-input-number
+                    v-model:value="record.max_qty" :min="record.min_qty || 1" size="small"
+                    style="width: 100%" :placeholder="$t('No_maximum')"
+                  />
+                </template>
+                <template v-else-if="column.key === 'price'">
+                  <a-input-number v-model:value="record.price" :min="0" size="small" style="width: 100%" />
+                </template>
+                <template v-else-if="column.key === 'action'">
+                  <a-button size="small" danger @click="priceTiers.splice(index, 1)">
+                    <template #icon><DeleteOutlined /></template>
+                  </a-button>
+                </template>
+              </template>
+            </a-table>
+          </a-card>
+
           <!-- Opening stock -->
           <a-card
             v-if="(product.type === 'is_single' || (!isEdit && product.type === 'is_variant' && variants.length)) && warehouses.length"
@@ -443,6 +488,35 @@
 
           <!-- Storefront: tags / FAQs -->
           <a-card size="small" :title="$t('Store')" style="margin-bottom: 16px">
+            <a-form-item
+              :label="$t('Estimated_Delivery_Date')" :extra="$t('Estimated_Delivery_Date_Hint')"
+            >
+              <a-input v-model:value="product.preorder_available_date" type="date" allow-clear />
+            </a-form-item>
+            <a-form-item
+              v-if="shippingMethods.length"
+              :label="$t('Shipping_Methods')" :extra="$t('Product_Shipping_Methods_Hint')"
+            >
+              <a-select
+                v-model:value="product.shipping_method_ids" mode="multiple" allow-clear
+                :placeholder="$t('All_shipping_methods')"
+                :options="shippingMethods.map(m => ({ label: m.name, value: Number(m.id) }))"
+                show-search option-filter-prop="label"
+              />
+            </a-form-item>
+            <a-form-item :label="$t('Related_Products')" :extra="$t('Related_Products_Hint')">
+              <a-select
+                v-model:value="relatedIds" mode="multiple" allow-clear
+                :placeholder="$t('Search_product')" :filter-option="false"
+                :options="relatedOptions" @search="onRelatedSearch"
+              />
+            </a-form-item>
+            <a-form-item :label="$t('Labels')" :extra="$t('Product_Labels_Hint')">
+              <a-select
+                v-model:value="labels" mode="tags" :token-separators="[',']"
+                :placeholder="$t('Add_a_label')" :options="labelSuggestions" :max-tag-count="5"
+              />
+            </a-form-item>
             <a-form-item :label="$t('Tags')">
               <a-select v-model:value="tags" mode="tags" :token-separators="[',']" :placeholder="$t('Tags')" />
             </a-form-item>
@@ -507,9 +581,23 @@
             >
               <a-button><UploadOutlined /> {{ $t('Choose_files') }}</a-button>
             </a-upload>
+            <!-- Or paste an image link (Unsplash, CDN, supplier catalog…) -->
+            <div class="gallery-link-row">
+              <a-input
+                v-model:value="galleryUrlInput"
+                :placeholder="$t('Paste_image_link')"
+                allow-clear
+                @pressEnter="addGalleryUrl"
+              >
+                <template #prefix><LinkOutlined /></template>
+              </a-input>
+              <a-button @click="addGalleryUrl" :disabled="!galleryUrlInput.trim()">{{ $t('Add_Link') }}</a-button>
+            </div>
+            <div class="gallery-link-hint">{{ $t('Image_link_hint') }}</div>
             <div v-if="gallery.length" class="gallery">
               <div v-for="(g, i) in gallery" :key="g._uid" class="gallery-tile" :class="{ main: g.is_main }">
-                <img :src="g.url" />
+                <img :src="g.url" @error="onGalleryImgError(g)" />
+                <span v-if="g._url || g.remote" class="gallery-link-badge"><LinkOutlined /></span>
                 <div class="gallery-actions">
                   <a-tooltip :title="$t('image')">
                     <a-button size="small" :type="g.is_main ? 'primary' : 'default'" @click="setMain(i)">★</a-button>
@@ -548,9 +636,10 @@
               <a-checkbox v-model:checked="product.preorder_always" style="display: block; margin: 10px 0 0">
                 {{ $t('Always_Preorder') }}
               </a-checkbox>
-              <a-form-item :label="$t('Preorder_Available_Date')" style="margin-top: 12px">
-                <a-input v-model:value="product.preorder_available_date" type="date" />
-              </a-form-item>
+              <a-alert
+                type="info" show-icon style="margin: 12px 0"
+                :message="$t('Preorder_Uses_Delivery_Date')"
+              />
               <a-form-item :label="$t('Preorder_Limit')">
                 <a-input-number v-model:value="product.preorder_limit" :min="0" style="width: 100%" />
               </a-form-item>
@@ -662,8 +751,9 @@
  *
  * Bootstrap: GET products/create → {categories, subcategories, brands,
  * size_guides, units, warehouses (id/name/qte), warehouse_locations,
- * show_product_gtin, show_serial_tracking, enable_multi_pack_selling}.
- * Edit: GET products/{id}/edit → {product (+ProductVariant, packs, tags,
+ * show_product_gtin, show_serial_tracking, enable_multi_pack_selling,
+ * enable_wholesale_pricing}.
+ * Edit: GET products/{id}/edit → {product (+ProductVariant, packs, price_tiers, tags,
  * faqs, product_images, assigned_category_ids/assigned_subcategory_ids),
  * categories, all_subcategories, brands, size_guides, units, units_sub,
  * warehouses, warehouse_locations, product_warehouse_locations, materiels}.
@@ -677,6 +767,7 @@
  * Both send: every scalar product field, multi_category_ids /
  * multi_subcategory_ids, materiels (combo), packs (feature on: single = flat
  * list, variant = per-variant rows tagged product_variant_id/variant_name),
+ * price_tiers (feature on: [{id, min_qty, max_qty, price}]),
  * tags, faqs, gallery_images[], variant_images[i], image.
  * is_variant is derived: true only when type is_variant AND variants exist.
  * Legacy also mirrors the first picked category/subcategory into the legacy
@@ -686,7 +777,7 @@ import { ref, computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { message } from 'ant-design-vue';
 import { useI18n } from 'vue-i18n';
-import { UploadOutlined, PlusOutlined, DeleteOutlined, ShopOutlined, ReloadOutlined } from '@ant-design/icons-vue';
+import { UploadOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, ShopOutlined, ReloadOutlined } from '@ant-design/icons-vue';
 import PageHeader from '../../components/PageHeader.vue';
 import ProductScanModal from '../../components/ProductScanModal.vue';
 import http from '../../lib/http';
@@ -719,6 +810,8 @@ const enableMultiPack = ref(false);
 const gallery = ref([]);          // {_uid, url, is_main, sort_order, _file?, id?}
 const galleryRemoveIds = ref([]);
 let gallerySeed = 0;
+const galleryUrlInput = ref('');
+const isRemoteImage = v => /^https?:\/\//i.test(String(v || ''));
 
 const variants = ref([]);
 const variantTag = ref('');
@@ -726,7 +819,50 @@ const materiels = ref([]);
 const comboProducts = ref([]);
 const comboQuery = ref('');
 const packs = ref([]);
+/* Wholesale Pricing by Quantity — [{id, min_qty, max_qty, price}]; max_qty null
+   is the open-ended top bracket ("100+"). Prices are per piece, in the same
+   basis as the product's retail price. */
+const enableWholesalePricing = ref(false);
+const priceTiers = ref([]);
 const tags = ref([]);
+// Storefront badge labels — free text, with the styled ones suggested.
+const labels = ref([]);
+const shippingMethods = ref([]);
+
+// Related products: ids drive the select; `relatedKnown` remembers a label for
+// every id ever seen, so chips keep their names when a new search replaces the
+// result list underneath them.
+const relatedIds = ref([]);
+const relatedKnown = ref(new Map());
+const relatedResults = ref([]);
+let relatedTimer = null;
+const relatedLabel = p => (p.code ? p.name + ' (' + p.code + ')' : p.name);
+const relatedOptions = computed(() => {
+  const seen = new Set();
+  const out = [];
+  const push = (id, label) => {
+    if (seen.has(id)) return;
+    seen.add(id);
+    out.push({ value: id, label });
+  };
+  relatedIds.value.forEach(id => push(id, relatedKnown.value.get(id) || ('#' + id)));
+  relatedResults.value.forEach(p => push(Number(p.id), relatedLabel(p)));
+  return out;
+});
+function onRelatedSearch(q) {
+  clearTimeout(relatedTimer);
+  relatedTimer = setTimeout(async () => {
+    try {
+      const r = await http.get('products/search-basic', { q: q || '', exclude: product.value.id || 0 });
+      relatedResults.value = r.products || [];
+      relatedResults.value.forEach(p => relatedKnown.value.set(Number(p.id), relatedLabel(p)));
+    } catch (e) {
+      relatedResults.value = [];
+    }
+  }, 300);
+}
+const labelSuggestions = ['New', 'Used', 'Refurbished', 'Sale', 'Hot', 'Limited', 'Exclusive']
+  .map(v => ({ label: v, value: v }));
 const faqs = ref([]);
 const warehouseRows = ref({});
 
@@ -758,6 +894,7 @@ const product = ref({
   generic_name: '', strength: '', dosage_form: '', pack_size: '',
   manufacturer: '', prescription_required: false, drug_schedule: '',
   size_guide_id: null,
+  shipping_method_ids: [],
   warranty_period: null, warranty_unit: 'months', warranty_terms: '',
   has_guarantee: false, guarantee_period: null, guarantee_unit: 'months',
 });
@@ -818,6 +955,13 @@ const packColumns = computed(() => [
   { title: '', key: 'action', width: 90 },
 ]);
 
+const priceTierColumns = computed(() => [
+  { title: t('Min_Quantity'), key: 'min_qty', width: 130 },
+  { title: t('Max_Quantity'), key: 'max_qty', width: 130 },
+  { title: t('Price_Per_Piece'), key: 'price', width: 150 },
+  { title: '', key: 'action', width: 60 },
+]);
+
 const rules = computed(() => ({
   type: [{ required: true, message: t('Field_is_required') }],
   name: [{ required: true, message: t('Field_is_required') }],
@@ -837,7 +981,7 @@ const rules = computed(() => ({
   discount_method: [{ required: true, message: t('Field_is_required') }],
   ...(product.value.type === 'is_service' ? {} : { unit_id: [{ required: true, message: t('Field_is_required') }] }),
   ...(product.value.type === 'is_variant' ? {} : { price: [{ required: true, message: t('Field_is_required') }] }),
-  ...(product.value.type === 'is_single' ? { cost: [{ required: true, message: t('Field_is_required') }] } : {}),
+  ...(product.value.type === 'is_single' || product.value.type === 'is_combo' ? { cost: [{ required: true, message: t('Field_is_required') }] } : {}),
 }));
 
 /* ---------------- behaviour ---------------- */
@@ -960,6 +1104,14 @@ function ensureVariantDefaultPack(v) {
   def.multiplier = 1;
   def.is_active = true;
 }
+/* Each new bracket starts where the previous one ended, so the ladder builds
+   itself in order and the backend's overlap check has nothing to drop. */
+function addPriceTier() {
+  const last = priceTiers.value[priceTiers.value.length - 1];
+  const nextMin = last ? Math.max(Number(last.max_qty || last.min_qty || 0) + 1, 1) : 10;
+  priceTiers.value.push({ id: null, min_qty: nextMin, max_qty: null, price: product.value.price || 0 });
+}
+
 function addVariantPack(v) {
   ensureVariantDefaultPack(v);
   v.packs.push({ id: null, name: '', multiplier: 1, price: 0, is_active: true, is_default: false });
@@ -972,6 +1124,27 @@ function addGalleryFile(f) {
     is_main: false, sort_order: gallery.value.length, _file: f,
   });
   if (!gallery.value.some(g => g.is_main)) gallery.value[0].is_main = true;
+}
+function addGalleryUrl() {
+  const url = String(galleryUrlInput.value || '').trim();
+  if (!url) return;
+  if (!/^https?:\/\/\S+$/i.test(url) || url.length > 255) {
+    message.error(t('Invalid_image_link'));
+    return;
+  }
+  if (gallery.value.some(g => (g._url || g.image_path) === url)) {
+    galleryUrlInput.value = '';
+    return;
+  }
+  gallery.value.push({
+    _uid: `n-${gallerySeed++}`, url,
+    is_main: false, sort_order: gallery.value.length, _url: url,
+  });
+  if (!gallery.value.some(g => g.is_main)) gallery.value[0].is_main = true;
+  galleryUrlInput.value = '';
+}
+function onGalleryImgError(g) {
+  if (g && (g._url || g.remote)) g.url = '/images/products/no-image.png';
 }
 function setMain(i) {
   gallery.value.forEach((g, idx) => { g.is_main = idx === i; });
@@ -1148,8 +1321,19 @@ async function submit() {
     }
   }
 
+  // Wholesale Pricing by Quantity: send the ladder as typed — the backend
+  // sanitises, sorts and de-overlaps it.
+  if (enableWholesalePricing.value) {
+    fd.append('price_tiers', JSON.stringify(priceTiers.value));
+  }
+
   fd.append('size_guide_id', product.value.size_guide_id || '');
   fd.append('tags', JSON.stringify(tags.value || []));
+  fd.append('labels', JSON.stringify(labels.value || []));
+  // Empty = no restriction, which is what an unedited product keeps.
+  fd.append('shipping_method_ids', JSON.stringify(product.value.shipping_method_ids || []));
+  // Order matters — the storefront shows them exactly as arranged here.
+  fd.append('related_product_ids', JSON.stringify(relatedIds.value || []));
   fd.append('faqs', JSON.stringify(faqs.value || []));
 
   if (isEdit.value) {
@@ -1171,11 +1355,20 @@ async function submit() {
   }
 
   // Gallery — payload shape differs between create and edit (legacy).
-  gallery.value.forEach(g => { if (g._file) fd.append('gallery_images[]', g._file); });
+  // New entries = uploaded files + pasted links; the manifest keeps their
+  // combined order so the backend creates rows in the arranged order.
+  const pendingAll = gallery.value.filter(g => g._file || g._url);
+  pendingAll.forEach(g => {
+    if (g._file) fd.append('gallery_images[]', g._file);
+    else if (g._url) fd.append('gallery_urls[]', g._url);
+  });
+  if (pendingAll.length) {
+    fd.append('gallery_new_manifest', JSON.stringify(pendingAll.map(g => ({ kind: g._file ? 'file' : 'url' }))));
+  }
   if (isEdit.value) {
     const order = gallery.value.filter(g => g.id).map((g, i) => ({ id: g.id, sort_order: i }));
     const mainRow = gallery.value.find(g => g.is_main);
-    const pending = gallery.value.filter(g => g._file);
+    const pending = pendingAll;
     const hasChanges = galleryRemoveIds.value.length > 0 || order.length > 0 || pending.length > 0;
     if (hasChanges) {
       fd.append('product_gallery_json', JSON.stringify({
@@ -1238,6 +1431,7 @@ onMounted(async () => {
       subcategories.value = data.all_subcategories || data.subcategories || [];
       brands.value = data.brands || [];
       sizeGuides.value = data.size_guides || [];
+      shippingMethods.value = data.shipping_methods || [];
       units.value = data.units || [];
       subUnits.value = data.units_sub || [];
       warehouses.value = data.warehouses || [];
@@ -1245,6 +1439,7 @@ onMounted(async () => {
       showGtin.value = data.show_product_gtin !== false;
       showSerialTracking.value = data.show_serial_tracking === true;
       enableMultiPack.value = data.enable_multi_pack_selling === true;
+      enableWholesalePricing.value = data.enable_wholesale_pricing === true;
 
       product.value = { ...product.value, ...p };
       // legacy: seed the multi-selects from the scalar columns when empty
@@ -1272,11 +1467,25 @@ onMounted(async () => {
         packs.value = packRows.filter(x => !x.product_variant_id);
         if (enableMultiPack.value && product.value.type === 'is_single') ensureDefaultPack();
       }
+      priceTiers.value = (p.price_tiers || []).map(x => ({
+        id: x.id,
+        min_qty: Number(x.min_qty),
+        max_qty: x.max_qty === null || x.max_qty === undefined ? null : Number(x.max_qty),
+        price: Number(x.price),
+      }));
       tags.value = Array.isArray(p.tags) ? p.tags.slice() : [];
+      labels.value = Array.isArray(p.labels) ? p.labels.slice() : [];
+      product.value.shipping_method_ids = Array.isArray(p.shipping_method_ids)
+        ? p.shipping_method_ids.map(Number) : [];
+      const rel = Array.isArray(p.related_products) ? p.related_products : [];
+      rel.forEach(r => relatedKnown.value.set(Number(r.id), relatedLabel(r)));
+      relatedIds.value = rel.map(r => Number(r.id));
       faqs.value = Array.isArray(p.faqs)
         ? p.faqs.map(f => ({ question: f.question || '', answer: f.answer || '' })) : [];
       gallery.value = (p.product_images || []).map(r => ({
-        _uid: `e-${r.id}`, id: r.id, url: r.image_url || `/images/products/${r.image_path || r.image}`,
+        _uid: `e-${r.id}`, id: r.id,
+        url: r.url || r.image_url || (isRemoteImage(r.image_path) ? r.image_path : `/images/products/${r.image_path || r.image}`),
+        image_path: r.image_path, remote: isRemoteImage(r.image_path),
         is_main: !!r.is_main, sort_order: r.sort_order,
       }));
       if (p.type === 'is_combo') {
@@ -1298,12 +1507,14 @@ onMounted(async () => {
       subcategories.value = data.subcategories || [];
       brands.value = data.brands || [];
       sizeGuides.value = data.size_guides || [];
+      shippingMethods.value = data.shipping_methods || [];
       units.value = data.units || [];
       warehouses.value = data.warehouses || [];
       indexLocations(data.warehouse_locations);
       showGtin.value = data.show_product_gtin !== false;
       showSerialTracking.value = data.show_serial_tracking === true;
       enableMultiPack.value = data.enable_multi_pack_selling === true;
+      enableWholesalePricing.value = data.enable_wholesale_pricing === true;
       if (enableMultiPack.value) ensureDefaultPack();
       warehouseRows.value = Object.fromEntries(
         warehouses.value.map(w => [w.id, { qte: w.qte ?? 0, warehouse_location_id: null }]));
@@ -1426,9 +1637,34 @@ onMounted(async () => {
   margin-top: 12px;
 }
 .gallery-tile {
+  position: relative;
   border: 1px solid rgba(5, 5, 5, 0.1);
   border-radius: 8px;
   padding: 4px;
+}
+.gallery-link-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.gallery-link-hint {
+  font-size: 12px;
+  opacity: 0.65;
+  margin: 4px 0 8px;
+}
+.gallery-link-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 12px;
 }
 .gallery-tile.main {
   border-color: #1677ff;

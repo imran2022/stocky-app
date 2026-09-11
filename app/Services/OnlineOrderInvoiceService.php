@@ -27,7 +27,10 @@ class OnlineOrderInvoiceService
 
         $settings = Setting::whereNull('deleted_at')->first();
         $store = StoreSetting::first();
-        $symbol = $store->currency_code ?? '';
+        // Multi-Currency: print in the currency the order was placed in
+        // (base symbol with rate 1 for legacy orders).
+        $docCurrency = StoreCurrencyService::forDocument($order);
+        $symbol = $docCurrency['symbol'] ?: ($store->currency_code ?? '');
 
         $lines = [];
         $computedSubtotal = 0.0;
@@ -70,6 +73,21 @@ class OnlineOrderInvoiceService
         ];
 
         $problems = $this->validateConsistency($subtotal, $tax, $shipping, $total, $computedSubtotal, $customer);
+
+        // Multi-Currency: consistency was validated on the frozen BASE values;
+        // only the rendered amounts convert (per-line tax stays a percent).
+        $rate = (float) ($docCurrency['rate'] ?? 1) ?: 1.0;
+        if ($rate !== 1.0) {
+            foreach ($lines as &$line) {
+                $line['price'] = $line['price'] * $rate;
+                $line['line_total'] = $line['line_total'] * $rate;
+            }
+            unset($line);
+            $subtotal *= $rate;
+            $tax *= $rate;
+            $shipping *= $rate;
+            $total *= $rate;
+        }
 
         return [
             'order' => $order,

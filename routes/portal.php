@@ -19,17 +19,25 @@ use App\Http\Controllers\Api\Portal\PortalDashboardController;
 use App\Http\Controllers\Api\Portal\PortalInvoicePdfController;
 use App\Http\Controllers\Api\Portal\PortalInvoicesController;
 use App\Http\Controllers\Api\Portal\PortalKnowledgeBaseController;
+use App\Http\Controllers\Api\Portal\PortalLocaleController;
 use App\Http\Controllers\Api\Portal\PortalPaymentsController;
 use App\Http\Controllers\Api\Portal\PortalProfileController;
 use App\Http\Controllers\Api\Portal\PortalQuotationsController;
 use App\Http\Controllers\Api\Portal\PortalStatementController;
 use Illuminate\Support\Facades\Route;
 
-Route::prefix('api/portal')->middleware(['web', 'portal.auth', 'throttle:60,1'])->group(function () {
+// portal.locale runs before portal.auth so its 403 message is already translated.
+Route::prefix('api/portal')->middleware(['web', 'portal.locale', 'portal.auth', 'throttle:60,1'])->group(function () {
     // Public - no auth (portal login / set password only)
     Route::post('login', [PortalAuthController::class, 'login']);
     Route::get('validate-invite', [PortalAuthController::class, 'validateInviteToken']);
     Route::post('set-password', [PortalAuthController::class, 'setPassword']);
+
+    // Language (public: the login / set-password pages carry a switcher too).
+    // Messages come from resources/lang/{locale}/portal.php.
+    Route::get('translations/{locale}', [PortalLocaleController::class, 'translations']);
+    Route::get('locale', [PortalLocaleController::class, 'show']);
+    Route::post('locale', [PortalLocaleController::class, 'update']);
 
     // Protected - portal guard only (separate from admin and store)
     Route::middleware('auth:portal')->group(function () {
@@ -37,6 +45,7 @@ Route::prefix('api/portal')->middleware(['web', 'portal.auth', 'throttle:60,1'])
         Route::get('me', [PortalAuthController::class, 'me']);
 
         Route::get('dashboard', [PortalDashboardController::class, 'index']);
+        Route::get('notifications', [PortalDashboardController::class, 'notifications']);
         Route::get('invoices', [PortalInvoicesController::class, 'index']);
         Route::get('invoices/{id}', [PortalInvoicesController::class, 'show']);
         Route::get('invoices/{id}/pdf', [PortalInvoicePdfController::class, 'download']);
@@ -44,6 +53,8 @@ Route::prefix('api/portal')->middleware(['web', 'portal.auth', 'throttle:60,1'])
         Route::get('statement', [PortalStatementController::class, 'index']);
         Route::get('profile', [PortalProfileController::class, 'show']);
         Route::put('profile/password', [PortalProfileController::class, 'updatePassword']);
+        // Self-service account closure (deletes the portal login only).
+        Route::delete('profile', [PortalProfileController::class, 'destroyAccount']);
 
         // Quotations (read + request)
         Route::get('quotations', [PortalQuotationsController::class, 'index']);

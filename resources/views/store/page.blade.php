@@ -5,13 +5,13 @@
   <nav class="text-sm text-fg-muted mb-4 flex items-center gap-1 flex-wrap">
     <a href="{{ route('store.index') }}" class="hover:text-accent-500">{{ __('messages.Home') }}</a>
     <x-store.icon name="chevron-right" class="w-4 h-4" />
-    <span class="text-fg-secondary truncate">{{ $page->title }}</span>
+    <span class="text-fg-secondary truncate">{{ $page->localized('title') }}</span>
   </nav>
 
   <article class="max-w-3xl mx-auto">
-    <h1 class="text-3xl lg:text-4xl font-bold text-fg-primary mb-6">{{ $page->title }}</h1>
+    <h1 class="text-3xl lg:text-4xl font-bold text-fg-primary mb-6">{{ $page->localized('title') }}</h1>
     <div class="cms-content text-fg-secondary leading-relaxed">
-      {!! $page->content ?: '<p class="text-fg-muted">'.e(__('messages.NoContent')).'</p>' !!}
+      {!! $page->localized('content') ?: '<p class="text-fg-muted">'.e(__('messages.NoContent')).'</p>' !!}
     </div>
   </article>
 </div>

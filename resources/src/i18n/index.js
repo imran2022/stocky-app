@@ -63,13 +63,38 @@ export const i18n = createI18n({
 
 const loaded = new Set();
 
+// Offline fallback: last successfully fetched messages per locale. The API
+// stays the source of truth (fetched with cache: 'no-store' every boot); this
+// copy is only read when that fetch fails, so an offline reload of the POS
+// doesn't render raw i18n keys.
+const CACHE_PREFIX = 'stocky_i18n_cache_v1_';
+
+function readCachedMessages(locale) {
+    try {
+        const raw = window.localStorage.getItem(CACHE_PREFIX + locale);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+function writeCachedMessages(locale, messages) {
+    try {
+        window.localStorage.setItem(CACHE_PREFIX + locale, JSON.stringify(messages || {}));
+    } catch (e) { /* quota/private mode — offline fallback just won't exist */ }
+}
+
 /**
  * Fetches a locale's messages once and activates it. Never throws: on failure
- * the app keeps running and $t() falls back to echoing the key, which stays
- * readable because the legacy keys are English-ish (e.g. 'Search_this_table').
+ * it falls back to the last cached copy, and only when there is no cache does
+ * $t() echo the key (which stays readable because the legacy keys are
+ * English-ish, e.g. 'Search_this_table').
  */
 export async function loadLocale(locale) {
     if (!loaded.has(locale)) {
+        let messages = null;
         try {
             const res = await fetch(`/api/translations/${locale}`, {
                 credentials: 'same-origin',
@@ -79,13 +104,17 @@ export async function loadLocale(locale) {
                 cache: 'no-store',
             });
             if (res.ok) {
-                const messages = await res.json();
-                i18n.global.setLocaleMessage(locale, messages || {});
-                indexLocale(locale, messages);
-                loaded.add(locale);
+                messages = await res.json();
+                writeCachedMessages(locale, messages);
             }
         } catch (e) {
-            console.warn(`[stocky-next] could not load translations for "${locale}"`);
+            console.warn(`[stocky-next] could not load translations for "${locale}" — trying offline cache`);
+        }
+        if (!messages) messages = readCachedMessages(locale);
+        if (messages) {
+            i18n.global.setLocaleMessage(locale, messages || {});
+            indexLocale(locale, messages);
+            loaded.add(locale);
         }
     }
 

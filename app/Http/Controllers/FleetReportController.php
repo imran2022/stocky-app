@@ -22,6 +22,8 @@ use Illuminate\Support\Facades\DB;
  */
 class FleetReportController extends Controller
 {
+    use \App\Traits\ScopesWarehouseAccess;
+
     /** Running cost per vehicle: fuel + maintenance, distance and cost/km. */
     public function costs(Request $request)
     {
@@ -144,13 +146,21 @@ class FleetReportController extends Controller
     {
         $this->authorizeForUser($request->user('api'), 'report', Vehicle::class);
 
+        // This report groups by driver rather than by vehicle, so it never goes
+        // through vehicleQuery(): restrict it to the vehicles the caller can see.
+        $visibleVehicleIds = $this->scopeToWarehouses(
+            Vehicle::whereNull('deleted_at'), 'warehouse_id', true
+        )->pluck('id')->all();
+
         $trips = VehicleAssignment::whereNull('deleted_at')
+            ->whereIn('vehicle_id', $visibleVehicleIds)
             ->when($request->filled('start_date'), fn ($q) => $q->whereDate('start_date', '>=', $request->start_date))
             ->when($request->filled('end_date'), fn ($q) => $q->whereDate('start_date', '<=', $request->end_date))
             ->get()
             ->groupBy('employee_id');
 
         $fuel = VehicleFuelLog::whereNull('deleted_at')
+            ->whereIn('vehicle_id', $visibleVehicleIds)
             ->whereNotNull('employee_id')
             ->when($request->filled('start_date'), fn ($q) => $q->whereDate('log_date', '>=', $request->start_date))
             ->when($request->filled('end_date'), fn ($q) => $q->whereDate('log_date', '<=', $request->end_date))
@@ -190,7 +200,13 @@ class FleetReportController extends Controller
 
     private function vehicleQuery(Request $request)
     {
-        return Vehicle::with('warehouse')->whereNull('deleted_at')
+        $query = Vehicle::with('warehouse')->whereNull('deleted_at');
+
+        // Every fleet report funnels through here, so the warehouse scope only
+        // has to be applied once.
+        $this->scopeToWarehouses($query, 'warehouse_id', true);
+
+        return $query
             ->when($request->filled('vehicle_id'), fn ($q) => $q->where('id', $request->vehicle_id))
             ->when($request->filled('warehouse_id'), fn ($q) => $q->where('warehouse_id', $request->warehouse_id))
             ->when($request->filled('type'), fn ($q) => $q->where('type', $request->type))

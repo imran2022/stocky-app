@@ -25,7 +25,7 @@ class RedirectIfAuthenticated
         if (Auth::guard($guard)->check() && $request->user()) {
             switch ($guard) {
                 case 'store':
-                    return redirect('/online_store');
+                    return redirect()->route('store.index');
                 default:
                     return redirect('/next');
             }

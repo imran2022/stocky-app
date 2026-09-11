@@ -13,10 +13,14 @@ class PurchaseReturn extends Model
         'user_id', 'discount', 'shipping',
         'warehouse_id', 'purchase_id', 'provider_id', 'notes', 'TaxNet', 'tax_rate', 'statut',
         'paid_amount', 'payment_statut', 'created_at', 'updated_at', 'deleted_at',
+        // Multi-Currency snapshot copied from the parent purchase; NULL = base currency
+        'currency_id', 'exchange_rate',
     ];
 
     protected $casts = [
         'GrandTotal' => 'double',
+        'currency_id' => 'integer',
+        'exchange_rate' => 'float',
         'user_id' => 'integer',
         'purchase_id' => 'integer',
         'provider_id' => 'integer',
@@ -27,6 +31,11 @@ class PurchaseReturn extends Model
         'tax_rate' => 'double',
         'paid_amount' => 'double',
     ];
+
+    public function currency()
+    {
+        return $this->belongsTo('App\Models\Currency');
+    }
 
     public function user()
     {

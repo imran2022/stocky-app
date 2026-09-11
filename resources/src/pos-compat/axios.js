@@ -1,7 +1,9 @@
 /**
  * Axios-shaped adapter over lib/http for the POS port: the 6k-line legacy
  * script calls `axios.get(url).then(r => r.data)` everywhere, so responses
- * are wrapped back into `{ data }`. Supports the config subset POS uses:
+ * are wrapped back into `{ status, data }` (http.raw keeps the HTTP status,
+ * which offline-sync callers read as `response.status`). Supports the config
+ * subset POS uses:
  * { params }, { responseType: 'blob' }, { timeout } (ignored — fetch has no
  * trivial timeout and the legacy value was advisory).
  */
@@ -22,7 +24,7 @@ async function blobGet(url) {
         err.response = { status: res.status };
         throw err;
     }
-    return { data: await res.blob() };
+    return { status: res.status, data: await res.blob() };
 }
 
 function wrapError(e) {
@@ -35,25 +37,24 @@ export default {
     async get(url, config = {}) {
         if (config.responseType === 'blob') return blobGet(url);
         try {
-            return { data: await http.get(url, config.params) };
+            return await http.raw('GET', url, { params: config.params });
         } catch (e) { wrapError(e); }
     },
     async post(url, body, config = {}) {
         try {
-            const data = body instanceof FormData
-                ? await http.postForm(url, body)
-                : await http.post(url, body);
-            return { data };
+            return body instanceof FormData
+                ? await http.raw('POST', url, { formData: body })
+                : await http.raw('POST', url, { body });
         } catch (e) { wrapError(e); }
     },
     async put(url, body) {
         try {
-            return { data: await http.put(url, body) };
+            return await http.raw('PUT', url, { body });
         } catch (e) { wrapError(e); }
     },
     async delete(url) {
         try {
-            return { data: await http.delete(url) };
+            return await http.raw('DELETE', url);
         } catch (e) { wrapError(e); }
     },
 };

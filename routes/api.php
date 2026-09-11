@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\Store\PagesApiController;
 use App\Http\Controllers\Api\Store\PendingCustomersController;
 use App\Http\Controllers\Api\Store\SettingsApiController;
 use App\Http\Controllers\Api\Store\FlashSalesController;
+use App\Http\Controllers\Api\Store\ProductQuestionsController;
 use App\Http\Controllers\Api\Store\ProductReviewsController;
 use App\Http\Controllers\Api\Store\QuoteRequestsController;
 use App\Http\Controllers\Api\Store\GiftCardController;
@@ -18,6 +19,7 @@ use App\Http\Controllers\Api\Store\StorePopupsController;
 use App\Http\Controllers\Api\Store\WalletController;
 use App\Http\Controllers\Api\Store\WalletWithdrawalController;
 use App\Http\Controllers\Api\Store\ReturnsController;
+use App\Http\Controllers\Api\Store\PickupBranchesController;
 use App\Http\Controllers\Api\Store\ShippingMethodsController;
 use App\Http\Controllers\Api\Store\SubscriberController;
 use App\Http\Controllers\Api\Store\TaxRatesController;
@@ -49,6 +51,11 @@ Route::get('/ping', function () {
         'ts' => now()->timestamp,
     ]);
 });
+
+// Liveness probe used by the System Update post-update health check.
+// Public by design (returns the literal "pong") and whitelisted from
+// maintenance mode so it also answers during an update.
+Route::get('/system-update/ping', 'SystemUpdateController@ping');
 
 // --------------------------- Reset Password  ---------------------------
 
@@ -85,12 +92,31 @@ Route::get('/languages', 'LanguageController@load_language');
 // Namespaced under /webhooks/incoming/{source} — never collides with existing routes.
 Route::post('/webhooks/incoming/{source}', [\App\Http\Controllers\Webhooks\IncomingWebhooksController::class, 'handle']);
 
+// Salla webhooks (public endpoint; authenticated by the X-Salla-Signature HMAC)
+Route::post('/salla/webhook', [\App\Http\Controllers\Integrations\SallaWebhookController::class, 'handle']);
+
 // Online-store payment gateway webhooks (public; each request is
 // signature-verified by the gateway service before anything is touched).
 Route::post('/store/webhooks/paypal', [\App\Http\Controllers\Api\Store\WebhookController::class, 'paypal']);
 Route::post('/store/webhooks/paystack', [\App\Http\Controllers\Api\Store\WebhookController::class, 'paystack']);
 Route::post('/store/webhooks/flutterwave', [\App\Http\Controllers\Api\Store\WebhookController::class, 'flutterwave']);
 Route::post('/store/webhooks/razorpay', [\App\Http\Controllers\Api\Store\WebhookController::class, 'razorpay']);
+Route::post('/store/webhooks/sslcommerz', [\App\Http\Controllers\Api\Store\WebhookController::class, 'sslcommerz']);
+
+// bKash / SSLCommerz browser callbacks. These live on the SESSIONLESS api
+// stack on purpose: SSLCommerz posts the shopper's browser back cross-site,
+// so the SameSite=Lax session cookie is not sent, and running StartSession
+// would answer with a fresh session cookie that overwrites the customer's
+// login mid-payment (they would land on the login page instead of thank-you).
+// It also keeps them CSRF-free without an $except entry, and reachable even
+// when the store is switched off — a payment already in flight must still be
+// executed/validated (bKash has no IPN to recover it). Nothing here reads the
+// session: the pending order is resolved by the unguessable gateway id, and
+// paid is only ever written after a server-to-server execute/validate.
+Route::get('/store/bkash/return', [\App\Http\Controllers\Api\Store\CheckoutController::class, 'bkashReturn'])->name('store.bkash.return');
+Route::match(['get', 'post'], '/store/sslcommerz/return', [\App\Http\Controllers\Api\Store\CheckoutController::class, 'sslcommerzReturn'])->name('store.sslcommerz.return');
+Route::match(['get', 'post'], '/store/sslcommerz/fail', [\App\Http\Controllers\Api\Store\CheckoutController::class, 'sslcommerzFail'])->name('store.sslcommerz.fail');
+Route::match(['get', 'post'], '/store/sslcommerz/cancel', [\App\Http\Controllers\Api\Store\CheckoutController::class, 'sslcommerzCancel'])->name('store.sslcommerz.cancel');
 
 Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])->group(function () {
 
@@ -106,14 +132,20 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     Route::get('/store/orders/{id}/invoice', [OnlineOrdersApiController::class, 'invoice']);
     Route::get('/store/orders/{id}/confirm-options', [OnlineOrdersApiController::class, 'confirmOptions']);
     Route::patch('/store/orders/{id}', [OnlineOrdersApiController::class, 'update']);
+    Route::post('/store/orders/{id}/payment-proofs/{proofId}/review', [OnlineOrdersApiController::class, 'reviewProof']);
 
     // Kitchen display
     Route::get('/kitchen/orders', 'KitchenOrderController@index');
     Route::get('/kitchen/orders/poll', 'KitchenOrderController@poll');
     Route::get('/kitchen/warehouses', 'KitchenOrderController@warehouses');
+    Route::get('/kitchen/stations', 'KitchenOrderController@stations');
+    Route::get('/kitchen/report', 'KitchenOrderController@report');
+    Route::post('/kitchen/ready-screen/generate', 'KitchenOrderController@generateReadyScreen');
+    Route::put('/kitchen/stations', 'KitchenOrderController@saveStations');
     Route::get('/kitchen/orders/{id}', 'KitchenOrderController@show');
     Route::post('/kitchen/orders', 'KitchenOrderController@store');
     Route::patch('/kitchen/orders/{id}/status', 'KitchenOrderController@updateStatus');
+    Route::patch('/kitchen/orders/{id}/item', 'KitchenOrderController@updateItem');
     Route::patch('/kitchen/orders/{id}/assign', 'KitchenOrderController@assign');
     Route::patch('/kitchen/orders/{id}/dispatch', 'KitchenOrderController@dispatchOrder');
 
@@ -147,6 +179,19 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     Route::post('/store/pending-customers/approve-all', [PendingCustomersController::class, 'approveAll']);
 
     // Shipping Methods
+    // Shipping zones + their rate rules (supersede the flat method list
+    // once any zone exists).
+    Route::get('/store/shipping-zones', [\App\Http\Controllers\Api\Store\ShippingZonesController::class, 'index']);
+    Route::post('/store/shipping-zones', [\App\Http\Controllers\Api\Store\ShippingZonesController::class, 'store']);
+    Route::put('/store/shipping-zones/{id}', [\App\Http\Controllers\Api\Store\ShippingZonesController::class, 'update']);
+    Route::delete('/store/shipping-zones/{id}', [\App\Http\Controllers\Api\Store\ShippingZonesController::class, 'destroy']);
+    Route::post('/store/shipping-zones/{zone}/rates', [\App\Http\Controllers\Api\Store\ShippingZonesController::class, 'storeRate']);
+    Route::put('/store/shipping-zones/{zone}/rates/{rate}', [\App\Http\Controllers\Api\Store\ShippingZonesController::class, 'updateRate']);
+    Route::delete('/store/shipping-zones/{zone}/rates/{rate}', [\App\Http\Controllers\Api\Store\ShippingZonesController::class, 'destroyRate']);
+
+    Route::get('/store/pickup-branches', [PickupBranchesController::class, 'index']);
+    Route::post('/store/pickup-branches', [PickupBranchesController::class, 'save']);
+
     Route::get('/store/shipping-methods', [ShippingMethodsController::class, 'index']);
     Route::post('/store/shipping-methods', [ShippingMethodsController::class, 'store']);
     Route::put('/store/shipping-methods/{id}', [ShippingMethodsController::class, 'update']);
@@ -200,6 +245,15 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     Route::post('/store/popups', [StorePopupsController::class, 'store']);
     Route::post('/store/popups/{id}', [StorePopupsController::class, 'update']); // POST for multipart update
     Route::delete('/store/popups/{id}', [StorePopupsController::class, 'destroy']);
+
+    // Everything awaiting staff action: the bell list + sidebar badges.
+    Route::get('pending-work', [\App\Http\Controllers\Api\PendingWorkController::class, 'index']);
+
+    // Product Q&A ("Ask About This Item") — admin answers
+    Route::get('/store/questions', [ProductQuestionsController::class, 'index']);
+    Route::post('/store/questions/{id}/answer', [ProductQuestionsController::class, 'answer']);
+    Route::post('/store/questions/{id}/status', [ProductQuestionsController::class, 'setStatus']);
+    Route::delete('/store/questions/{id}', [ProductQuestionsController::class, 'destroy']);
 
     // Product Reviews (admin moderation)
     Route::get('/store/reviews', [ProductReviewsController::class, 'index']);
@@ -321,6 +375,7 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     Route::get('report/product_report', 'ReportController@product_report');
     Route::get('report/sale_products_details', 'ReportController@sale_products_details');
     Route::get('report/product_sales_report', 'ReportController@product_sales_report');
+    Route::get('report/products_sold_summary', 'ReportController@products_sold_summary');
     Route::get('report/product_purchases_report', 'ReportController@product_purchases_report');
 
     Route::get('report/users', 'ReportController@users_Report');
@@ -449,6 +504,7 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
 
     // ------------------------------- payment_methods ------------------------\\
     // ------------------------------------------------------------------\\
+    Route::put('payment_methods/{id}/active', 'PaymentMethodController@setActive');
     Route::resource('payment_methods', 'PaymentMethodController');
 
     // ------------------------------Employee------------------------------------\\
@@ -551,6 +607,7 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     // Customer Ledger (separate endpoints)
     Route::get('/sales_client', 'ClientController@salesByClient');
     Route::get('/payments_client', 'ClientController@paymentsByClient');
+    Route::get('/service_jobs_client', 'ClientController@serviceJobsByClient');
     Route::get('/quotations_client', 'ClientController@quotationsByClient');
     Route::get('/returns_client', 'ClientController@returnsByClient');
     Route::get('/payment_returns_client', 'ClientController@paymentReturnsByClient');
@@ -600,6 +657,8 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
 
     Route::post('pos/create_pos', 'PosController@CreatePOS');
     Route::get('pos/wallet-balance/{client}', 'PosController@walletBalance');
+    Route::get('pos/client-history/{client}', 'PosController@clientHistory');
+    Route::get('pos/client-history/sale/{sale}', 'PosController@clientHistorySale');
     Route::get('pos/get_products_pos', 'PosController@GetProductsByParametre');
     Route::get('pos/get_products_pos_changes', 'PosController@GetProductsChanges');
     Route::get('pos/data_create_pos', 'PosController@GetELementPos');
@@ -1063,6 +1122,8 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     Route::post('products/delete/by_selection', 'ProductsController@delete_by_selection');
     Route::get('show_product_data/{id}/{variant_id}', 'ProductsController@show_product_data');
     Route::get('show_product_data/{id}/{variant_id}/{warehouse_id}', 'ProductsController@show_product_data');
+    // Typeahead for the Related products picker (any visible product).
+    Route::get('products/search-basic', 'ProductsController@search_products_basic');
     Route::get('get_products_materiels', 'ProductsController@get_products_materiels')->name('get_products_materiels');
 
     Route::get('opening-stock/import/meta', 'ProductsController@opening_stock_meta');
@@ -1105,6 +1166,9 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     // ------------------------------- Currencies --------------------------\\
     // ------------------------------------------------------------------\\
 
+    // Lightweight list for the Multi-Currency document pickers (no `currency`
+    // permission — cashiers and salespeople need it too).
+    Route::get('currencies_list', 'CurrencyController@Get_Currencies');
     Route::resource('currencies', 'CurrencyController');
     Route::post('currencies/delete/by_selection', 'CurrencyController@delete_by_selection');
     Route::post('currencies/{id}/set-default', 'CurrencyController@setDefault');
@@ -1350,6 +1414,9 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     // ------------------------------------------------------------------\\
     Route::get('settings/dark-mode', 'SettingsController@getDarkMode');
     Route::put('settings/dark-mode', 'SettingsController@updateDarkMode');
+    // Multipart FormData can't be sent as PUT (PHP won't parse it), so the SPA
+    // posts settings updates; route POST to the same update action.
+    Route::post('settings/{id}', 'SettingsController@update')->where('id', '[0-9]+');
     Route::resource('settings', 'SettingsController');
     Route::get('get_Settings_data_api', 'SettingsController@get_Settings_data_api');
     Route::get('get_Settings_data', 'SettingsController@getSettings');
@@ -1364,6 +1431,10 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     Route::put('module_flags', 'SettingsController@updateModuleFlags');
     Route::delete('module_flags', 'SettingsController@resetModuleFlags');
 
+    // Feature toggles (Settings → Modules → Features tab)
+    Route::get('feature_settings', 'SettingsController@getFeatureSettings');
+    Route::put('feature_settings', 'SettingsController@updateFeatureSettings');
+
     // Barcode label print defaults (Print Barcode page)
     Route::get('barcode_label_settings', 'SettingsController@getBarcodeLabelSettings');
     Route::put('barcode_label_settings', 'SettingsController@updateBarcodeLabelSettings');
@@ -1371,6 +1442,12 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     // Direct label printing (raw TSPL to the label printer)
     Route::post('print_labels_direct', 'ProductsController@Print_Labels_Direct');
     Route::post('label_printer_test', 'SettingsController@testLabelPrinter');
+    Route::get('label_printer_test_design', 'SettingsController@labelPrinterTestDesign');
+    Route::post('label_printer_calibrate', 'SettingsController@calibrateLabelPrinter');
+    Route::post('label_printer_dpi_test', 'SettingsController@dpiTestLabelPrinter');
+    // QZ Tray request signing (silent client-side printing)
+    Route::get('qz/certificate', 'SettingsController@qzCertificate');
+    Route::post('qz/sign', 'SettingsController@qzSign');
 
     // Demo data generator (System Settings)
     Route::get('demo_data/status', 'DemoDataController@status');
@@ -1395,6 +1472,9 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     Route::put('update_appearance_settings/{id}', 'SettingsController@update_appearance_settings');
 
     // ------------------------------- PWA Settings ------------------------\\
+
+    Route::get('get_mobile_settings', 'SettingsController@get_mobile_settings');
+    Route::post('update_mobile_settings', 'SettingsController@update_mobile_settings');
 
     Route::get('get_pwa_settings', 'SettingsController@get_pwa_settings');
     Route::post('update_pwa_settings', 'SettingsController@update_pwa_settings');
@@ -1442,6 +1522,22 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     Route::post('one_click_update', 'AutoUpdateController@oneClickUpdate');
     Route::get('update/preflight', 'AutoUpdateController@preflight');
     Route::get('update/progress', 'AutoUpdateController@progress');
+
+    // --------------------- System Update (upload-based, resumable) ----------\\
+    // Whitelisted in CheckForMaintenanceMode so the flow keeps working while
+    // the application is down for updating.
+    Route::get('system-update/status', 'SystemUpdateController@status');
+    Route::post('system-update/upload', 'SystemUpdateController@uploadChunk');
+    Route::post('system-update/validate', 'SystemUpdateController@validatePackage');
+    Route::post('system-update/start', 'SystemUpdateController@start');
+    Route::post('system-update/step', 'SystemUpdateController@step');
+    Route::post('system-update/resume', 'SystemUpdateController@resume');
+    Route::post('system-update/rollback', 'SystemUpdateController@rollback');
+    Route::post('system-update/discard', 'SystemUpdateController@discard');
+    Route::delete('system-update/package', 'SystemUpdateController@deletePackage');
+    Route::post('system-update/restore-backup', 'SystemUpdateController@restoreBackup');
+    Route::delete('system-update/backups/{id}', 'SystemUpdateController@deleteBackup');
+    Route::post('system-update/retention', 'SystemUpdateController@saveRetention');
 
     // ------------------------------- Backup --------------------------\\
     // ------------------------------------------------------------------\\
@@ -1631,6 +1727,97 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     Route::post('webhooks/{id}/toggle', [\App\Http\Controllers\Webhooks\WebhooksController::class, 'toggle']);
     Route::apiResource('webhooks', \App\Http\Controllers\Webhooks\WebhooksController::class);
 
+    // ------------------------------- Slack notifications ------------------------\\
+    Route::get('slack/settings', [\App\Http\Controllers\Integrations\SlackSettingsController::class, 'show']);
+    Route::put('slack/settings', [\App\Http\Controllers\Integrations\SlackSettingsController::class, 'update']);
+    Route::post('slack/settings/test', [\App\Http\Controllers\Integrations\SlackSettingsController::class, 'test']);
+
+    // ------------------------------- Telegram notifications ------------------------\\
+    Route::get('telegram/settings', [\App\Http\Controllers\Integrations\TelegramSettingsController::class, 'show']);
+    Route::put('telegram/settings', [\App\Http\Controllers\Integrations\TelegramSettingsController::class, 'update']);
+    Route::post('telegram/settings/test', [\App\Http\Controllers\Integrations\TelegramSettingsController::class, 'test']);
+
+    // ------------------------------- Salla (ecommerce sync) ------------------------\\
+    Route::get('salla/settings', [\App\Http\Controllers\Integrations\SallaSyncController::class, 'settings']);
+    Route::post('salla/settings', [\App\Http\Controllers\Integrations\SallaSyncController::class, 'saveSettings']);
+    Route::post('salla/disconnect', [\App\Http\Controllers\Integrations\SallaSyncController::class, 'disconnect']);
+    Route::post('salla/test-connection', [\App\Http\Controllers\Integrations\SallaSyncController::class, 'testConnection']);
+    Route::get('salla/stats', [\App\Http\Controllers\Integrations\SallaSyncController::class, 'stats']);
+    Route::post('salla/reset-mappings', [\App\Http\Controllers\Integrations\SallaSyncController::class, 'resetMappings']);
+    Route::post('salla/sync/products', [\App\Http\Controllers\Integrations\SallaSyncController::class, 'syncProducts']);
+    Route::post('salla/sync/inventory', [\App\Http\Controllers\Integrations\SallaSyncController::class, 'syncInventory']);
+    Route::post('salla/sync/orders', [\App\Http\Controllers\Integrations\SallaSyncController::class, 'syncOrders']);
+    Route::get('salla/logs', [\App\Http\Controllers\Integrations\SallaSyncController::class, 'logs']);
+    Route::delete('salla/logs', [\App\Http\Controllers\Integrations\SallaSyncController::class, 'clearLogs']);
+
+    // ------------------------------- Xero (accounting sync) ------------------------\\
+    Route::get('xero/settings', [\App\Http\Controllers\Integrations\XeroSyncController::class, 'settings']);
+    Route::post('xero/settings', [\App\Http\Controllers\Integrations\XeroSyncController::class, 'saveSettings']);
+    Route::post('xero/disconnect', [\App\Http\Controllers\Integrations\XeroSyncController::class, 'disconnect']);
+    Route::post('xero/test-connection', [\App\Http\Controllers\Integrations\XeroSyncController::class, 'testConnection']);
+    Route::get('xero/stats', [\App\Http\Controllers\Integrations\XeroSyncController::class, 'stats']);
+    Route::post('xero/reset-mappings', [\App\Http\Controllers\Integrations\XeroSyncController::class, 'resetMappings']);
+    Route::post('xero/sync/contacts', [\App\Http\Controllers\Integrations\XeroSyncController::class, 'syncContacts']);
+    Route::post('xero/sync/invoices', [\App\Http\Controllers\Integrations\XeroSyncController::class, 'syncInvoices']);
+    Route::get('xero/logs', [\App\Http\Controllers\Integrations\XeroSyncController::class, 'logs']);
+    Route::delete('xero/logs', [\App\Http\Controllers\Integrations\XeroSyncController::class, 'clearLogs']);
+
+    // ------------------------------- PrestaShop (ecommerce sync) ------------------------\\
+    Route::get('prestashop/settings', [\App\Http\Controllers\Integrations\PrestashopSyncController::class, 'settings']);
+    Route::post('prestashop/settings', [\App\Http\Controllers\Integrations\PrestashopSyncController::class, 'saveSettings']);
+    Route::post('prestashop/test-connection', [\App\Http\Controllers\Integrations\PrestashopSyncController::class, 'testConnection']);
+    Route::get('prestashop/stats', [\App\Http\Controllers\Integrations\PrestashopSyncController::class, 'stats']);
+    Route::post('prestashop/reset-mappings', [\App\Http\Controllers\Integrations\PrestashopSyncController::class, 'resetMappings']);
+    Route::post('prestashop/sync/products', [\App\Http\Controllers\Integrations\PrestashopSyncController::class, 'syncProducts']);
+    Route::post('prestashop/sync/inventory', [\App\Http\Controllers\Integrations\PrestashopSyncController::class, 'syncInventory']);
+    Route::post('prestashop/sync/orders', [\App\Http\Controllers\Integrations\PrestashopSyncController::class, 'syncOrders']);
+    Route::get('prestashop/logs', [\App\Http\Controllers\Integrations\PrestashopSyncController::class, 'logs']);
+    Route::delete('prestashop/logs', [\App\Http\Controllers\Integrations\PrestashopSyncController::class, 'clearLogs']);
+
+    // ------------------------------- Google Sheets (exports) ------------------------\\
+    Route::get('google-sheets/settings', [\App\Http\Controllers\Integrations\GoogleSheetsSyncController::class, 'settings']);
+    Route::post('google-sheets/settings', [\App\Http\Controllers\Integrations\GoogleSheetsSyncController::class, 'saveSettings']);
+    Route::post('google-sheets/disconnect', [\App\Http\Controllers\Integrations\GoogleSheetsSyncController::class, 'disconnect']);
+    Route::post('google-sheets/test-connection', [\App\Http\Controllers\Integrations\GoogleSheetsSyncController::class, 'testConnection']);
+    Route::post('google-sheets/create-spreadsheet', [\App\Http\Controllers\Integrations\GoogleSheetsSyncController::class, 'createSpreadsheet']);
+    Route::get('google-sheets/stats', [\App\Http\Controllers\Integrations\GoogleSheetsSyncController::class, 'stats']);
+    Route::post('google-sheets/export/sales', [\App\Http\Controllers\Integrations\GoogleSheetsSyncController::class, 'exportSales']);
+    Route::post('google-sheets/export/products', [\App\Http\Controllers\Integrations\GoogleSheetsSyncController::class, 'exportProducts']);
+    Route::post('google-sheets/export/customers', [\App\Http\Controllers\Integrations\GoogleSheetsSyncController::class, 'exportCustomers']);
+    Route::get('google-sheets/logs', [\App\Http\Controllers\Integrations\GoogleSheetsSyncController::class, 'logs']);
+    Route::delete('google-sheets/logs', [\App\Http\Controllers\Integrations\GoogleSheetsSyncController::class, 'clearLogs']);
+
+    // ------------------------------- Mailchimp (audience sync) ------------------------\\
+    Route::get('mailchimp/settings', [\App\Http\Controllers\Integrations\MailchimpSettingsController::class, 'settings']);
+    Route::post('mailchimp/settings', [\App\Http\Controllers\Integrations\MailchimpSettingsController::class, 'saveSettings']);
+    Route::post('mailchimp/test-connection', [\App\Http\Controllers\Integrations\MailchimpSettingsController::class, 'testConnection']);
+    Route::get('mailchimp/lists', [\App\Http\Controllers\Integrations\MailchimpSettingsController::class, 'lists']);
+    Route::get('mailchimp/stats', [\App\Http\Controllers\Integrations\MailchimpSettingsController::class, 'stats']);
+    Route::post('mailchimp/sync/customers', [\App\Http\Controllers\Integrations\MailchimpSettingsController::class, 'syncCustomers']);
+    Route::get('mailchimp/logs', [\App\Http\Controllers\Integrations\MailchimpSettingsController::class, 'logs']);
+    Route::delete('mailchimp/logs', [\App\Http\Controllers\Integrations\MailchimpSettingsController::class, 'clearLogs']);
+
+    // ------------------------------- Jumia (marketplace sync) ------------------------\\
+    Route::get('jumia/settings', [\App\Http\Controllers\Integrations\JumiaSyncController::class, 'settings']);
+    Route::post('jumia/settings', [\App\Http\Controllers\Integrations\JumiaSyncController::class, 'saveSettings']);
+    Route::post('jumia/test-connection', [\App\Http\Controllers\Integrations\JumiaSyncController::class, 'testConnection']);
+    Route::get('jumia/stats', [\App\Http\Controllers\Integrations\JumiaSyncController::class, 'stats']);
+    Route::post('jumia/sync/price-stock', [\App\Http\Controllers\Integrations\JumiaSyncController::class, 'syncPriceStock']);
+    Route::post('jumia/sync/orders', [\App\Http\Controllers\Integrations\JumiaSyncController::class, 'syncOrders']);
+    Route::get('jumia/logs', [\App\Http\Controllers\Integrations\JumiaSyncController::class, 'logs']);
+    Route::delete('jumia/logs', [\App\Http\Controllers\Integrations\JumiaSyncController::class, 'clearLogs']);
+
+    // ------------------------------- ZATCA Phase 2 e-invoicing ------------------------\\
+    Route::get('zatca/settings', 'ZatcaController@settings');
+    Route::post('zatca/settings', 'ZatcaController@saveSettings');
+    Route::post('zatca/onboard', 'ZatcaController@onboard');
+    Route::post('zatca/csr/regenerate', 'ZatcaController@regenerateCsr');
+    Route::get('zatca/documents', 'ZatcaController@documents');
+    Route::get('zatca/documents/{id}/xml', 'ZatcaController@downloadXml');
+    Route::post('zatca/sales/{id}/submit', 'ZatcaController@submitSale');
+    Route::post('zatca/sale_returns/{id}/submit', 'ZatcaController@submitSaleReturn');
+    Route::get('zatca/logs', 'ZatcaController@logs');
+
 });
 
 // NEW FEATURE - SAFE ADDITION: Accounting V2 (isolated routes)
@@ -1664,6 +1851,8 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety'])->group(function (
 // Public minimal endpoints for customer display (no auth)
 Route::post('pos/customer-display/broadcast', [CustomerDisplayController::class, 'broadcastCart']);
 Route::get('pos/customer-display/last-cart', [CustomerDisplayController::class, 'lastCart']);
+// Order Ready screen polling (no auth; token-guarded inside the controller)
+Route::get('kitchen/ready-screen/data', [\App\Http\Controllers\KitchenOrderController::class, 'readyScreenData']);
 
 // -------------------------------  Print & PDF ------------------------\\
 // ------------------------------------------------------------------\\
@@ -1854,3 +2043,23 @@ Route::middleware(['auth:api', 'Is_Active'])->prefix('realestate')->group(functi
 // and no CSRF token. The request proves itself with an HMAC signature over the
 // raw body, verified in ShopifyWebhookController against the store's secret.
 Route::post('shopify/webhook', 'ShopifyWebhookController@handle');
+
+// ---------------- Mobile admin app (Flutter) ----------------
+// The app authenticates with a Passport personal access token issued by
+// mobile/login and sent as a Bearer header — no cookies involved. ping and
+// login are public: ping validates a server URL typed into the app before
+// any credentials exist, and login is throttled per IP.
+Route::prefix('mobile')->group(function () {
+    Route::get('ping', [\App\Http\Controllers\Api\Mobile\MobileAuthController::class, 'ping']);
+    Route::post('login', [\App\Http\Controllers\Api\Mobile\MobileAuthController::class, 'login'])
+        ->middleware('throttle:10,1');
+
+    Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])->group(function () {
+        Route::get('me', [\App\Http\Controllers\Api\Mobile\MobileAuthController::class, 'me']);
+        Route::post('logout', [\App\Http\Controllers\Api\Mobile\MobileAuthController::class, 'logout']);
+
+        Route::post('device-token', [\App\Http\Controllers\Api\Mobile\MobileDeviceTokenController::class, 'store']);
+        Route::delete('device-token', [\App\Http\Controllers\Api\Mobile\MobileDeviceTokenController::class, 'destroy']);
+        Route::post('device-token/test', [\App\Http\Controllers\Api\Mobile\MobileDeviceTokenController::class, 'test']);
+    });
+});

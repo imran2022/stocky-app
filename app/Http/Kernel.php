@@ -90,6 +90,7 @@ class Kernel extends HttpKernel
         'Is_Active' => \App\Http\Middleware\Is_Active::class,
         'store.data' => \App\Http\Middleware\StoreDataMiddleware::class,
         'setlocale' => \App\Http\Middleware\SetLocale::class,
+        'store.locale' => \App\Http\Middleware\SetStoreLocale::class,
         'XSS' => \App\Http\Middleware\XSS::class,
         'request.safety' => \App\Http\Middleware\RequestSafety::class,
         'store.enabled' => \App\Http\Middleware\EnsureStoreEnabled::class,
@@ -98,6 +99,7 @@ class Kernel extends HttpKernel
         'pdf.locale' => \App\Http\Middleware\SetPdfLocale::class,
         // Client portal: separate auth from admin/store
         'portal.auth' => \App\Http\Middleware\EnsurePortalAuth::class,
+        'portal.locale' => \App\Http\Middleware\SetPortalLocale::class,
 
     ];
 }

@@ -1,9 +1,14 @@
 {{-- Product size guide modal. Opened by #pdpSizeGuideBtn on the product page. --}}
-@if(isset($p) && $p->sizeGuide && $p->sizeGuide->status)
+@if(isset($p) && $p->sizeGuide && $p->sizeGuide->status && $p->sizeGuide->hasChart())
 @php
   $sg = $p->sizeGuide;
-  $sgColumns = is_array($sg->columns) ? $sg->columns : [];
-  $sgRows = is_array($sg->rows) ? $sg->rows : [];
+  $sgColumns = $sg->chart('columns');
+  $sgRows = $sg->chart('rows');
+  $sgHasTable = $sg->hasTable();
+  // A guide is very often just an uploaded chart image with no typed matrix —
+  // that image IS the size chart, so show it full width rather than declaring
+  // there is no chart while a thumbnail sits in the header.
+  $sgHasImage = (bool) $sg->image;
 @endphp
 
 <div id="size-guide-modal" class="sg-root hidden" role="dialog" aria-modal="true" aria-label="{{ __('messages.SizeGuide') }}">
@@ -11,13 +16,19 @@
   <div class="sg-card">
     <button type="button" class="sg-close" data-sg-close aria-label="{{ __('messages.Close') }}">&times;</button>
     <div class="sg-head">
-      @if($sg->image)
+      {{-- Only a decorative thumbnail when the table is the chart; otherwise
+           the image is shown full width in the body below. --}}
+      @if($sgHasImage && $sgHasTable)
         <img class="sg-thumb" src="{{ url('/images/size_guides/'.$sg->image) }}" alt="{{ $sg->name }}">
       @endif
       <h3 class="sg-title">{{ $sg->name }}</h3>
     </div>
     <div class="sg-body">
-      @if(count($sgColumns) && count($sgRows))
+      @if($sgHasImage && ! $sgHasTable)
+        <img class="sg-chart" src="{{ url('/images/size_guides/'.$sg->image) }}" alt="{{ $sg->name }}">
+      @endif
+
+      @if($sgHasTable)
         <div class="sg-table-wrap">
           <table class="sg-table">
             <thead>
@@ -38,8 +49,6 @@
             </tbody>
           </table>
         </div>
-      @else
-        <p class="text-fg-muted text-sm">{{ __('messages.NoSizeGuideData') }}</p>
       @endif
     </div>
   </div>
@@ -58,6 +67,8 @@
   .sg-thumb { width: 56px; height: 56px; object-fit: contain; border-radius: 8px; background: rgb(var(--color-bg-muted)); }
   .sg-title { font-size: 1.15rem; font-weight: 700; margin: 0; }
   .sg-body { padding: 18px 22px; }
+  .sg-chart { display: block; width: 100%; height: auto; max-height: 62vh; object-fit: contain; border-radius: 8px; }
+  .sg-chart + .sg-table-wrap { margin-top: 16px; }
   .sg-table-wrap { overflow-x: auto; }
   .sg-table { width: 100%; border-collapse: collapse; font-size: .9rem; }
   .sg-table th, .sg-table td { padding: 9px 12px; text-align: center; border: 1px solid rgb(var(--color-line-subtle)); }

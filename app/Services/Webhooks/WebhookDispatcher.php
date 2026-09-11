@@ -29,6 +29,16 @@ class WebhookDispatcher
             // Never let webhook dispatch break the originating business flow.
             report($e);
         }
+
+        // Fan the same canonical event out to the chat notification channels
+        // (Slack / Telegram). Guards its own failures the same way.
+        app(\App\Services\Notifications\ChannelNotifier::class)->dispatch($event, $payload);
+
+        // Mailchimp auto-sync (client.created only; guards its own failures).
+        \App\Services\Mailchimp\MailchimpService::handleEvent($event, $payload);
+
+        // Xero auto-sync (sale.created only; guards its own failures).
+        \App\Services\Xero\SyncService::handleEvent($event, $payload);
     }
 
     protected function queue(Webhook $webhook, string $event, array $payload): void

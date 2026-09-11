@@ -375,6 +375,10 @@ class AdjustmentController extends BaseController
         }
 
         // Check If User Has Permission view All Records
+        // Warehouse half of the same rule: record_view says whose documents,
+        // the assigned warehouses say which warehouses they may come from.
+        $this->abortIfDocumentWarehouseDenied($current_adjustment);
+
         if (! $view_records) {
             // Check If User->id === Adjustment->id
             $this->authorizeForUser($request->user('api'), 'check_record', $current_adjustment);
@@ -752,6 +756,10 @@ class AdjustmentController extends BaseController
             $old_adjustment_details = AdjustmentDetail::where('adjustment_id', $id)->get();
 
             // Check If User Has Permission view All Records
+            // Warehouse half of the same rule: record_view says whose documents,
+            // the assigned warehouses say which warehouses they may come from.
+            $this->abortIfDocumentWarehouseDenied($current_adjustment);
+
             if (! $view_records) {
                 // Check If User->id === current_adjustment->id
                 $this->authorizeForUser($request->user('api'), 'check_record', $current_adjustment);
@@ -1013,6 +1021,10 @@ class AdjustmentController extends BaseController
 
         $details = [];
         // Check If User Has Permission view All Records
+        // Warehouse half of the same rule: record_view says whose documents,
+        // the assigned warehouses say which warehouses they may come from.
+        $this->abortIfDocumentWarehouseDenied($Adjustment_data);
+
         if (! $view_records) {
             // Check If User->id === Adjustment->id
             $this->authorizeForUser($request->user('api'), 'check_record', $Adjustment_data);
@@ -1117,6 +1129,10 @@ class AdjustmentController extends BaseController
             ->findOrFail($id);
         $details = [];
         // Check If User Has Permission view All Records
+        // Warehouse half of the same rule: record_view says whose documents,
+        // the assigned warehouses say which warehouses they may come from.
+        $this->abortIfDocumentWarehouseDenied($Adjustment_data);
+
         if (! $view_records) {
             // Check If User->id === Adjustment->id
             $this->authorizeForUser($request->user('api'), 'check_record', $Adjustment_data);

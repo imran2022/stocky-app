@@ -1,6 +1,11 @@
 <template>
   <div class="page">
-    <PageHeader :title="$t('Warehouse_report')" :breadcrumb="[$t('Reports'), $t('Warehouse_report')]" />
+    <PageHeader :title="$t('Warehouse_report')" :breadcrumb="[$t('Reports'), $t('Warehouse_report')]">
+      <template #actions>
+        <!-- Multi-Currency: view amounts converted (display-only) -->
+        <ViewCurrencySelect />
+      </template>
+    </PageHeader>
 
     <a-card size="small" style="margin-bottom: 16px">
       <a-space wrap :size="12">
@@ -82,6 +87,7 @@ import { useI18n } from 'vue-i18n';
 import PageHeader from '../../components/PageHeader.vue';
 import DataTable from '../../components/DataTable.vue';
 import ReportChart from '../../components/ReportChart.vue';
+import ViewCurrencySelect from '../../components/ViewCurrencySelect.vue';
 import { useCrudTable } from '../../composables/useCrudTable';
 import { useFormat } from '../../composables/useFormat';
 import { docStatusColor } from '../../lib/statusColors';

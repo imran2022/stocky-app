@@ -126,6 +126,137 @@ class helpers
     }
 
     /**
+     * Whether the Multi-Currency module is enabled. Read once per request and
+     * cached statically like price_decimals().
+     */
+    public static function multi_currency_enabled()
+    {
+        static $enabled = null;
+
+        if ($enabled === null) {
+            try {
+                $enabled = (bool) Setting::where('deleted_at', '=', null)
+                    ->value('enable_multi_currency');
+            } catch (\Throwable $e) {
+                // Settings table/column may not exist yet (e.g. during migration) — fall back.
+                $enabled = false;
+            }
+        }
+
+        return $enabled;
+    }
+
+    /**
+     * Resolve the currency a document was recorded in.
+     *
+     * Returns ['id','symbol','code','rate'] where rate = units of the document
+     * currency per 1 base-currency unit (base rate is always 1). Falls back to
+     * the global default currency with rate 1 when the document has no
+     * currency_id, the currency row was deleted, or Multi-Currency is off —
+     * so legacy rows and toggle-off installs behave exactly as before.
+     *
+     * @param  object|null  $doc  any model/stdClass with currency_id / exchange_rate
+     */
+    public static function Get_Document_Currency($doc)
+    {
+        $helpers = new self;
+        $default = [
+            'id' => null,
+            'symbol' => $helpers->Get_Currency(),
+            'code' => $helpers->Get_Currency_Code(),
+            'rate' => 1.0,
+        ];
+
+        if (! $doc || ! self::multi_currency_enabled()) {
+            return $default;
+        }
+
+        $currencyId = $doc->currency_id ?? null;
+        if (! $currencyId) {
+            return $default;
+        }
+
+        $currency = Currency::where('id', $currencyId)
+            ->where('deleted_at', '=', null)
+            ->first();
+        if (! $currency) {
+            return $default;
+        }
+
+        $rate = (float) ($doc->exchange_rate ?? 0);
+        if ($rate <= 0) {
+            $rate = (float) ($currency->exchange_rate ?? 1) ?: 1.0;
+        }
+
+        return [
+            'id' => $currency->id,
+            'symbol' => $currency->symbol,
+            'code' => $currency->code,
+            'rate' => $rate,
+        ];
+    }
+
+    /**
+     * Convert a base-currency amount to the document currency.
+     */
+    public static function to_document_amount($baseAmount, $rate)
+    {
+        return (float) $baseAmount * ((float) $rate ?: 1.0);
+    }
+
+    /**
+     * Sanitize the currency snapshot sent by a document form.
+     *
+     * Returns ['currency_id','exchange_rate'] ready to persist. Base-currency
+     * documents are stored as NULL/NULL (the backward-compat convention), a
+     * missing field keeps the existing stored pair (so non-form API callers
+     * don't clear it), and the client-sent rate is never trusted blindly —
+     * anything <= 0 falls back to the currency's configured rate.
+     */
+    public static function resolve_request_currency($request, $existingCurrencyId = null, $existingRate = null)
+    {
+        if (! self::multi_currency_enabled() || ! $request->has('currency_id')) {
+            return ['currency_id' => $existingCurrencyId, 'exchange_rate' => $existingRate];
+        }
+
+        // Permission gate (SalePolicy::multi_currency): the pickers are hidden
+        // for users without it, so also refuse a crafted request here — the
+        // stored pair is left untouched. No auth context (queued jobs) passes.
+        try {
+            $user = Auth::user();
+            if ($user && $user->cannot('multi_currency', \App\Models\Sale::class)) {
+                return ['currency_id' => $existingCurrencyId, 'exchange_rate' => $existingRate];
+            }
+        } catch (\Throwable $e) {
+            // Permission lookup unavailable — never block the save itself.
+        }
+
+        $currencyId = $request->input('currency_id');
+        if (empty($currencyId)) {
+            return ['currency_id' => null, 'exchange_rate' => null];
+        }
+
+        $default = Setting::where('deleted_at', '=', null)->value('currency_id');
+        if ((int) $currencyId === (int) $default) {
+            return ['currency_id' => null, 'exchange_rate' => null];
+        }
+
+        $currency = Currency::where('id', $currencyId)
+            ->where('deleted_at', '=', null)
+            ->first();
+        if (! $currency) {
+            return ['currency_id' => null, 'exchange_rate' => null];
+        }
+
+        $rate = (float) $request->input('exchange_rate', 0);
+        if ($rate <= 0) {
+            $rate = (float) ($currency->exchange_rate ?? 1) ?: 1.0;
+        }
+
+        return ['currency_id' => $currency->id, 'exchange_rate' => $rate];
+    }
+
+    /**
      * Number of decimal places to use for monetary values.
      *
      * Driven by the "Enable 3 Decimal Pricing" setting: returns 3 when enabled,

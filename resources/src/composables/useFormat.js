@@ -2,6 +2,7 @@ import { computed } from 'vue';
 import dayjs from 'dayjs';
 import { useAuthStore } from '../stores/auth';
 import { formatPriceDisplay, resolvePriceDecimals, roundAmount } from '../lib/priceFormat';
+import { viewIsBase, viewRate, viewSymbol } from '../lib/viewCurrencyState';
 
 /**
  * Money/date/number formatting driven by the authenticated user's settings
@@ -24,8 +25,28 @@ export function useFormat() {
         return formatPriceDisplay(value, dec ?? decimals.value, formatKey.value);
     }
 
-    /** Number prefixed with the user's currency symbol. */
+    /**
+     * Number prefixed with the user's currency symbol.
+     *
+     * Multi-Currency: when a display currency is selected (ViewCurrencySelect
+     * on reports/dashboard), the BASE amount is re-expressed as base × rate
+     * with that currency's symbol. Base selection / module off = legacy exact.
+     */
     function money(value, dec) {
+        if (!viewIsBase.value) {
+            const converted = number((Number(value) || 0) * viewRate.value, dec);
+            return viewSymbol.value ? `${viewSymbol.value} ${converted}` : converted;
+        }
+        const formatted = number(value, dec);
+        return currency.value ? `${currency.value} ${formatted}` : formatted;
+    }
+
+    /**
+     * Always the BASE currency, ignoring the display-currency selection —
+     * for transactional contexts (document forms, credit limits) that must
+     * not follow the view switch.
+     */
+    function moneyBase(value, dec) {
         const formatted = number(value, dec);
         return currency.value ? `${currency.value} ${formatted}` : formatted;
     }
@@ -50,5 +71,5 @@ export function useFormat() {
         return date(value, `${dateFormat.value} HH:mm`);
     }
 
-    return { money, number, roundMoney, date, dateTime, currency, decimals, dateFormat };
+    return { money, moneyBase, number, roundMoney, date, dateTime, currency, decimals, dateFormat };
 }

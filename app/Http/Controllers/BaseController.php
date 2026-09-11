@@ -2,11 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Traits\ScopesWarehouseAccess;
 use Config;
 use DB;
 
 class BaseController extends Controller
 {
+    use ScopesWarehouseAccess;
+
     public function sendResponse($result, $msg)
     {
         $response = [

@@ -8,11 +8,15 @@
     export-endpoint="report/client"
     export-rows-key="report"
   >
+    <template #actions>
+      <!-- Multi-Currency: view amounts converted (display-only) -->
+      <ViewCurrencySelect />
+    </template>
     <!-- Summary + charts over the WHOLE customer base (backend summary /
          top_customers / top_debtors), not the visible page. -->
     <template #chart>
       <a-row :gutter="[16, 16]" style="margin-bottom: 16px">
-        <a-col v-for="k in kpiTiles" :key="k.key" :xs="12" :sm="12" :md="6">
+        <a-col v-for="k in kpiTiles" :key="k.key" :xs="12" :sm="12" :md="8">
           <a-card size="small" class="kpi-card">
             <div class="kpi-inner">
               <div class="kpi-icon" :style="{ background: k.tint, color: k.color }">
@@ -73,6 +77,11 @@
 
     <template #bodyCell="{ column, record }">
       <template v-if="MONEY_KEYS.includes(column.key)">{{ money(record[column.key]) }}</template>
+      <template v-else-if="column.key === 'service_due' || column.key === 'total_due'">
+        <strong :style="{ color: Number(record[column.key]) > 0 ? '#ff4d4f' : undefined }">
+          {{ money(record[column.key]) }}
+        </strong>
+      </template>
       <template v-else-if="column.key === 'due'">
         <strong :style="{ color: Number(record.due) > 0 ? '#ff4d4f' : undefined }">
           {{ money(record.due) }}
@@ -96,6 +105,7 @@ import {
   EyeOutlined, TeamOutlined, DollarOutlined, CheckCircleOutlined, ExclamationCircleOutlined,
 } from '@ant-design/icons-vue';
 import ReportPage from '../../components/ReportPage.vue';
+import ViewCurrencySelect from '../../components/ViewCurrencySelect.vue';
 import { useCrudTable } from '../../composables/useCrudTable';
 import { useFormat } from '../../composables/useFormat';
 import { useUiStore } from '../../stores/ui';
@@ -126,6 +136,8 @@ const kpiTiles = computed(() => {
     { key: 'amount', label: t('Amount'), value: money(n('amount')), icon: DollarOutlined, color: '#6d28d9', tint: 'rgba(109, 40, 217, 0.12)' },
     { key: 'paid', label: t('Paid'), value: money(n('paid')), icon: CheckCircleOutlined, color: '#22c55e', tint: 'rgba(34, 197, 94, 0.12)' },
     { key: 'due', label: t('Total_Sale_Due'), value: money(n('due')), icon: ExclamationCircleOutlined, color: '#f43f5e', tint: 'rgba(244, 63, 94, 0.12)' },
+    { key: 'service_due', label: t('Total_Service_Due'), value: money(n('service_due')), icon: ExclamationCircleOutlined, color: '#f97316', tint: 'rgba(249, 115, 22, 0.12)' },
+    { key: 'total_due', label: t('Total_Due'), value: money(n('total_due')), icon: DollarOutlined, color: '#dc2626', tint: 'rgba(220, 38, 38, 0.12)' },
   ];
 });
 
@@ -161,6 +173,8 @@ const columns = computed(() => [
   { title: t('Amount'), key: 'total_amount', dataIndex: 'total_amount', sorter: true, align: 'right', sum: 'money', exportValue: r => money(r.total_amount) },
   { title: t('Paid'), key: 'total_paid', dataIndex: 'total_paid', sorter: true, align: 'right', sum: 'money', exportValue: r => money(r.total_paid) },
   { title: t('Total_Sale_Due'), key: 'due', dataIndex: 'due', sorter: true, align: 'right', sum: 'money', exportValue: r => money(r.due) },
+  { title: t('Service_Due'), key: 'service_due', dataIndex: 'service_due', sorter: true, align: 'right', sum: 'money', exportValue: r => money(r.service_due) },
+  { title: t('Total_Due'), key: 'total_due', dataIndex: 'total_due', sorter: true, align: 'right', sum: 'money', exportValue: r => money(r.total_due) },
   { title: t('Action'), key: 'actions', align: 'center', width: 80, exportable: false },
 ]);
 

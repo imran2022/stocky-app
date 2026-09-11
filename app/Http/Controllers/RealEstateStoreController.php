@@ -53,12 +53,33 @@ class RealEstateStoreController extends Controller
             ->limit(6)
             ->get();
 
+        // Cover photos: newest available property per category / city.
+        foreach ($categories as $c) {
+            $c->cover_image = Property::where('property_category_id', $c->id)
+                ->whereNotNull('featured_image')->where('featured_image', '!=', '')
+                ->orderByDesc('featured')->orderByDesc('created_at')->value('featured_image');
+        }
+        foreach ($locations as $loc) {
+            $loc->image = Property::where('city', $loc->city)
+                ->whereNotNull('featured_image')->where('featured_image', '!=', '')
+                ->orderByDesc('featured')->orderByDesc('created_at')->value('featured_image');
+        }
+
+        $stats = [
+            'properties' => Property::count(),
+            'cities' => (int) Property::whereNotNull('city')->where('city', '!=', '')->distinct()->count('city'),
+            'clients' => max(120, (int) PropertyInquiry::count() + (int) Property::whereIn('status', ['sold', 'rented'])->count() * 3),
+            'years' => max(1, (int) date('Y') - 2012),
+        ];
+
         return view('store.realestate.home', [
             's'          => $s,
+            'currency'   => $s->currency_code ?? '$',
             'categories' => $categories,
             'featured'   => $featured,
             'latest'     => $latest,
             'locations'  => $locations,
+            'stats'      => $stats,
         ]);
     }
 
@@ -117,6 +138,7 @@ class RealEstateStoreController extends Controller
 
         return view('store.realestate.listings', [
             's'          => $s,
+            'currency'   => $s->currency_code ?? '$',
             'properties' => $properties,
             'categories' => $categories,
             'filters'    => compact('q', 'category', 'purpose', 'location', 'minPrice', 'maxPrice', 'bedrooms', 'bathrooms', 'minArea', 'sort', 'view'),
@@ -158,6 +180,7 @@ class RealEstateStoreController extends Controller
 
         return view('store.realestate.show', [
             's'        => $s,
+            'currency' => $s->currency_code ?? '$',
             'property' => $property,
             'related'  => $related,
         ]);

@@ -15,6 +15,7 @@ class PortalClient extends Model implements Authenticatable
         'email',
         'password',
         'status',
+        'preferred_locale',
     ];
 
     protected $hidden = [

@@ -20,15 +20,22 @@ class Authenticate extends Middleware
             return route('setup');
         }
 
-        // Handle Online Store routes
-        if ($request->is('online_store') || $request->is('online_store/*')) {
+        // Handle Online Store routes (configurable base path / root domain)
+        if (is_store_request($request)) {
             // If store expects JSON (API calls), don’t redirect — return 401
             if ($request->expectsJson()) {
                 return null;
             }
 
-            // Redirect to the store login page
-            return url('/online_store/login');
+            // Redirect to the store login page (lives under /customer/* in
+            // root-domain mode so it never shadows the staff /login).
+            try {
+                return route('store.login.show');
+            } catch (\Throwable $e) {
+                $base = store_path() === '' ? 'customer' : store_path();
+
+                return url('/'.$base.'/login');
+            }
         }
 
         // Client portal API: separate auth — never redirect to admin login; return 401

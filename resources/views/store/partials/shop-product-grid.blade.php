@@ -1,5 +1,5 @@
 @php
-  $currency   = $currency ?? ($s->currency_code ?? '$');
+  $currency   = $currency ?? store_currency()['symbol'];
   $hasFilters = filled($q ?? null) || filled($cat ?? null) || filled($collection ?? null) || filled($min ?? null) || filled($max ?? null);
 @endphp
 
@@ -7,14 +7,14 @@
 @if($hasFilters)
   <div class="flex flex-wrap gap-2 mb-4">
     @if(filled($q))
-      <a href="{{ route('store.shop', request()->except('q','page')) }}" class="chip">
+      <a href="{{ route('store.shop', request()->except('q','page')) }}" class="chip chip-accent">
         <x-store.icon name="search" class="w-3 h-3" /> "{{ $q }}"
         <x-store.icon name="x" class="w-3 h-3 ms-1 opacity-70" />
       </a>
     @endif
     @if(filled($cat))
       @php $catName = optional($categories->firstWhere('id', $cat))->name ?? $cat; @endphp
-      <a href="{{ route('store.shop', request()->except('category','page')) }}" class="chip">
+      <a href="{{ route('store.shop', request()->except('category','page')) }}" class="chip chip-accent">
         <x-store.icon name="tag" class="w-3 h-3" /> {{ $catName }}
         <x-store.icon name="x" class="w-3 h-3 ms-1 opacity-70" />
       </a>
@@ -24,20 +24,20 @@
         $coObj  = $collections->first(fn($c) => (string)$c->slug === (string)$collection || (string)$c->id === (string)$collection);
         $coName = $coObj->title ?? $collection;
       @endphp
-      <a href="{{ route('store.shop', request()->except('collection','page')) }}" class="chip">
+      <a href="{{ route('store.shop', request()->except('collection','page')) }}" class="chip chip-accent">
         <x-store.icon name="package" class="w-3 h-3" /> {{ $coName }}
         <x-store.icon name="x" class="w-3 h-3 ms-1 opacity-70" />
       </a>
     @endif
     @if(filled($min))
-      <a href="{{ route('store.shop', request()->except('min','page')) }}" class="chip">
-        {{ __('messages.Min') }}: {{ $currency }}{{ number_format((float)$min, \App\utils\helpers::price_decimals()) }}
+      <a href="{{ route('store.shop', request()->except('min','page')) }}" class="chip chip-accent">
+        {{ __('messages.Min') }}: {{ store_money((float)$min) }}
         <x-store.icon name="x" class="w-3 h-3 ms-1 opacity-70" />
       </a>
     @endif
     @if(filled($max))
-      <a href="{{ route('store.shop', request()->except('max','page')) }}" class="chip">
-        {{ __('messages.Max') }}: {{ $currency }}{{ number_format((float)$max, \App\utils\helpers::price_decimals(), '.', ',') }}
+      <a href="{{ route('store.shop', request()->except('max','page')) }}" class="chip chip-accent">
+        {{ __('messages.Max') }}: {{ store_money((float)$max) }}
         <x-store.icon name="x" class="w-3 h-3 ms-1 opacity-70" />
       </a>
     @endif

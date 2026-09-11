@@ -2,6 +2,10 @@
   <div class="page">
     <PageHeader :title="$t('Online_Orders')" :breadcrumb="[$t('Store'), $t('Online_Orders')]">
       <template #extra>
+        <a-button @click="guideOpen = true">
+          <template #icon><BookOutlined /></template>
+          {{ $t('Orders_Guide') }}
+        </a-button>
         <a-button @click="clearFilters">
           <template #icon><ReloadOutlined /></template>
           {{ $t('Clear') }}
@@ -36,6 +40,12 @@
           </a-select>
         </a-col>
         <a-col :xs="12" :md="5">
+          <a-select v-model:value="proofFilter" style="width: 100%" @change="reload">
+            <a-select-option value="">{{ $t('All') }} {{ $t('Payments') }}</a-select-option>
+            <a-select-option value="pending">{{ $t('AwaitingVerification') }}</a-select-option>
+          </a-select>
+        </a-col>
+        <a-col :xs="12" :md="5">
           <a-select v-model:value="preorderFilter" style="width: 100%" @change="reload">
             <a-select-option value="">{{ $t('All') }} {{ $t('Orders') }}</a-select-option>
             <a-select-option value="yes">{{ $t('HasPreorderItems') }}</a-select-option>
@@ -59,6 +69,15 @@
         :locale="{ emptyText: $t('NodataAvailable') }"
         @change="onTableChange"
       >
+        <template #headerCell="{ column }">
+          <template v-if="column.key === 'payment_status'">
+            {{ column.title }}
+            <a-tooltip :title="$t('Ord_Guide_PaymentStatus_Tip')">
+              <QuestionCircleOutlined class="head-help" @click.stop="guideOpen = true" />
+            </a-tooltip>
+          </template>
+          <template v-else>{{ column.title }}</template>
+        </template>
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'status'">
             <a-tag :color="statusColor(record.status)">{{ record.status }}</a-tag>
@@ -69,9 +88,15 @@
           </template>
           <template v-else-if="column.key === 'payment_method'">
             <a-tag :color="paymentMethodColor(record.payment_method)">{{ paymentMethodLabel(record.payment_method) }}</a-tag>
+            <a-tag v-if="record.delivery_method === 'pickup'" color="orange" style="margin-inline-start: 4px">
+              {{ $t('Pickup') }}
+            </a-tag>
           </template>
           <template v-else-if="column.key === 'payment_status'">
             <a-tag :color="record.payment_status === 'paid' ? 'success' : 'warning'">{{ record.payment_status || 'pending' }}</a-tag>
+            <a-tag v-if="record.has_pending_proof" color="processing" style="margin-inline-start: 4px">
+              {{ $t('ProofToVerify') }}
+            </a-tag>
           </template>
           <template v-else-if="column.key === 'total'">
             {{ currency(record.total) }}
@@ -144,6 +169,83 @@
         </a-alert>
       </a-spin>
     </a-modal>
+
+    <!-- How online orders work: lifecycle + where payment is actually recorded.
+         Opened from the header button and from the Payment Status column help. -->
+    <a-drawer
+      v-model:open="guideOpen"
+      :title="$t('Orders_Guide')"
+      placement="right"
+      width="min(560px, 100vw)"
+      class="orders-guide"
+    >
+      <p class="guide-intro">{{ $t('Ord_Guide_Intro') }}</p>
+
+      <div class="guide-section">
+        <div class="guide-title">
+          <ShoppingCartOutlined :style="{ color: token.colorInfo }" />
+          {{ $t('Ord_Guide_Lifecycle_Title') }}
+        </div>
+        <ul class="guide-list">
+          <li v-for="s in lifecycle" :key="s.key">
+            <a-tag :color="statusColor(s.key)" class="guide-tag">{{ s.key }}</a-tag>
+            <span>{{ $t(s.text) }}</span>
+          </li>
+        </ul>
+      </div>
+
+      <a-divider class="guide-divider" />
+
+      <div class="guide-section">
+        <div class="guide-title">
+          <CreditCardOutlined :style="{ color: token.colorInfo }" />
+          {{ $t('Ord_Guide_Payment_Title') }}
+        </div>
+        <p class="guide-intro">{{ $t('Ord_Guide_Payment_Intro') }}</p>
+        <ul class="guide-list">
+          <li>
+            <a-tag color="success" class="guide-tag">paid</a-tag>
+            <span>{{ $t('Ord_Guide_Payment_Paid') }}</span>
+          </li>
+          <li>
+            <a-tag color="warning" class="guide-tag">pending</a-tag>
+            <span>{{ $t('Ord_Guide_Payment_Pending') }}</span>
+          </li>
+          <li>
+            <a-tag color="error" class="guide-tag">failed</a-tag>
+            <span>{{ $t('Ord_Guide_Payment_Failed') }}</span>
+          </li>
+        </ul>
+      </div>
+
+      <a-divider class="guide-divider" />
+
+      <div class="guide-section">
+        <div class="guide-title">
+          <DollarOutlined :style="{ color: token.colorSuccess }" />
+          {{ $t('Ord_Guide_MarkPaid_Title') }}
+        </div>
+        <a-steps direction="vertical" size="small" :current="-1" class="guide-steps">
+          <a-step v-for="(k, i) in markPaidSteps" :key="i" :title="$t(k)" />
+        </a-steps>
+        <a-alert type="info" show-icon :message="$t('Ord_Guide_MarkPaid_Note')" />
+      </div>
+
+      <a-divider class="guide-divider" />
+
+      <div class="guide-section">
+        <div class="guide-title">
+          <InfoCircleOutlined :style="{ color: token.colorInfo }" />
+          {{ $t('Ord_Guide_Notes_Title') }}
+        </div>
+        <ul class="guide-list">
+          <li v-for="k in notes" :key="k">
+            <ExclamationCircleOutlined :style="{ color: token.colorWarning }" />
+            <span>{{ $t(k) }}</span>
+          </li>
+        </ul>
+      </div>
+    </a-drawer>
   </div>
 </template>
 
@@ -158,15 +260,21 @@
  * cancelled; confirmed → shipped → delivered.
  */
 import { ref, computed, onMounted } from 'vue';
-import { message, Modal } from 'ant-design-vue';
+import { useRoute } from 'vue-router';
+import { message, Modal, theme } from 'ant-design-vue';
 import { useI18n } from 'vue-i18n';
-import { ReloadOutlined, EyeOutlined, FlagOutlined } from '@ant-design/icons-vue';
+import {
+  ReloadOutlined, EyeOutlined, FlagOutlined, BookOutlined, QuestionCircleOutlined,
+  ShoppingCartOutlined, CreditCardOutlined, DollarOutlined, InfoCircleOutlined,
+  ExclamationCircleOutlined,
+} from '@ant-design/icons-vue';
 import PageHeader from '../../components/PageHeader.vue';
 import { useAuthStore } from '../../stores/auth';
 import http from '../../lib/http';
 import { PAGE_SIZE_OPTIONS, buildPageSizeOptionText } from '../../composables/useCrudTable';
 
 const { t } = useI18n();
+const { token } = theme.useToken();
 const auth = useAuthStore();
 
 const isLoading = ref(true);
@@ -176,6 +284,7 @@ const errorTitle = ref('');
 const errors = ref([]);
 const search = ref('');
 const status = ref('');
+const proofFilter = ref('');
 const preorderFilter = ref('');
 const dateFrom = ref('');
 const dateTo = ref('');
@@ -183,6 +292,28 @@ const actionBusyId = ref(null);
 const page = ref(1);
 const perPage = ref(10);
 const sort = ref({ field: 'created_at', dir: 'desc' });
+
+/* ---------- Guide ---------- */
+const guideOpen = ref(false);
+const lifecycle = [
+  { key: 'pending', text: 'Ord_Guide_Lifecycle_Pending' },
+  { key: 'confirmed', text: 'Ord_Guide_Lifecycle_Confirmed' },
+  { key: 'shipped', text: 'Ord_Guide_Lifecycle_Shipped' },
+  { key: 'delivered', text: 'Ord_Guide_Lifecycle_Delivered' },
+  { key: 'cancelled', text: 'Ord_Guide_Lifecycle_Cancelled' },
+];
+const markPaidSteps = [
+  'Ord_Guide_MarkPaid_Step1',
+  'Ord_Guide_MarkPaid_Step2',
+  'Ord_Guide_MarkPaid_Step3',
+  'Ord_Guide_MarkPaid_Step4',
+];
+const notes = [
+  'Ord_Guide_Note_Warehouse',
+  'Ord_Guide_Note_Preorder',
+  'Ord_Guide_Note_Flagged',
+  'Ord_Guide_Note_Cancel',
+];
 
 const columns = computed(() => [
   { title: t('Order'), dataIndex: 'code', key: 'code', sorter: true },
@@ -215,10 +346,18 @@ function statusColor(s) {
   return { pending: 'warning', confirmed: 'success', shipped: 'cyan', delivered: 'blue', cancelled: 'error' }[s] || 'default';
 }
 function paymentMethodLabel(m) {
-  return { credit_card: t('CreditCard'), paypal: 'PayPal', paystack: 'Paystack', flutterwave: 'Flutterwave', razorpay: 'Razorpay', mobile_money: t('MobileMoney'), cod: t('CashOnDelivery') }[m] || m || 'N/A';
+  return {
+    credit_card: t('CreditCard'), paypal: 'PayPal', paystack: 'Paystack', flutterwave: 'Flutterwave',
+    razorpay: 'Razorpay', bkash: 'bKash', sslcommerz: 'SSLCommerz', mobile_money: t('MobileMoney'), cod: t('CashOnDelivery'),
+    gcash: t('GCash'), bank_transfer: t('BankTransfer'), cash_on_pickup: t('CashOnPickup'),
+  }[m] || m || 'N/A';
 }
 function paymentMethodColor(m) {
-  return { credit_card: 'blue', paypal: 'geekblue', paystack: 'cyan', flutterwave: 'orange', razorpay: 'blue', mobile_money: 'cyan', cod: 'default' }[m] || 'default';
+  return {
+    credit_card: 'blue', paypal: 'geekblue', paystack: 'cyan', flutterwave: 'orange', razorpay: 'blue',
+    bkash: 'magenta', sslcommerz: 'geekblue',
+    mobile_money: 'cyan', cod: 'default', gcash: 'blue', bank_transfer: 'geekblue', cash_on_pickup: 'orange',
+  }[m] || 'default';
 }
 
 /* ---------- Legacy error parsing ---------- */
@@ -294,6 +433,7 @@ async function fetch() {
       dir: sort.value.dir,
       q: search.value || '',
       status: status.value || '',
+      proof: proofFilter.value || '',
       preorder: preorderFilter.value || '',
       from: dateFrom.value || '',
       to: dateTo.value || '',
@@ -326,6 +466,7 @@ function onTableChange(pag, _f, sorter) {
 function clearFilters() {
   search.value = '';
   status.value = '';
+  proofFilter.value = '';
   preorderFilter.value = '';
   dateFrom.value = '';
   dateTo.value = '';
@@ -409,5 +550,89 @@ function changeStatus(row, newStatus) {
   patchStatus(row, newStatus, t('Status_updated'));
 }
 
-onMounted(fetch);
+// The pending-work bell links here as /store/orders?proof=pending.
+const route = useRoute();
+onMounted(() => {
+  if (route.query.proof === 'pending') proofFilter.value = 'pending';
+  fetch();
+});
 </script>
+
+<style scoped>
+.head-help {
+  margin-inline-start: 4px;
+  cursor: pointer;
+  opacity: 0.55;
+}
+.head-help:hover {
+  opacity: 1;
+}
+
+.guide-section + .guide-section {
+  margin-top: 4px;
+}
+
+.guide-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 15px;
+  margin-bottom: 10px;
+}
+
+.guide-intro {
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0 0 10px;
+  opacity: 0.85;
+}
+
+.guide-divider {
+  margin: 16px 0;
+}
+
+.guide-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.guide-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 5px 0;
+  line-height: 1.6;
+  font-size: 13px;
+}
+
+.guide-list li .anticon {
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+
+/* Keep the status chips in one column so the sentences line up. */
+.guide-tag {
+  flex-shrink: 0;
+  min-width: 82px;
+  margin: 1px 0 0;
+  text-align: center;
+}
+
+.guide-steps {
+  margin-bottom: 12px;
+}
+
+.guide-steps :deep(.ant-steps-item-title) {
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: normal;
+}
+
+/* Every step is "wait" (nothing is done yet), which antd greys out — the
+   numbered circles are the point here, so keep the text readable. */
+.guide-steps :deep(.ant-steps-item-wait .ant-steps-item-title) {
+  color: inherit;
+}
+</style>

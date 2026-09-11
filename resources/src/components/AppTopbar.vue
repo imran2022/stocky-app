@@ -16,6 +16,13 @@
         <span class="hide-sm">POS</span>
       </a-button>
 
+      <!-- Install PWA — only while the browser is offering installation -->
+      <a-tooltip v-if="pwaCanInstall" :title="$t('Install_App')">
+        <a-button type="text" class="icon-btn install-btn" @click="promptInstall">
+          <template #icon><DownloadOutlined /></template>
+        </a-button>
+      </a-tooltip>
+
       <!-- Today's summary -->
       <a-tooltip :title="$t('Todays_Summary')">
         <a-button type="text" class="icon-btn" @click="summaryOpen = true">
@@ -65,39 +72,39 @@
              Ant sizes that slot for a bare icon and clips the count bubble.
              count 0 renders nothing, matching legacy's v-if on the badge. -->
         <a-button type="text" class="icon-btn">
-          <a-badge :count="auth.notifs" size="small" :offset="[4, -2]">
+          <a-badge :count="pending.total" size="small" :offset="[4, -2]">
             <BellOutlined class="bell" />
           </a-badge>
         </a-button>
         <template #overlay>
           <div class="notif-menu" :class="{ 'notif-menu--dark': ui.dark }">
             <div class="notif-head">
-              <span class="notif-title">Notifications</span>
-              <span v-if="hasAlerts" class="notif-pill">{{ auth.notifs }} new</span>
+              <span class="notif-title">{{ $t('Notifications') }}</span>
+              <span v-if="pending.total" class="notif-pill">{{ pending.total }}</span>
             </div>
 
             <div class="notif-list">
-              <button v-if="hasAlerts" type="button" class="notif-item" @click="goNotif">
-                <span class="notif-ic"><WarningFilled /></span>
+              <button
+                v-for="item in pending.items" :key="item.key"
+                type="button" class="notif-item" @click="goPending(item)"
+              >
+                <span class="notif-ic" :class="{ 'notif-ic--warn': item.severity === 'warning' }">
+                  <WarningFilled v-if="item.severity === 'warning'" />
+                  <BellOutlined v-else />
+                </span>
                 <span class="notif-body">
-                  <span class="notif-item-title">
-                    {{ auth.notifs }} {{ $t('ProductQuantityAlerts') }}
-                  </span>
-                  <span class="notif-item-sub">Products at or below their alert quantity</span>
+                  <span class="notif-item-title">{{ item.count }} {{ $t(item.label_key) }}</span>
+                  <span class="notif-item-sub">{{ $t('Waiting_for_action') }}</span>
                 </span>
                 <RightOutlined class="notif-chev" />
               </button>
 
-              <div v-else class="notif-empty">
+              <div v-if="!pending.items.length" class="notif-empty">
                 <span class="notif-empty-ic"><BellOutlined /></span>
-                <span class="notif-empty-title">No notifications</span>
-                <span class="notif-empty-sub">You're all caught up</span>
+                <span class="notif-empty-title">{{ $t('No_notifications') }}</span>
+                <span class="notif-empty-sub">{{ $t('You_are_all_caught_up') }}</span>
               </div>
             </div>
-
-            <button v-if="hasAlerts" type="button" class="notif-foot" @click="goNotif">
-              View all alerts
-            </button>
           </div>
         </template>
       </a-dropdown>
@@ -208,16 +215,19 @@
  * Legacy reloaded the page after a language change (a Vue 2 workaround);
  * loadLocale() fetches the new bundle reactively, so no reload here.
  */
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import { useRouter } from 'vue-router';
 import {
   MenuFoldOutlined, MenuUnfoldOutlined, CalculatorOutlined, BulbOutlined,
   BulbFilled, FullscreenOutlined, FullscreenExitOutlined, GlobalOutlined,
   BellOutlined, DownOutlined, PieChartOutlined, UserOutlined, SettingOutlined,
   DesktopOutlined, LogoutOutlined, WarningFilled, RightOutlined,
+  DownloadOutlined,
 } from '@ant-design/icons-vue';
 import TodaySummary from './TodaySummary.vue';
+import { canInstall as pwaCanInstall, promptInstall } from '../lib/pwaInstall';
 import { useAuthStore } from '../stores/auth';
+import { usePendingWorkStore } from '../stores/pendingWork';
 import { useUiStore } from '../stores/ui';
 import { SUPPORTED_LOCALES } from '../i18n';
 import http from '../lib/http';
@@ -229,6 +239,7 @@ const emit = defineEmits(['toggle-sidebar', 'logout']);
 
 const auth = useAuthStore();
 const ui = useUiStore();
+const pending = usePendingWorkStore();
 const router = useRouter();
 
 const summaryOpen = ref(false);
@@ -237,15 +248,18 @@ const summaryOpen = ref(false);
 
 const notifOpen = ref(false);
 
-// Legacy's nested guard: the bell only links through when there are alerts AND
-// the user holds the report permission — otherwise the panel shows empty state.
-const hasAlerts = computed(() => auth.notifs > 0 && auth.can('Reports_quantity_alerts'));
-
+// The bell now lists every pending process, not just stock alerts. The
+// server already filters each entry by the viewer's permission, so there is
+// no second guard here.
 // A custom panel (not a-menu) doesn't auto-close on click, so close it here.
-function goNotif() {
+function goPending(item) {
   notifOpen.value = false;
-  router.push('/reports/quantity-alerts');
+  if (item?.route) router.push(item.route);
 }
+
+// Refresh when the panel is opened, so counts are current the moment they
+// are looked at rather than whenever the last poll happened.
+watch(notifOpen, open => { if (open) pending.fetch(true); });
 
 // ---------------- account menu ----------------
 
@@ -277,6 +291,8 @@ const languages = computed(() =>
     ? remoteLanguages.value
     : SUPPORTED_LOCALES.map(l => ({ value: l.value, label: l.label, flag: l.flag, image: null }))
 );
+
+onMounted(() => pending.fetch());
 
 onMounted(async () => {
   try {
@@ -357,6 +373,17 @@ onBeforeUnmount(() => document.removeEventListener('fullscreenchange', syncFulls
 }
 .icon-btn:active {
   transform: scale(0.92);
+}
+
+/* Install offer keeps a resting primary tint so it reads as an invitation,
+   not just another toggle. It disappears once the app is installed. */
+.install-btn {
+  color: #6d28d9;
+  background: rgba(109, 40, 217, 0.08);
+}
+:global(.topbar--dark .install-btn) {
+  color: #c4b5fd;
+  background: rgba(139, 92, 246, 0.16);
 }
 
 /* POS shortcut as a pill so it reads as the toolbar's one primary action. */

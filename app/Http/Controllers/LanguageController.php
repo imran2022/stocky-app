@@ -6,6 +6,7 @@ use App\Models\Language;
 use App\Models\Setting;
 use App\Models\Translate;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 class LanguageController extends Controller
 {
@@ -135,6 +136,8 @@ class LanguageController extends Controller
                 $setting->update([
                     'default_language' => $language->locale,
                 ]);
+                // SetLocale caches this to keep it off every web request.
+                Cache::forget('settings.default_language');
             }
         }
 
@@ -164,6 +167,7 @@ class LanguageController extends Controller
 
             // Update settings
             Setting::query()->update(['default_language' => $language->locale]);
+            Cache::forget('settings.default_language');
         }
 
         return response()->json([
@@ -278,6 +282,10 @@ class LanguageController extends Controller
             ['value' => $request->value, 'is_customized' => 1]
         );
 
+        // Blade reads this table through tdb(); drop its cached map so the edit
+        // shows on the login/password pages right away.
+        forget_db_translations($locale);
+
         return response()->json([
             'message' => 'Translation saved successfully.',
             'data' => $translation,
@@ -308,6 +316,7 @@ class LanguageController extends Controller
 
         // Delete the translation
         $translation->delete();
+        forget_db_translations($locale);
 
         return response()->json([
             'message' => 'Translation deleted successfully.',

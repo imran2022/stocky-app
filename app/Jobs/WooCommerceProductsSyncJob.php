@@ -6,6 +6,8 @@ use App\Models\Product;
 use App\Models\SyncJob;
 use App\Models\WooCommerceLog;
 use App\Models\WooCommerceSetting;
+use App\Services\WooCommerce\SyncQueue;
+use App\Services\WooCommerce\SyncOptions;
 use App\Services\WooCommerce\SyncService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -145,7 +147,7 @@ class WooCommerceProductsSyncJob implements ShouldQueue
             $prevErrors  = 0;
             $lastStageForProduct = null;
 
-            $batchSize = (int) env('WOO_PRODUCTS_PER_JOB', 5);
+            $batchSize = SyncOptions::int('products_per_job');
             $batchSize = max(1, min(100, $batchSize));
             $startAfterId = (int) ($state['last_product_id'] ?? 0);
 
@@ -460,10 +462,9 @@ class WooCommerceProductsSyncJob implements ShouldQueue
                 }
 
                 // Re-dispatch same job for next slice.
-                $queue = $this->syncJobId ? ('woocommerce-sync-'.(int) $this->syncJobId) : 'default';
                 self::dispatch($this->progressKey, $this->onlyUnsynced, $this->syncJobId)
-                    ->onConnection('database')
-                    ->onQueue($queue);
+                    ->onConnection(SyncQueue::CONNECTION)
+                    ->onQueue(SyncQueue::NAME);
                 return;
             }
 

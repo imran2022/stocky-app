@@ -2,7 +2,7 @@
 
 @section('content')
 @php
-  $currency = $s->currency_code ?? '$';
+  $currency = store_currency()['symbol'];
   $dec = \App\utils\helpers::price_decimals();
 
   $rowVal = function ($p, $key) {
@@ -56,13 +56,13 @@
             @foreach($products as $p)
               @php
                 $pf = $p->productGalleryFilenames();
-                $img = ($pf && $pf[0]) ? asset('images/products/'.$pf[0]) : asset('images/products/no-image.png');
+                $img = product_image_url(($pf && $pf[0]) ? $pf[0] : null);
                 $price = (float) ($p->display_price ?? $p->price ?? 0);
                 $vp = collect($p->relationLoaded('variants') ? $p->variants : [])->map(function ($v) use ($currency, $dec) {
                   $f = (float) ($v->display_price ?? $v->price ?? 0);
                   return ['id' => (int) $v->id, 'name' => (string) $v->name, 'price' => (float) $v->price, 'display_price' => $f,
-                          'display_price_formatted' => $currency.number_format($f, $dec, '.', ','),
-                          'image' => ! empty($v->image) ? asset('images/products/'.$v->image) : null, 'stock' => (int) max(0, $v->stock ?? 0)];
+                          'display_price_formatted' => store_money($f),
+                          'image' => product_image_url_or_null($v->image ?? null), 'stock' => (int) max(0, $v->stock ?? 0)];
                 })->values();
                 $pStock = collect($p->relationLoaded('variants') ? $p->variants : [])->isEmpty() ? (int) max(0, $p->stock ?? 0) : null;
               @endphp
@@ -75,7 +75,7 @@
                     <img src="{{ $img }}" alt="{{ $p->name }}" class="w-full h-32 object-contain mb-2">
                   </a>
                   <a href="{{ route('store.product.show', $p->id) }}" class="font-medium text-fg-primary hover:text-accent-500 line-clamp-2">{{ $p->name }}</a>
-                  <div class="text-lg font-bold mt-1">{{ $currency }}{{ number_format($price, $dec, '.', ',') }}</div>
+                  <div class="text-lg font-bold mt-1">{{ store_money($price) }}</div>
                   <button type="button"
                           class="js-add-to-cart btn btn-primary btn-sm btn-block mt-2"
                           data-id="{{ $p->id }}"

@@ -79,7 +79,7 @@ class MyOrdersApiController extends Controller
         abort_unless($user->client_id, 403);
 
         // Only allow the customer to see their own order (404 otherwise).
-        $order = OnlineOrder::with(['items.product', 'items.productVariant', 'client', 'warehouse'])
+        $order = OnlineOrder::with(['items.product', 'items.productVariant', 'client', 'warehouse', 'pickupBranch', 'paymentProofs'])
             ->where('id', $id)
             ->where('client_id', $user->client_id)
             ->firstOrFail();
@@ -127,6 +127,27 @@ class MyOrdersApiController extends Controller
             'payment_method' => $order->payment_method ?? 'cod',
             'payment_status' => $order->payment_status ?? 'pending',
 
+            // Pickup orders are collected at a branch instead of shipped.
+            'delivery_method' => $order->delivery_method ?? 'ship',
+            'pickup_branch' => $order->isPickup() ? $this->pickupBranchInfo($order) : null,
+
+            // Offline payment: the account details to pay to + what was sent.
+            'payment_instructions' => \App\Services\StorePaymentMethodService::get($order->payment_method),
+            'payment_proofs' => $order->paymentProofs->sortByDesc('id')->map(fn ($p) => [
+                'id' => $p->id,
+                'reference_number' => $p->reference_number,
+                'amount' => (float) $p->amount,
+                'paid_at' => optional($p->paid_at)->toDateString(),
+                'status' => $p->status,
+                'reject_reason' => $p->reject_reason,
+                'file_url' => $p->fileUrl(),
+                'submitted_at' => optional($p->created_at)->toDateTimeString(),
+            ])->values(),
+            'can_submit_proof' => \App\Services\StorePaymentMethodService::requiresProof($order->payment_method)
+                && ($order->payment_status ?? 'pending') !== 'paid'
+                && $order->status !== 'cancelled'
+                && ! $order->paymentProofs->contains('status', 'pending'),
+
             'items' => $order->items->map(function ($d) {
                 $name = optional($d->product)->name ?? ('#'.$d->product_id);
                 $variant = optional($d->productVariant)->name;
@@ -142,5 +163,21 @@ class MyOrdersApiController extends Controller
                 ];
             })->values(),
         ]);
+    }
+
+    /** Branch address/hours the shopper needs in order to collect. */
+    protected function pickupBranchInfo(OnlineOrder $order): array
+    {
+        $branch = \App\Models\StorePickupBranch::where('warehouse_id', $order->pickup_branch_id)->first();
+        $warehouse = $order->pickupBranch;
+
+        return [
+            'id' => $order->pickup_branch_id,
+            'name' => optional($warehouse)->name,
+            'address' => $branch->address ?? trim(implode(', ', array_filter([optional($warehouse)->city, optional($warehouse)->country]))),
+            'hours' => $branch->hours ?? null,
+            'contact' => $branch->contact ?? optional($warehouse)->mobile,
+            'notes' => $branch->notes ?? null,
+        ];
     }
 }

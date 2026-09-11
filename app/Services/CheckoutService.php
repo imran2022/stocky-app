@@ -10,7 +10,9 @@ use App\Models\StoreCoupon;
 use App\Models\StoreCouponRedemption;
 use App\Models\StoreSetting;
 use App\Models\TaxRate;
+use App\Services\ShippingZoneService;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Single source of truth for online-store checkout maths.
@@ -22,8 +24,10 @@ use Illuminate\Support\Collection;
  */
 class CheckoutService
 {
-    public function __construct(private FlashSaleService $flashSales)
-    {
+    public function __construct(
+        private FlashSaleService $flashSales,
+        private WholesalePricingService $wholesale
+    ) {
     }
 
     /** Thrown for any checkout validation problem; carries an HTTP status + payload. */
@@ -136,9 +140,19 @@ class CheckoutService
             }
             $price = round(max(0, $price), 2);
 
+            // Wholesale Pricing by Quantity: once the line quantity reaches a
+            // configured break, the tier price REPLACES the retail base price.
+            // No-op when the feature is off, the product has no ladder, or the
+            // quantity is still below the first break.
+            $wholesalePrice = round($this->wholesale->unitPrice($pid, $qty, $price), 2);
+
             // Apply the running flash-sale price server-side so the customer is
             // charged the discounted price and can never tamper with it.
             $price = $this->flashSales->discountedBase($pid, $price);
+
+            // A product can be both on flash sale and past a wholesale break —
+            // the shopper gets whichever is cheaper, never both stacked.
+            $price = min($price, $wholesalePrice);
 
             $line = round($qty * $price, 2);
 
@@ -165,6 +179,7 @@ class CheckoutService
             $normalized[] = [
                 'product_id' => $pid,
                 'product_variant_id' => $pvid,
+                'weight' => (float) ($product->weight ?? 0),
                 'product_name' => $product->name,
                 'qty' => $qty,
                 'price' => $price,
@@ -192,15 +207,65 @@ class CheckoutService
      *
      * @return Collection<int,ShippingMethod>
      */
-    public function availableShippingMethods(?string $country): Collection
+    public function availableShippingMethods(
+        ?string $country,
+        array $productIds = [],
+        ?string $state = null,
+        float $subtotal = 0.0,
+        float $weight = 0.0
+    ): Collection {
+        // Zones supersede the flat method list, but ONLY once the store has
+        // configured at least one — otherwise every existing install keeps the
+        // exact behaviour it has today.
+        if (ShippingZoneService::inUse()) {
+            $methods = ShippingZoneService::ratesFor($country, $state, $subtotal, $weight);
+        } else {
+            $methods = ShippingMethod::with('regions')
+                ->whereNull('shipping_zone_id')
+                ->where('active', true)
+                ->orderBy('sort_order')
+                ->orderBy('price')
+                ->get()
+                ->filter(fn (ShippingMethod $m) => $m->availableForCountry($country));
+        }
+
+        return $this->restrictToProducts($methods, $productIds)->values();
+    }
+
+    /** Total cart weight, in whatever unit products.weight is kept in. */
+    public function cartWeight(array $items): float
     {
-        return ShippingMethod::with('regions')
-            ->where('active', true)
-            ->orderBy('sort_order')
-            ->orderBy('price')
-            ->get()
-            ->filter(fn (ShippingMethod $m) => $m->availableForCountry($country))
-            ->values();
+        return round(collect($items)->sum(
+            fn ($i) => (float) ($i['weight'] ?? 0) * (float) ($i['qty'] ?? 0)
+        ), 3);
+    }
+
+    /**
+     * Narrow a method list to what EVERY product in the cart allows.
+     *
+     * A product with no rows in product_shipping_method is unrestricted and
+     * constrains nothing — so carts of ordinary products behave exactly as
+     * before, and one restricted item narrows the whole order.
+     */
+    private function restrictToProducts(Collection $methods, array $productIds): Collection
+    {
+        $productIds = array_values(array_filter(array_map('intval', $productIds)));
+        if (! $productIds || $methods->isEmpty()) {
+            return $methods;
+        }
+
+        $rows = DB::table('product_shipping_method')
+            ->whereIn('product_id', $productIds)
+            ->get(['product_id', 'shipping_method_id'])
+            ->groupBy('product_id');
+
+        foreach ($rows as $allowedForProduct) {
+            $allowed = $allowedForProduct->pluck('shipping_method_id')
+                ->map(fn ($id) => (int) $id)->all();
+            $methods = $methods->filter(fn (ShippingMethod $m) => in_array((int) $m->id, $allowed, true));
+        }
+
+        return $methods;
     }
 
     /**
@@ -209,12 +274,18 @@ class CheckoutService
      *
      * @return array{method: ?ShippingMethod, cost: float}
      */
-    public function resolveShipping($shippingMethodId, ?string $country): array
-    {
-        $available = $this->availableShippingMethods($country);
+    public function resolveShipping(
+        $shippingMethodId,
+        ?string $country,
+        array $productIds = [],
+        ?string $state = null,
+        float $subtotal = 0.0,
+        float $weight = 0.0
+    ): array {
+        $available = $this->availableShippingMethods($country, $productIds, $state, $subtotal, $weight);
 
         // Nothing configured for this store → no shipping charge, no selection needed.
-        if (ShippingMethod::where('active', true)->count() === 0) {
+        if (! ShippingZoneService::inUse() && ShippingMethod::where('active', true)->count() === 0) {
             return ['method' => null, 'cost' => 0.0];
         }
 
@@ -311,7 +382,7 @@ class CheckoutService
      *
      * @return array full breakdown
      */
-    public function calculate(array $items, int|array $warehouseIds, ?string $country, ?string $state, $shippingMethodId, ?string $couponCode = null, $clientId = null): array
+    public function calculate(array $items, int|array $warehouseIds, ?string $country, ?string $state, $shippingMethodId, ?string $couponCode = null, $clientId = null, bool $isPickup = false): array
     {
         $lines = $this->buildLineItems($items, $warehouseIds);
         $subtotal = $lines['subtotal'];
@@ -320,7 +391,18 @@ class CheckoutService
         $discount = $couponResult['discount'];
         $netSubtotal = round(max(0, $subtotal - $discount), 2);
 
-        $shipping = $this->resolveShipping($shippingMethodId, $country);
+        // Collected at a branch: nothing ships, so no method is required and
+        // no shipping is charged.
+        $shipping = $isPickup
+            ? ['method' => null, 'cost' => 0.0]
+            : $this->resolveShipping(
+                $shippingMethodId,
+                $country,
+                collect($lines['items'])->pluck('product_id')->filter()->unique()->all(),
+                $state,
+                $netSubtotal,
+                $this->cartWeight($lines['items'])
+            );
         $tax = $this->resolveTax($netSubtotal, $country, $state);
 
         $total = round($netSubtotal + $tax['amount'] + $shipping['cost'], 2);

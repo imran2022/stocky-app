@@ -3,6 +3,8 @@
     <PageHeader :title="$t('Deposits_Report')" :breadcrumb="[$t('Reports'), $t('Deposits_Report')]">
       <template #actions>
         <a-space wrap>
+          <!-- Multi-Currency: view amounts converted (display-only) -->
+          <ViewCurrencySelect />
           <a-button :loading="exporting === 'pdf'" @click="exportList('pdf')">
             <template #icon><FilePdfOutlined /></template>
             {{ $t('PDF') }}
@@ -134,6 +136,7 @@ import { useFormat } from '../../composables/useFormat';
 import { exportExcel, exportPdf, printRows } from '../../lib/exporters';
 import http from '../../lib/http';
 import DateRangePicker from '../../components/DateRangePicker.vue';
+import ViewCurrencySelect from '../../components/ViewCurrencySelect.vue';
 
 const { t } = useI18n();
 const { money } = useFormat();

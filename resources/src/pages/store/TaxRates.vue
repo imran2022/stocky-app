@@ -48,10 +48,19 @@
           <a-input v-model:value="form.name" :placeholder="$t('Optional')" />
         </a-form-item>
         <a-form-item :label="$t('Country') + ' *'">
-          <a-input v-model:value="form.country" />
+          <a-select
+            v-model:value="form.country" allow-clear show-search option-filter-prop="label"
+            :placeholder="$t('Choose_Country')" :options="countryOptions"
+            @change="form.state = ''"
+          />
         </a-form-item>
         <a-form-item :label="$t('State')">
-          <a-input v-model:value="form.state" :placeholder="$t('Leave_empty_whole_country')" />
+          <a-select
+            v-if="stateOptions.length"
+            v-model:value="form.state" allow-clear show-search option-filter-prop="label"
+            :placeholder="$t('Leave_empty_whole_country')" :options="stateOptions"
+          />
+          <a-input v-else v-model:value="form.state" :placeholder="$t('Leave_empty_whole_country')" />
         </a-form-item>
         <a-form-item :label="$t('Rate') + ' (%) *'">
           <a-input-number v-model:value="form.rate" :min="0" :max="100" :step="0.001" style="width: 100%" />
@@ -83,6 +92,17 @@ const isLoading = ref(true);
 const saving = ref(false);
 const search = ref('');
 const rates = ref([]);
+// Canonical country list + subdivisions, from the API.
+const countries = ref([]);
+const subdivisions = ref({});
+const countryOptions = computed(() =>
+  countries.value.map(x => ({ label: x.name, value: x.canonical })));
+// A state picker only where we ship a list; free text everywhere else.
+const stateOptions = computed(() => {
+  const hit = countries.value.find(x => x.canonical === form.value.country);
+  const rows = (hit && subdivisions.value[hit.code]) || [];
+  return rows.map(s => ({ label: s, value: s }));
+});
 const modalOpen = ref(false);
 
 const emptyForm = () => ({ id: null, name: '', country: '', state: '', rate: 0, active: true });
@@ -101,6 +121,8 @@ async function fetch() {
   try {
     const r = await http.get('store/tax-rates', { search: search.value });
     rates.value = r.rates || [];
+    countries.value = r.country_options || [];
+    subdivisions.value = r.subdivisions || {};
   } catch (e) {
     message.error(t('Failed'));
   } finally {

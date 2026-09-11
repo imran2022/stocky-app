@@ -12,6 +12,7 @@ use App\Models\Setting;
 use App\Models\StoreSetting;
 use App\Models\User;
 use App\Notifications\NewOnlineOrderNotification;
+use App\Services\BkashService;
 use App\Services\CheckoutException;
 use App\Services\CheckoutService;
 use App\Services\OnlineOrderInvoiceService;
@@ -19,6 +20,7 @@ use App\Services\FlutterwaveService;
 use App\Services\PayPalService;
 use App\Services\PaystackService;
 use App\Services\RazorpayService;
+use App\Services\SslcommerzService;
 use App\Services\WalletException;
 use App\Services\WalletService;
 use Illuminate\Http\Request;
@@ -31,10 +33,16 @@ use Illuminate\Support\Facades\Notification;
 class CheckoutController extends BaseController
 {
     /** Payment methods the storefront may accept. */
-    private const ALLOWED_PAYMENT_METHODS = ['credit_card', 'mobile_money', 'cod', 'wallet', 'paypal', 'paystack', 'flutterwave', 'razorpay'];
+    private const ALLOWED_PAYMENT_METHODS = ['credit_card', 'mobile_money', 'cod', 'wallet', 'paypal', 'paystack', 'flutterwave', 'razorpay', 'bkash', 'sslcommerz', 'gcash', 'bank_transfer', 'cash_on_pickup'];
+
+    /** Offline methods the shopper backs with a screenshot + reference number. */
+    public const PROOF_METHODS = ['gcash', 'bank_transfer'];
+
+    /** Paying at the counter implies collecting the order at a branch. */
+    public const PICKUP_METHODS = ['cash_on_pickup'];
 
     /** Redirect gateways: order is created payment-pending, then approved off-site. */
-    private const REDIRECT_GATEWAYS = ['paypal', 'paystack', 'flutterwave', 'razorpay'];
+    private const REDIRECT_GATEWAYS = ['paypal', 'paystack', 'flutterwave', 'razorpay', 'bkash', 'sslcommerz'];
 
     public function __construct(
         private CheckoutService $checkout,
@@ -43,7 +51,9 @@ class CheckoutController extends BaseController
         private PayPalService $paypal,
         private PaystackService $paystack,
         private FlutterwaveService $flutterwave,
-        private RazorpayService $razorpay
+        private RazorpayService $razorpay,
+        private BkashService $bkash,
+        private SslcommerzService $sslcommerz
     ) {
     }
 
@@ -66,11 +76,20 @@ class CheckoutController extends BaseController
             'shipping_method_id' => ['nullable', 'integer'],
             'warehouse_id' => ['nullable', 'integer'],
             'coupon_code' => ['nullable', 'string', 'max:60'],
+            'payment_method' => ['nullable', 'string', 'max:40'],
+            'pickup_branch_id' => ['nullable', 'integer'],
         ]);
 
         $client = $user->client_id ? Client::find($user->client_id) : null;
         $country = $req->input('country') ?: ($client->country ?? null);
         $state = $req->input('state') ?: ($client->state ?? null);
+        $isPickup = in_array((string) ($data['payment_method'] ?? ''), self::PICKUP_METHODS, true);
+
+        // Pickup hides the address form, so tax falls back to the branch's
+        // country here exactly as it does when the order is created.
+        if ($isPickup && ! $country) {
+            $country = \App\Models\Warehouse::where('id', (int) ($data['pickup_branch_id'] ?? 0))->value('country');
+        }
 
         try {
             $warehouseIds = $this->checkout->activeWarehouseIds();
@@ -96,7 +115,15 @@ class CheckoutController extends BaseController
             $netSubtotal = round(max(0, $subtotal - $discount), 2);
             $tax = $this->checkout->resolveTax($netSubtotal, $country, $state);
 
-            $methods = $this->checkout->availableShippingMethods($country)
+            // Per-product restrictions narrow the list the shopper sees.
+            $cartProductIds = collect($req->input('items', []))->pluck('product_id')->filter()->unique()->all();
+            $methods = $this->checkout->availableShippingMethods(
+                $country,
+                $cartProductIds,
+                $state,
+                $netSubtotal,
+                $this->checkout->cartWeight($lines['items'])
+            )
                 ->map(fn ($m) => [
                     'id' => $m->id,
                     'name' => $m->name,
@@ -105,7 +132,7 @@ class CheckoutController extends BaseController
 
             // Shipping cost only if a valid method is chosen.
             $shippingCost = 0.0;
-            $chosen = $req->input('shipping_method_id');
+            $chosen = $isPickup ? null : $req->input('shipping_method_id');
             if ($chosen) {
                 $match = $methods->firstWhere('id', (int) $chosen);
                 if ($match) {
@@ -122,8 +149,9 @@ class CheckoutController extends BaseController
                 'tax_rate' => $tax['rate'],
                 'shipping_cost' => $shippingCost,
                 'total' => round($netSubtotal + $tax['amount'] + $shippingCost, 2),
-                'shipping_methods' => $methods,
-                'shipping_required' => $methods->isNotEmpty(),
+                'shipping_methods' => $isPickup ? [] : $methods,
+                'shipping_required' => ! $isPickup && $methods->isNotEmpty(),
+                'is_pickup' => $isPickup,
                 'country' => $country,
             ]);
         } catch (CheckoutException $e) {
@@ -153,7 +181,7 @@ class CheckoutController extends BaseController
         ]);
 
         $stripeSecret = config('services.stripe.secret');
-        if (! $stripeSecret) {
+        if (! $stripeSecret || ! StoreSetting::stripeEnabled()) {
             return response()->json(['error' => __('messages.StripeNotConfiguredError')], 500);
         }
 
@@ -178,9 +206,13 @@ class CheckoutController extends BaseController
 
         \Stripe\Stripe::setApiKey($stripeSecret);
 
-        $currency = strtolower((string) (StoreSetting::query()->value('currency_code') ?: 'usd'));
-        $currency = substr(preg_replace('/[^a-z]/', '', $currency) ?: 'usd', 0, 3);
-        $amountInCents = (int) round($breakdown['total'] * 100);
+        // Multi-Currency: charge in the shopper's selected currency (base
+        // with rate 1 otherwise). The rate is snapshotted into the intent
+        // metadata so the verify step compares against the SAME rate even if
+        // the admin edits rates mid-checkout.
+        $storeCurrency = \App\Services\StoreCurrencyService::active();
+        $currency = strtolower($this->storeCurrencyCode());
+        $amountInCents = $this->toGatewayMinorUnits((float) $breakdown['total'], (float) $storeCurrency['rate'], $currency);
 
         try {
             $intent = \Stripe\PaymentIntent::create([
@@ -189,6 +221,8 @@ class CheckoutController extends BaseController
                 'metadata' => [
                     'client_id' => $user->client_id ?? $user->id,
                     'ecommerce_client_id' => $user->id,
+                    'currency_rate' => (string) $storeCurrency['rate'],
+                    'currency_id' => (string) ($storeCurrency['id'] ?? ''),
                 ],
             ]);
         } catch (\Exception $e) {
@@ -222,6 +256,7 @@ class CheckoutController extends BaseController
             'shipping_method_id' => ['nullable', 'integer'],
             'coupon_code' => ['nullable', 'string', 'max:60'],
             'payment_method' => ['required', 'string'],
+            'pickup_branch_id' => ['nullable', 'integer'],
             'stripe_payment_intent_id' => ['nullable', 'string', 'max:128'],
 
             // Customer / shipping address
@@ -240,7 +275,10 @@ class CheckoutController extends BaseController
         if (! in_array($paymentMethod, self::ALLOWED_PAYMENT_METHODS, true)) {
             return response()->json(['error' => __('messages.PaymentMethodInvalid')], 422);
         }
-        if ($paymentMethod === 'credit_card' && ! config('services.stripe.secret')) {
+        // Cards need Stripe credentials AND the admin switch (which is kept
+        // separate so turning cards off does not clear the stored keys).
+        if ($paymentMethod === 'credit_card'
+            && (! config('services.stripe.secret') || ! StoreSetting::stripeEnabled())) {
             return response()->json(['error' => __('messages.PaymentMethodNotConfigured')], 422);
         }
         if ($paymentMethod === 'paypal' && ! $this->paypal->isConfigured()) {
@@ -255,6 +293,15 @@ class CheckoutController extends BaseController
         if ($paymentMethod === 'razorpay' && ! $this->razorpay->isConfigured()) {
             return response()->json(['error' => __('messages.PaymentMethodNotConfigured')], 422);
         }
+        // bKash charges BDT only: hidden/rejected while the active store
+        // currency is anything else (mirrors the storefront's availability rule).
+        if ($paymentMethod === 'bkash'
+            && (! $this->bkash->isConfigured() || $this->storeCurrencyCode() !== 'BDT')) {
+            return response()->json(['error' => __('messages.PaymentMethodNotConfigured')], 422);
+        }
+        if ($paymentMethod === 'sslcommerz' && ! $this->sslcommerz->isConfigured()) {
+            return response()->json(['error' => __('messages.PaymentMethodNotConfigured')], 422);
+        }
         if ($paymentMethod === 'wallet' && ! $this->wallets->enabled()) {
             return response()->json(['error' => __('messages.PaymentMethodNotConfigured')], 422);
         }
@@ -265,6 +312,30 @@ class CheckoutController extends BaseController
         }
         if ($paymentMethod === 'mobile_money' && $storeSetting && $storeSetting->payment_mobile_money_enabled === false) {
             return response()->json(['error' => __('messages.PaymentMethodNotConfigured')], 422);
+        }
+        // Manual/offline methods are off by default: the admin must fill in the
+        // account details before they can be offered.
+        $manualFlags = [
+            'gcash' => 'payment_gcash_enabled',
+            'bank_transfer' => 'payment_bank_transfer_enabled',
+            'cash_on_pickup' => 'payment_cash_on_pickup_enabled',
+        ];
+        if (isset($manualFlags[$paymentMethod]) && ! ($storeSetting && $storeSetting->{$manualFlags[$paymentMethod]})) {
+            return response()->json(['error' => __('messages.PaymentMethodNotConfigured')], 422);
+        }
+
+        // ---- Pickup: paying at the counter means collecting at a branch -----
+        $isPickup = in_array($paymentMethod, self::PICKUP_METHODS, true);
+        $pickupBranch = null;
+        if ($isPickup) {
+            $branches = \App\Models\StorePickupBranch::selectable();
+            if ($branches->isEmpty()) {
+                return response()->json(['error' => __('messages.NoPickupBranchAvailable')], 422);
+            }
+            $pickupBranch = $branches->firstWhere('warehouse_id', (int) ($data['pickup_branch_id'] ?? 0));
+            if (! $pickupBranch) {
+                return response()->json(['error' => __('messages.PickupBranchRequired')], 422);
+            }
         }
 
         // ---- (5a) Customer information: gather + validate completeness -------
@@ -284,8 +355,15 @@ class CheckoutController extends BaseController
             'country' => trim((string) ($data['shipping_country'] ?? $client->country)),
         ];
 
+        // A collected order needs no shipping address; the branch country
+        // stands in for the customer's when tax has to be resolved.
+        if ($isPickup) {
+            $customer['country'] = $customer['country'] ?: (string) ($pickupBranch->warehouse->country ?? '');
+        }
+
         $missing = [];
-        foreach (['name', 'email', 'phone', 'address', 'country'] as $field) {
+        $requiredFields = $isPickup ? ['name', 'email', 'phone'] : ['name', 'email', 'phone', 'address', 'country'];
+        foreach ($requiredFields as $field) {
             if ($customer[$field] === '') {
                 $missing[] = $field;
             }
@@ -304,13 +382,17 @@ class CheckoutController extends BaseController
         try {
             $warehouseIds = $this->checkout->activeWarehouseIds();
             $breakdown = $this->checkout->calculate(
-                $data['items'], $warehouseIds, $customer['country'], $customer['state'], $data['shipping_method_id'] ?? null,
-                $data['coupon_code'] ?? null, $user->client_id
+                $data['items'], $warehouseIds, $customer['country'], $customer['state'],
+                $isPickup ? null : ($data['shipping_method_id'] ?? null),
+                $data['coupon_code'] ?? null, $user->client_id, $isPickup
             );
             // The order is booked under one warehouse: the requested one when
             // it is enabled for the store, else the enabled warehouse holding
             // the most stock for this cart.
-            $warehouseId = $this->checkout->selectFulfilmentWarehouseId($breakdown['items'], $data['warehouse_id'] ?? null);
+            // Pickup orders are booked under the branch the shopper chose.
+            $warehouseId = $isPickup
+                ? (int) $pickupBranch->warehouse_id
+                : $this->checkout->selectFulfilmentWarehouseId($breakdown['items'], $data['warehouse_id'] ?? null);
 
             // Vehicle Fitment: an order may not contain parts that don't fit
             // the customer's selected vehicle.
@@ -358,7 +440,13 @@ class CheckoutController extends BaseController
             }
 
             // Charged amount must equal the server-computed total (anti-tamper).
-            $expectedCents = (int) round($total * 100);
+            // Multi-Currency: compare using the rate snapshotted on the intent
+            // at creation (rate 1 for base-currency checkouts).
+            $verifyRate = (float) ($intent->metadata['currency_rate'] ?? 0);
+            if ($verifyRate <= 0) {
+                $verifyRate = (float) \App\Services\StoreCurrencyService::active()['rate'];
+            }
+            $expectedCents = $this->toGatewayMinorUnits((float) $total, $verifyRate, (string) $intent->currency);
             if ((int) $intent->amount !== $expectedCents) {
                 Log::warning("Checkout amount mismatch: intent {$intent->amount} vs expected {$expectedCents}");
 
@@ -382,8 +470,12 @@ class CheckoutController extends BaseController
             'country' => $customer['country'] ?: $client->country,
         ])->save();
 
+        // Multi-Currency: snapshot the shopper's checkout currency on the order
+        // (NULL/NULL when base). Totals stay in the base currency.
+        $activeCurrency = \App\Services\StoreCurrencyService::active();
+
         try {
-            $order = DB::transaction(function () use ($breakdown, $warehouseId, $warehouseIds, $client, $paymentMethod, $paymentStatus, $piId, $customer, $isFlagged, $flagReason) {
+            $order = DB::transaction(function () use ($breakdown, $warehouseId, $warehouseIds, $client, $paymentMethod, $paymentStatus, $piId, $customer, $isFlagged, $flagReason, $activeCurrency, $isPickup, $pickupBranch) {
                 // ---- (5f) Stock re-check under row locks (prevent overselling) ----
                 // Combined stock across all enabled warehouses, matching what
                 // the storefront displays.
@@ -409,6 +501,8 @@ class CheckoutController extends BaseController
                     'total' => $breakdown['total'],
                     'shipping_method_id' => $breakdown['shipping_method']->id ?? null,
                     'shipping_method_name' => $breakdown['shipping_method']->name ?? null,
+                    'delivery_method' => $isPickup ? 'pickup' : 'ship',
+                    'pickup_branch_id' => $isPickup ? (int) $pickupBranch->warehouse_id : null,
                     'customer_name' => $customer['name'],
                     'customer_email' => $customer['email'],
                     'customer_phone' => $customer['phone'],
@@ -422,6 +516,8 @@ class CheckoutController extends BaseController
                     'stripe_payment_intent_id' => $piId,
                     'is_flagged' => $isFlagged,
                     'flag_reason' => $flagReason,
+                    'currency_id' => $activeCurrency['is_base'] ? null : $activeCurrency['id'],
+                    'exchange_rate' => $activeCurrency['is_base'] ? null : $activeCurrency['rate'],
                 ]);
 
                 $rows = array_map(function ($i) {
@@ -481,7 +577,7 @@ class CheckoutController extends BaseController
         if ($paymentMethod === 'paypal') {
             try {
                 $pp = $this->paypal->createOrder(
-                    (float) $order->total,
+                    $this->toGatewayAmount((float) $order->total, (float) ($order->exchange_rate ?: 1), $this->storeCurrencyCode()),
                     $this->storeCurrencyCode(),
                     __('messages.OnlineOrder').' '.$order->ref,
                     ['online_order_id' => $order->id, 'client_id' => $client->id],
@@ -506,7 +602,7 @@ class CheckoutController extends BaseController
         if ($paymentMethod === 'paystack') {
             try {
                 $ps = $this->paystack->initializeTransaction(
-                    (float) $order->total,
+                    $this->toGatewayAmount((float) $order->total, (float) ($order->exchange_rate ?: 1), $this->storeCurrencyCode()),
                     $this->storeCurrencyCode(),
                     $customer['email'],
                     ['online_order_id' => $order->id, 'client_id' => $client->id],
@@ -529,7 +625,7 @@ class CheckoutController extends BaseController
         if ($paymentMethod === 'flutterwave') {
             try {
                 $fw = $this->flutterwave->initializePayment(
-                    (float) $order->total,
+                    $this->toGatewayAmount((float) $order->total, (float) ($order->exchange_rate ?: 1), $this->storeCurrencyCode()),
                     $this->storeCurrencyCode(),
                     $customer['email'],
                     $customer['name'],
@@ -554,7 +650,7 @@ class CheckoutController extends BaseController
         if ($paymentMethod === 'razorpay') {
             try {
                 $rz = $this->razorpay->createPaymentLink(
-                    (float) $order->total,
+                    $this->toGatewayAmount((float) $order->total, (float) ($order->exchange_rate ?: 1), $this->storeCurrencyCode()),
                     $this->storeCurrencyCode(),
                     __('messages.OnlineOrder').' '.$order->ref,
                     $customer['name'],
@@ -571,6 +667,56 @@ class CheckoutController extends BaseController
 
             $order->update(['razorpay_payment_link_id' => $rz['id']]);
             $approveUrl = $rz['url'];
+        }
+
+        // ---- bKash: Tokenized Checkout for the SERVER-computed total (BDT
+        // only, enforced above), redirect to the hosted bkashURL, then EXECUTE
+        // server-side on the callback (same redirect-then-verify pattern).
+        if ($paymentMethod === 'bkash') {
+            try {
+                $bk = $this->bkash->createPayment(
+                    $this->toGatewayAmount((float) $order->total, (float) ($order->exchange_rate ?: 1), 'BDT'),
+                    $customer['phone'],
+                    $order->ref,
+                    // bKash appends ?paymentID&status=success|failure|cancel.
+                    route('store.bkash.return')
+                );
+            } catch (\Throwable $e) {
+                Log::error('bKash checkout failed for order '.$order->id.': '.$e->getMessage());
+                $order->update(['status' => 'cancelled', 'payment_status' => 'failed']);
+
+                return response()->json(['error' => __('messages.PaymentSetupFailed')], 502);
+            }
+
+            $order->update(['bkash_payment_id' => $bk['payment_id']]);
+            $approveUrl = $bk['url'];
+        }
+
+        // ---- SSLCommerz: hosted session for the SERVER-computed total with a
+        // server-generated tran_id, redirect to the GatewayPageURL, then
+        // VALIDATE by val_id on the success callback / IPN.
+        if ($paymentMethod === 'sslcommerz') {
+            try {
+                $ssl = $this->sslcommerz->initializeSession(
+                    $this->toGatewayAmount((float) $order->total, (float) ($order->exchange_rate ?: 1), $this->storeCurrencyCode()),
+                    $this->storeCurrencyCode(),
+                    $customer,
+                    ['online_order_id' => $order->id, 'client_id' => $client->id],
+                    route('store.sslcommerz.return'),
+                    route('store.sslcommerz.fail'),
+                    route('store.sslcommerz.cancel'),
+                    url('/api/store/webhooks/sslcommerz'),
+                    __('messages.OnlineOrder').' '.$order->ref
+                );
+            } catch (\Throwable $e) {
+                Log::error('SSLCommerz checkout failed for order '.$order->id.': '.$e->getMessage());
+                $order->update(['status' => 'cancelled', 'payment_status' => 'failed']);
+
+                return response()->json(['error' => __('messages.PaymentSetupFailed')], 502);
+            }
+
+            $order->update(['sslcommerz_tran_id' => $ssl['tran_id']]);
+            $approveUrl = $ssl['url'];
         }
 
         if (! in_array($paymentMethod, self::REDIRECT_GATEWAYS, true)) {
@@ -800,14 +946,212 @@ class CheckoutController extends BaseController
     }
 
     /**
-     * ISO currency code for gateway charges — same normalization as the
-     * Stripe path (store currency_code may hold a symbol; fall back to USD).
+     * GET /store/bkash/return?paymentID=…&status=success|failure|cancel —
+     * bKash redirects here after the payment attempt. The status param is
+     * only trusted for cancel/failure; success is EXECUTED server-side (with
+     * the query endpoint as fallback for a retried/timed-out execute) before
+     * the order is marked paid and the deferred emails go out.
+     */
+    public function bkashReturn(Request $request)
+    {
+        $paymentId = (string) $request->query('paymentID', '');
+        $order = $paymentId !== '' ? OnlineOrder::where('bkash_payment_id', $paymentId)->first() : null;
+
+        if (! $order) {
+            return redirect()->route('checkout', ['bkash' => 'failed']);
+        }
+
+        // Idempotent: a refresh of the callback page must not double-process.
+        if ($order->payment_status === 'paid') {
+            return redirect()->route('store.thankyou', ['bkash' => 'paid']);
+        }
+
+        $status = strtolower((string) $request->query('status', ''));
+        if ($status === 'cancel') {
+            $order->update(['status' => 'cancelled', 'payment_status' => 'failed']);
+
+            return redirect()->route('checkout', ['bkash' => 'cancelled']);
+        }
+        if ($status !== 'success') {
+            $order->update(['status' => 'cancelled', 'payment_status' => 'failed']);
+
+            return redirect()->route('checkout', ['bkash' => 'failed']);
+        }
+
+        try {
+            $verify = $this->bkash->executePayment($paymentId);
+        } catch (\Throwable $e) {
+            Log::error('bKash execute threw for order '.$order->id.': '.$e->getMessage());
+            $verify = ['success' => false, 'trx_id' => null];
+        }
+
+        // Execute can debit the customer and still not report success here
+        // (bKash-documented timeout) or have already run on a retried
+        // callback — the query endpoint is the authoritative state either way.
+        if (empty($verify['success'])) {
+            try {
+                $verify = $this->bkash->queryPayment($paymentId);
+            } catch (\Throwable $e) {
+                Log::error('bKash query threw for order '.$order->id.': '.$e->getMessage());
+                $verify = ['success' => false, 'trx_id' => null];
+            }
+        }
+
+        if (empty($verify['success'])) {
+            $order->update(['status' => 'cancelled', 'payment_status' => 'failed']);
+
+            return redirect()->route('checkout', ['bkash' => 'failed']);
+        }
+
+        $order->update([
+            'payment_status' => 'paid',
+            // A prior transient failure may have auto-cancelled the order;
+            // the money moved, so reopen it for fulfilment (bKash has no
+            // webhook to do this later, unlike the other gateways).
+            'status' => $order->status === 'cancelled' ? 'pending' : $order->status,
+            'bkash_trx_id' => $verify['trx_id'],
+        ]);
+
+        $this->sendOrderEmail($order);
+        $this->notifyAdminsOfOrder($order);
+
+        return redirect()->route('store.thankyou', ['bkash' => 'paid']);
+    }
+
+    /**
+     * POST|GET /store/sslcommerz/return — SSLCommerz posts here (success_url)
+     * with tran_id + val_id. The POST is NEVER trusted: the transaction is
+     * validated via the validation API (tran_id + amount cross-checked) before
+     * the order is marked paid and the deferred emails go out.
+     */
+    public function sslcommerzReturn(Request $request)
+    {
+        $tranId = (string) $request->input('tran_id', '');
+        $order = $tranId !== '' ? OnlineOrder::where('sslcommerz_tran_id', $tranId)->first() : null;
+
+        if (! $order) {
+            return redirect()->route('checkout', ['sslcommerz' => 'failed']);
+        }
+
+        // Idempotent: a refresh of the callback page must not double-process.
+        if ($order->payment_status === 'paid') {
+            return redirect()->route('store.thankyou', ['sslcommerz' => 'paid']);
+        }
+
+        // Expected charge from the ORDER's snapshotted currency/rate — the
+        // session selection may have changed between checkout and return.
+        $orderCurrency = \App\Services\StoreCurrencyService::forDocument($order);
+        $expectedAmount = $this->toGatewayAmount((float) $order->total, (float) $orderCurrency['rate'], (string) $orderCurrency['code']);
+
+        try {
+            $valId = (string) $request->input('val_id', '');
+            $verify = $valId !== ''
+                ? $this->sslcommerz->validateTransaction($valId, $tranId, $expectedAmount, (string) $orderCurrency['code'])
+                : $this->sslcommerz->validateByTranId($tranId, $expectedAmount, (string) $orderCurrency['code']);
+        } catch (\Throwable $e) {
+            Log::error('SSLCommerz validate threw for order '.$order->id.': '.$e->getMessage());
+            $verify = ['success' => false, 'val_id' => null];
+        }
+
+        if (empty($verify['success'])) {
+            $order->update(['status' => 'cancelled', 'payment_status' => 'failed']);
+
+            return redirect()->route('checkout', ['sslcommerz' => 'failed']);
+        }
+
+        $order->update([
+            'payment_status' => 'paid',
+            // Reopen an order a prior transient failure auto-cancelled —
+            // the validation API just confirmed the money moved.
+            'status' => $order->status === 'cancelled' ? 'pending' : $order->status,
+            'sslcommerz_val_id' => $verify['val_id'],
+        ]);
+
+        $this->sendOrderEmail($order);
+        $this->notifyAdminsOfOrder($order);
+
+        return redirect()->route('store.thankyou', ['sslcommerz' => 'paid']);
+    }
+
+    /**
+     * POST|GET /store/sslcommerz/fail — the payment attempt failed on the
+     * hosted page. The pending order is resolved by the unguessable tran_id.
+     */
+    public function sslcommerzFail(Request $request)
+    {
+        $tranId = (string) $request->input('tran_id', '');
+        $order = $tranId !== '' ? OnlineOrder::where('sslcommerz_tran_id', $tranId)->first() : null;
+
+        if ($order && $order->payment_status !== 'paid') {
+            $order->update(['status' => 'cancelled', 'payment_status' => 'failed']);
+        }
+
+        return redirect()->route('checkout', ['sslcommerz' => 'failed']);
+    }
+
+    /**
+     * POST|GET /store/sslcommerz/cancel — the customer backed out on the
+     * hosted page. Cancel the pending order and send them back to checkout.
+     */
+    public function sslcommerzCancel(Request $request)
+    {
+        $tranId = (string) $request->input('tran_id', '');
+        $order = $tranId !== '' ? OnlineOrder::where('sslcommerz_tran_id', $tranId)->first() : null;
+
+        if ($order && $order->payment_status !== 'paid') {
+            $order->update(['status' => 'cancelled', 'payment_status' => 'failed']);
+        }
+
+        return redirect()->route('checkout', ['sslcommerz' => 'cancelled']);
+    }
+
+    /**
+     * Currencies whose minor unit IS the major unit (no cents) — Stripe et al.
+     * take these amounts un-multiplied.
+     */
+    private const ZERO_DECIMAL_CURRENCIES = [
+        'BIF', 'CLP', 'DJF', 'GNF', 'JPY', 'KMF', 'KRW', 'MGA',
+        'PYG', 'RWF', 'UGX', 'VND', 'VUV', 'XAF', 'XOF', 'XPF',
+    ];
+
+    /**
+     * ISO currency code for gateway charges. Historically this was derived
+     * from store_settings.currency_code — which stores the SYMBOL — so the
+     * a-z filter stripped everything and every gateway silently charged USD.
+     * It now resolves the real ISO code from the active store currency
+     * (the shopper's Multi-Currency selection, or the base currency).
      */
     private function storeCurrencyCode(): string
     {
-        $currency = strtolower((string) (StoreSetting::query()->value('currency_code') ?: 'usd'));
+        $code = strtolower((string) (\App\Services\StoreCurrencyService::active()['code'] ?? ''));
 
-        return strtoupper(substr(preg_replace('/[^a-z]/', '', $currency) ?: 'usd', 0, 3));
+        return strtoupper(substr(preg_replace('/[^a-z]/', '', $code) ?: 'usd', 0, 3));
+    }
+
+    /**
+     * A BASE-currency total converted into the charge currency, rounded to
+     * that currency's precision (rate 1 = unchanged legacy behavior).
+     * Public static so the store WebhookController computes IPN expected
+     * amounts with the exact same rounding the session was opened with.
+     */
+    public static function toGatewayAmount(float $baseTotal, float $rate, string $code): float
+    {
+        $converted = $baseTotal * ($rate ?: 1);
+        $decimals = in_array(strtoupper($code), self::ZERO_DECIMAL_CURRENCIES, true) ? 0 : 2;
+
+        return round($converted, $decimals);
+    }
+
+    /**
+     * The same conversion expressed in the gateway's minor units (Stripe).
+     */
+    private function toGatewayMinorUnits(float $baseTotal, float $rate, string $code): int
+    {
+        $converted = $baseTotal * ($rate ?: 1);
+
+        return in_array(strtoupper($code), self::ZERO_DECIMAL_CURRENCIES, true)
+            ? (int) round($converted)
+            : (int) round($converted * 100);
     }
 
     /**
@@ -999,6 +1343,19 @@ class CheckoutController extends BaseController
             }
         } catch (\Throwable $e) {
             Log::warning('Admin new-order notification failed: '.$e->getMessage());
+        }
+
+        // 3) Push to admins' mobile devices (no-op until FCM is configured).
+        try {
+            $adminIds = ($admins ?? collect())->pluck('id')->all();
+            app(\App\Services\FcmService::class)->sendToUsers(
+                $adminIds,
+                __('messages.OnlineOrder').' '.$order->ref,
+                $order->customer_name.' — '.number_format((float) $order->total, 2),
+                ['type' => 'online_order', 'order_id' => $order->id]
+            );
+        } catch (\Throwable $e) {
+            Log::warning('Admin new-order push failed: '.$e->getMessage());
         }
     }
 }

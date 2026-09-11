@@ -76,6 +76,13 @@ const POS_BOOTSTRAP_KEY = 'pos_bootstrap_v1';
 const POS_WAREHOUSE_SNAPSHOTS_KEY = 'pos_warehouse_snapshots_v1';
 const POS_OFFLINE_SALES_KEY = 'pos_offline_sales_v1';
 const POS_PRODUCT_DETAILS_KEY = 'pos_product_details_v1';
+const POS_CART_STATE_KEY = 'pos_cart_state_v1';
+const POS_OFFLINE_DRAFTS_KEY = 'pos_offline_drafts_v1';
+const POS_OFFLINE_CLIENTS_KEY = 'pos_offline_clients_v1';
+
+// Records created offline get string ids with this prefix so they can never
+// collide with (numeric) server ids and are recognizable everywhere.
+const LOCAL_ID_PREFIX = 'local-';
 
 const makeDetailKey = (warehouseId, productId, variantId) => {
   const w = warehouseId != null ? String(warehouseId) : '0';
@@ -116,7 +123,16 @@ const offlinePos = {
       default_tax: data.default_tax,
       products_per_page: data.products_per_page,
       languages_available: data.languages_available || [],
-      stripe_key: data.stripe_key || ''
+      stripe_key: data.stripe_key || '',
+      // Fields the offline-hydrate branch in PosPage reads; without them an
+      // offline reload lost the company/receipt header, POS settings, the
+      // salesperson switcher and the default account/payment method.
+      setting: data.setting || null,
+      pos_settings: data.pos_settings || null,
+      salespeople: data.salespeople || [],
+      enable_pos_salesperson_switch: data.enable_pos_salesperson_switch === true,
+      default_account_id: data.default_account_id != null ? data.default_account_id : null,
+      default_payment_method_id: data.default_payment_method_id != null ? data.default_payment_method_id : null
     });
   },
 
@@ -158,6 +174,27 @@ const offlinePos = {
     const key = makeDetailKey(warehouseId, productId, variantId);
     const current = readJSON(POS_PRODUCT_DETAILS_KEY, {});
     return current[key] || null;
+  },
+
+  // ---- In-progress cart persistence (refresh/crash survival) ----
+  // The whole cart lives in PosPage component state; without this snapshot a
+  // page refresh (deliberate or accidental, online or offline) wiped the sale.
+  saveCartState(state) {
+    if (!state || typeof state !== 'object') return;
+    writeJSON(POS_CART_STATE_KEY, Object.assign({}, state, {
+      savedAt: new Date().toISOString()
+    }));
+  },
+
+  getCartState() {
+    const state = readJSON(POS_CART_STATE_KEY, null);
+    if (!state || typeof state !== 'object') return null;
+    if (!Array.isArray(state.details) || !state.details.length) return null;
+    return state;
+  },
+
+  clearCartState() {
+    writeJSON(POS_CART_STATE_KEY, null);
   },
 
   // ---- Offline sales queue ----
@@ -229,6 +266,16 @@ const offlinePos = {
     }));
   },
 
+  // Release a record back to the queue after a sync attempt that never
+  // reached the server (connection dropped mid-pass). Unlike 'failed', a
+  // 'pending' record is picked up by the next automatic sync pass.
+  markSaleAsPending(id) {
+    this._updateSale(id, () => ({
+      status: 'pending',
+      lastError: null
+    }));
+  },
+
   markSaleAsSynced(id, remoteId) {
     this._updateSale(id, (s) => ({
       status: 'synced',
@@ -251,6 +298,214 @@ const offlinePos = {
     const list = this.getOfflineSales();
     const next = list.filter((s) => !s || s.status !== 'synced');
     writeJSON(POS_OFFLINE_SALES_KEY, next);
+  },
+
+  // A record left in 'syncing' means a sync worker died mid-flight (tab
+  // closed, page refreshed, browser crash). Nothing will ever pick it up
+  // again — the sync loops skip 'syncing' records — so on POS boot we reset
+  // them to 'pending' in every offline queue. Sales resubmit safely (the
+  // payload carries a sale_uuid and the backend short-circuits duplicates);
+  // clients/drafts have no server-side idempotency key, so a crash exactly
+  // between the POST succeeding and the record being cleared can duplicate —
+  // a narrow window accepted for not losing the record entirely.
+  resetStuckSyncingSales() {
+    let changed = false;
+    [POS_OFFLINE_SALES_KEY, POS_OFFLINE_DRAFTS_KEY, POS_OFFLINE_CLIENTS_KEY].forEach((key) => {
+      const list = readJSON(key, []);
+      if (!Array.isArray(list)) return;
+      let keyChanged = false;
+      const next = list.map((s) => {
+        if (s && s.status === 'syncing') {
+          keyChanged = true;
+          return Object.assign({}, s, {
+            status: 'pending',
+            updatedAt: new Date().toISOString()
+          });
+        }
+        return s;
+      });
+      if (keyChanged) {
+        writeJSON(key, next);
+        changed = true;
+      }
+    });
+    return changed;
+  },
+
+  // ---- Local ids ----
+  isLocalId(id) {
+    return typeof id === 'string' && id.indexOf(LOCAL_ID_PREFIX) === 0;
+  },
+
+  // ---- Offline drafts (hold sales created/updated while offline) ----
+  // Record shape: { id, status: pending|syncing|failed, createdAt, updatedAt,
+  //   payload (pos/create_draft body — includes draft_sale_id only when it
+  //   updates an existing SERVER draft), cart (full cart snapshot so the
+  //   draft can be reopened offline), meta {client_name, warehouse_name,
+  //   GrandTotal, date}, lastError }
+  getOfflineDrafts() {
+    const list = readJSON(POS_OFFLINE_DRAFTS_KEY, []);
+    return Array.isArray(list) ? list : [];
+  },
+
+  addOfflineDraft(payload, cart, meta) {
+    const list = this.getOfflineDrafts();
+    const now = new Date().toISOString();
+    const record = {
+      id: LOCAL_ID_PREFIX + 'd-' + generateId(),
+      status: 'pending',
+      createdAt: now,
+      updatedAt: now,
+      lastError: null,
+      payload: payload || {},
+      cart: cart || null,
+      meta: meta || {}
+    };
+    list.push(record);
+    writeJSON(POS_OFFLINE_DRAFTS_KEY, list);
+    return record;
+  },
+
+  updateOfflineDraft(id, payload, cart, meta) {
+    if (!id) return null;
+    const list = this.getOfflineDrafts();
+    let updated = null;
+    const next = list.map((d) => {
+      if (!d || d.id !== id) return d;
+      updated = Object.assign({}, d, {
+        status: 'pending',
+        lastError: null,
+        payload: payload || d.payload,
+        cart: cart !== undefined ? cart : d.cart,
+        meta: meta || d.meta,
+        updatedAt: new Date().toISOString()
+      });
+      return updated;
+    });
+    if (updated) writeJSON(POS_OFFLINE_DRAFTS_KEY, next);
+    return updated;
+  },
+
+  removeOfflineDraft(id) {
+    if (!id) return;
+    const list = this.getOfflineDrafts();
+    writeJSON(POS_OFFLINE_DRAFTS_KEY, list.filter((d) => !d || d.id !== id));
+  },
+
+  markDraftStatus(id, status, message) {
+    if (!id) return;
+    const list = this.getOfflineDrafts();
+    let changed = false;
+    const next = list.map((d) => {
+      if (!d || d.id !== id) return d;
+      changed = true;
+      return Object.assign({}, d, {
+        status,
+        lastError: message ? { message } : null,
+        updatedAt: new Date().toISOString()
+      });
+    });
+    if (changed) writeJSON(POS_OFFLINE_DRAFTS_KEY, next);
+  },
+
+  // ---- Offline clients (quick-add customers created while offline) ----
+  // Record shape: { id, status: pending|syncing|failed, createdAt, updatedAt,
+  //   payload (POST clients body), custom_field_values, lastError }
+  getOfflineClients() {
+    const list = readJSON(POS_OFFLINE_CLIENTS_KEY, []);
+    return Array.isArray(list) ? list : [];
+  },
+
+  addOfflineClient(payload, customFieldValues) {
+    const list = this.getOfflineClients();
+    const now = new Date().toISOString();
+    const record = {
+      id: LOCAL_ID_PREFIX + 'c-' + generateId(),
+      status: 'pending',
+      createdAt: now,
+      updatedAt: now,
+      lastError: null,
+      payload: payload || {},
+      custom_field_values:
+        customFieldValues && Object.keys(customFieldValues).length
+          ? Object.assign({}, customFieldValues)
+          : null
+    };
+    list.push(record);
+    writeJSON(POS_OFFLINE_CLIENTS_KEY, list);
+    return record;
+  },
+
+  removeOfflineClient(id) {
+    if (!id) return;
+    const list = this.getOfflineClients();
+    writeJSON(POS_OFFLINE_CLIENTS_KEY, list.filter((c) => !c || c.id !== id));
+  },
+
+  markClientStatus(id, status, message) {
+    if (!id) return;
+    const list = this.getOfflineClients();
+    let changed = false;
+    const next = list.map((c) => {
+      if (!c || c.id !== id) return c;
+      changed = true;
+      return Object.assign({}, c, {
+        status,
+        lastError: message ? { message } : null,
+        updatedAt: new Date().toISOString()
+      });
+    });
+    if (changed) writeJSON(POS_OFFLINE_CLIENTS_KEY, next);
+  },
+
+  // After an offline client syncs, rewrite every queued record that still
+  // references its temporary local id: queued sales, offline drafts (payload
+  // + reopenable cart), and the persisted in-progress cart.
+  remapLocalClientId(localId, remoteId) {
+    if (!localId || remoteId == null) return;
+    try {
+      const sales = this.getOfflineSales();
+      let changed = false;
+      const nextSales = sales.map((s) => {
+        if (s && s.payload && String(s.payload.client_id) === String(localId)) {
+          changed = true;
+          return Object.assign({}, s, {
+            payload: Object.assign({}, s.payload, { client_id: remoteId }),
+            updatedAt: new Date().toISOString()
+          });
+        }
+        return s;
+      });
+      if (changed) writeJSON(POS_OFFLINE_SALES_KEY, nextSales);
+    } catch (e) {}
+    try {
+      const drafts = this.getOfflineDrafts();
+      let changed = false;
+      const nextDrafts = drafts.map((d) => {
+        if (!d) return d;
+        let rec = d;
+        if (rec.payload && String(rec.payload.client_id) === String(localId)) {
+          rec = Object.assign({}, rec, {
+            payload: Object.assign({}, rec.payload, { client_id: remoteId })
+          });
+        }
+        if (rec.cart && String(rec.cart.selectedClientId) === String(localId)) {
+          rec = Object.assign({}, rec, {
+            cart: Object.assign({}, rec.cart, { selectedClientId: remoteId })
+          });
+        }
+        if (rec !== d) changed = true;
+        return rec;
+      });
+      if (changed) writeJSON(POS_OFFLINE_DRAFTS_KEY, nextDrafts);
+    } catch (e) {}
+    try {
+      const cart = readJSON(POS_CART_STATE_KEY, null);
+      if (cart && String(cart.selectedClientId) === String(localId)) {
+        cart.selectedClientId = remoteId;
+        writeJSON(POS_CART_STATE_KEY, cart);
+      }
+    } catch (e) {}
   },
 
   // ---- Clear cache (for page reload) ----
@@ -335,7 +590,10 @@ const shadowStock = {
         const productId = d.product_id || d.id;
         if (!productId) return;
         const variantId = d.product_variant_id != null ? d.product_variant_id : null;
-        const qty = Number(d.quantity || 0);
+        // Multi-Pack Selling: a pack line consumes quantity × pack_multiplier
+        // stock units — mirror the server-side deduction.
+        const packMultiplier = Number(d.pack_multiplier) > 0 ? Number(d.pack_multiplier) : 1;
+        const qty = Number(d.quantity || 0) * packMultiplier;
         if (!qty || qty <= 0) return;
         const key = makeDetailKey(warehouseId, productId, variantId);
         items.push({

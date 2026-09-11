@@ -44,6 +44,11 @@ class MrpPlanningController extends BaseController
             'horizon_end' => 'nullable|date|after_or_equal:horizon_start',
         ]);
 
+        // A planning run over a warehouse reads that warehouse's stock.
+        if ($request->filled('warehouse_id')) {
+            $this->abortIfWarehouseDenied($request->warehouse_id);
+        }
+
         @ini_set('max_execution_time', '600');
 
         $run = $this->mrp->run([
@@ -70,6 +75,7 @@ class MrpPlanningController extends BaseController
         $offSet = ($pageStart * $perPage) - $perPage;
 
         $query = MrpPlanningRun::query()
+            ->tap(fn ($q) => $this->scopeToWarehouses($q, 'warehouse_id', true))
             ->when($request->filled('warehouse_id'), fn ($q) => $q->where('warehouse_id', $request->warehouse_id));
 
         $totalRows = $query->count();
@@ -385,6 +391,7 @@ class MrpPlanningController extends BaseController
             ->when($request->filled('from'), fn ($q) => $q->whereDate('mrp_production_orders.actual_end', '>=', $request->from))
             ->when($request->filled('to'), fn ($q) => $q->whereDate('mrp_production_orders.actual_end', '<=', $request->to))
             ->when($request->filled('product_id'), fn ($q) => $q->where('mrp_production_orders.product_id', $request->product_id))
+            ->tap(fn ($q) => $this->scopeToWarehouses($q, 'mrp_production_orders.warehouse_id'))
             ->when($request->filled('warehouse_id'), fn ($q) => $q->where('mrp_production_orders.warehouse_id', $request->warehouse_id))
             ->select('mrp_production_orders.*', 'products.name as product_name', 'products.code as product_code')
             ->orderByDesc('mrp_production_orders.actual_end')
@@ -497,6 +504,7 @@ class MrpPlanningController extends BaseController
             ->whereIn('o.status', ['released', 'in_progress', 'completed'])
             ->when($request->filled('from'), fn ($q) => $q->whereDate('o.planned_start', '>=', $request->from))
             ->when($request->filled('to'), fn ($q) => $q->whereDate('o.planned_start', '<=', $request->to))
+            ->tap(fn ($q) => $this->scopeToWarehouses($q, 'o.warehouse_id'))
             ->when($request->filled('warehouse_id'), fn ($q) => $q->where('o.warehouse_id', $request->warehouse_id))
             ->groupBy('p.id', 'p.name', 'p.code')
             ->selectRaw('

@@ -1581,6 +1581,66 @@ class PermissionRoleSeeder extends Seeder
                     'role_id' => 1,
                 ],
 
+                // Products sold summary (per item day report)
+                [
+                    'id' => 297,
+                    'permission_id' => 297,
+                    'role_id' => 1,
+                ],
+
+                // ZATCA e-invoicing (Phase 2) settings
+                [
+                    'id' => 298,
+                    'permission_id' => 298,
+                    'role_id' => 1,
+                ],
+
+                [
+                    'id' => 299,
+                    'permission_id' => 299,
+                    'role_id' => 1,
+                ],
+                [
+                    'id' => 300,
+                    'permission_id' => 300,
+                    'role_id' => 1,
+                ],
+                [
+                    'id' => 301,
+                    'permission_id' => 301,
+                    'role_id' => 1,
+                ],
+                [
+                    'id' => 302,
+                    'permission_id' => 302,
+                    'role_id' => 1,
+                ],
+                [
+                    'id' => 303,
+                    'permission_id' => 303,
+                    'role_id' => 1,
+                ],
+                [
+                    'id' => 304,
+                    'permission_id' => 304,
+                    'role_id' => 1,
+                ],
+                [
+                    'id' => 305,
+                    'permission_id' => 305,
+                    'role_id' => 1,
+                ],
+                [
+                    'id' => 306,
+                    'permission_id' => 306,
+                    'role_id' => 1,
+                ],
+                [
+                    'id' => 307,
+                    'permission_id' => 307,
+                    'role_id' => 1,
+                ],
+
             ]
         );
     }

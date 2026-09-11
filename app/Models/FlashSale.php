@@ -2,19 +2,26 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasTranslations;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class FlashSale extends Model
 {
+    use HasTranslations;
+
+    /** Customer-facing copy that can be translated per locale. */
+    public const TRANSLATABLE = ['name'];
+
     protected $table = 'flash_sales';
 
     protected $fillable = [
-        'name', 'is_active', 'starts_at', 'ends_at', 'sort_order',
+        'name', 'name_translations', 'is_active', 'starts_at', 'ends_at', 'sort_order',
     ];
 
     protected $casts = [
+        'name_translations' => 'array',
         'is_active' => 'boolean',
         'starts_at' => 'datetime',
         'ends_at' => 'datetime',
@@ -27,6 +34,15 @@ class FlashSale extends Model
             ->withPivot(['discount_type', 'discount_value', 'sort_order'])
             ->withTimestamps()
             ->orderBy('flash_sale_product.sort_order');
+    }
+
+    /**
+     * The campaign title in the visitor's language, falling back to `name`
+     * when that locale was left blank in the admin.
+     */
+    public function localizedName(?string $locale = null): string
+    {
+        return (string) $this->localized('name', $locale);
     }
 
     /** Active and within its (optional) start/end window. */

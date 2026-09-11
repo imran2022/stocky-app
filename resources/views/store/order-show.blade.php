@@ -2,10 +2,16 @@
 
 @section('content')
 @php
-  $currency = $s->currency_code ?? '$';
   use App\Models\StoreSetting;
 
   $s = $s ?? StoreSetting::first();
+
+  // Amounts on this page belong to ONE stored order — use its snapshotted currency.
+  $orderCurrency = \App\Services\StoreCurrencyService::forDocument(
+      \App\Models\OnlineOrder::where('client_id', (int) optional(auth('store')->user())->client_id)
+          ->find($id ?? request()->route('id'))
+  );
+  $currency = $orderCurrency['symbol'];
 @endphp
 
 <section class="border-b border-line-subtle"
@@ -109,6 +115,71 @@
           </div>
         </div>
 
+        {{-- Payment: status, how to pay, proof of payment --}}
+        <div class="card hidden" id="o-payment-card">
+          <div class="card-body" id="payment-proof">
+            <div class="flex items-center justify-between gap-2 mb-3">
+              <h6 class="font-semibold m-0">{{ __('messages.Payment') }}</h6>
+              <span class="chip" id="o-payment-status">—</span>
+            </div>
+            <div class="text-sm text-fg-muted mb-3" id="o-payment-method">—</div>
+
+            {{-- Account details to pay to (offline methods) --}}
+            <div id="o-payment-instructions" class="hidden mb-3"></div>
+
+            {{-- What the customer already submitted --}}
+            <div id="o-proof-list" class="space-y-2 mb-3"></div>
+
+            {{-- Upload form --}}
+            <div id="o-proof-form" class="hidden rounded-xl border border-line-subtle p-3">
+              <div class="text-xs font-semibold text-fg-secondary mb-2">{{ __('messages.UploadProofOfPayment') }}</div>
+              <div class="space-y-2">
+                <div>
+                  <label class="form-label text-xs" for="pf-ref">{{ __('messages.ReferenceNumber') }} *</label>
+                  <input type="text" id="pf-ref" class="input" autocomplete="off"
+                         placeholder="{{ __('messages.ReferenceNumberPlaceholder') }}">
+                </div>
+                <div>
+                  <label class="form-label text-xs" for="pf-amount">{{ __('messages.AmountSent') }} *</label>
+                  <input type="number" id="pf-amount" class="input" step="0.01" min="0" placeholder="0.00">
+                </div>
+                <div>
+                  <label class="form-label text-xs" for="pf-date">{{ __('messages.PaymentDate') }}</label>
+                  <input type="date" id="pf-date" class="input">
+                </div>
+                <div>
+                  <label class="form-label text-xs" for="pf-file">{{ __('messages.Screenshot') }} *</label>
+                  <input type="file" id="pf-file" class="input"
+                         accept="image/jpeg,image/png,image/webp,application/pdf">
+                  <p class="text-[11px] text-fg-muted mt-1">{{ __('messages.ProofFileHint') }}</p>
+                </div>
+                <div>
+                  <label class="form-label text-xs" for="pf-note">{{ __('messages.Note') }}</label>
+                  <textarea id="pf-note" class="input" rows="2"></textarea>
+                </div>
+              </div>
+              <div id="pf-error" class="text-danger text-xs mt-2 hidden"></div>
+              <button type="button" id="pf-submit" class="btn btn-primary btn-sm mt-3">
+                <x-store.icon name="send" class="w-4 h-4" />{{ __('messages.Submit') }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {{-- Pickup branch --}}
+        <div class="card hidden" id="o-pickup-card">
+          <div class="card-body">
+            <h6 class="font-semibold mb-2 flex items-center gap-2">
+              <x-store.icon name="map-pin" class="w-4 h-4 text-accent-500" />{{ __('messages.CollectAtBranch') }}
+            </h6>
+            <div class="text-sm font-semibold" id="o-pickup-name">—</div>
+            <div class="text-sm text-fg-muted" id="o-pickup-address"></div>
+            <div class="text-sm text-fg-muted" id="o-pickup-hours"></div>
+            <div class="text-sm text-fg-muted" id="o-pickup-contact"></div>
+            <div class="text-xs text-fg-muted mt-2" id="o-pickup-notes"></div>
+          </div>
+        </div>
+
         <div class="card">
           <div class="card-body">
             <h6 class="font-semibold mb-2">{{ __('messages.StatusHelp') }}</h6>
@@ -164,7 +235,8 @@
 (function(){
   const wrap  = document.getElementById('order-app');
   const id    = wrap?.dataset.orderId;
-  const cur   = document.querySelector('meta[name="currency"]')?.content || '{{ $currency }}';
+  const cur   = @json($orderCurrency['symbol']);
+  const RATE  = {{ (float) $orderCurrency['rate'] }};
   const PRICE_DECIMALS = parseInt(document.querySelector('meta[name="price-decimals"]')?.content, 10) || 2;
 
   const el = {
@@ -181,7 +253,7 @@
     empty:     document.getElementById('o-empty'),
   };
 
-  function money(n){ return cur + Number(n||0).toLocaleString('en-US', { minimumFractionDigits: PRICE_DECIMALS, maximumFractionDigits: PRICE_DECIMALS }); }
+  function money(n){ return cur + (Number(n||0) * RATE).toLocaleString('en-US', { minimumFractionDigits: PRICE_DECIMALS, maximumFractionDigits: PRICE_DECIMALS }); }
   function badgeClass(status){
     status = String(status||'').toLowerCase();
     return status === 'pending'   ? 'chip chip-warning'
@@ -191,10 +263,147 @@
   }
   function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 
+  // ---- Payment / proof of payment ----------------------------------------
+  const PROOF_URL = `{{ url('/'.store_path_to('my/orders')) }}/${id}/payment-proofs`;
+
+  const METHOD_LABELS = {
+    credit_card:    @json(__('messages.CreditCard')),
+    mobile_money:   @json(__('messages.MobileMoney')),
+    cod:            @json(__('messages.CashOnDelivery')),
+    wallet:         @json(__('messages.PayWithWallet')),
+    gcash:          @json(__('messages.GCash')),
+    bank_transfer:  @json(__('messages.BankTransfer')),
+    cash_on_pickup: @json(__('messages.CashOnPickup')),
+    bkash:          'bKash',
+    sslcommerz:     'SSLCommerz'
+  };
+  const PROOF_STATUS = {
+    pending:  { text: @json(__('messages.AwaitingVerification')), cls: 'chip chip-warning' },
+    approved: { text: @json(__('messages.Verified')),             cls: 'chip chip-success' },
+    rejected: { text: @json(__('messages.Rejected')),             cls: 'chip chip-danger' }
+  };
+
+  function renderPayment(o){
+    const card = document.getElementById('o-payment-card');
+    if (!card) return;
+    card.classList.remove('hidden');
+
+    document.getElementById('o-payment-method').textContent =
+      METHOD_LABELS[o.payment_method] || o.payment_method || '—';
+
+    const paid = o.payment_status === 'paid';
+    const badge = document.getElementById('o-payment-status');
+    badge.className   = paid ? 'chip chip-success' : 'chip chip-warning';
+    badge.textContent = paid ? @json(__('messages.Paid')) : @json(__('messages.PaymentPending'));
+
+    // Account details to pay to — only while something is still owed.
+    const insWrap = document.getElementById('o-payment-instructions');
+    const ins = o.payment_instructions;
+    if (ins && !paid) {
+      let html = '';
+      if (ins.instructions) html += `<div class="text-xs text-fg-muted mb-2">${escapeHtml(ins.instructions)}</div>`;
+      (ins.details || []).forEach(d => {
+        html += `<div class="flex justify-between gap-2 text-sm py-1 border-b border-line-subtle last:border-0">
+                   <span class="text-fg-muted">${escapeHtml(d.label)}</span>
+                   <strong class="text-end break-all">${escapeHtml(d.value)}</strong>
+                 </div>`;
+      });
+      if (ins.qr_url) html += `<img src="${escapeHtml(ins.qr_url)}" alt="QR" class="mt-2 rounded-lg border border-line-subtle" style="max-width:160px">`;
+      insWrap.innerHTML = html;
+      insWrap.classList.toggle('hidden', html === '');
+    } else {
+      insWrap.classList.add('hidden');
+      insWrap.innerHTML = '';
+    }
+
+    // Submission history.
+    const listEl = document.getElementById('o-proof-list');
+    const proofs = Array.isArray(o.payment_proofs) ? o.payment_proofs : [];
+    listEl.innerHTML = proofs.map(p => {
+      const st = PROOF_STATUS[p.status] || PROOF_STATUS.pending;
+      const reason = p.status === 'rejected' && p.reject_reason
+        ? `<div class="text-xs text-danger mt-1">${escapeHtml(p.reject_reason)}</div>` : '';
+      const file = p.file_url
+        ? `<a href="${escapeHtml(p.file_url)}" target="_blank" rel="noopener" class="text-xs text-accent-500">${@json(__('messages.ViewFile'))}</a>` : '';
+      return `<div class="rounded-lg border border-line-subtle p-2.5">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-sm font-semibold break-all">${escapeHtml(p.reference_number||'—')}</span>
+                  <span class="${st.cls}">${st.text}</span>
+                </div>
+                <div class="text-xs text-fg-muted mt-1">${money(p.amount)} · ${escapeHtml(p.paid_at||p.submitted_at||'')}</div>
+                ${file}${reason}
+              </div>`;
+    }).join('');
+
+    // Upload form: only for offline methods still awaiting payment, and only
+    // when nothing is already queued for review.
+    const form = document.getElementById('o-proof-form');
+    form.classList.toggle('hidden', !o.can_submit_proof);
+    if (o.can_submit_proof) {
+      const amt = document.getElementById('pf-amount');
+      if (amt && !amt.value) amt.value = Number(o.total || 0).toFixed(PRICE_DECIMALS);
+    }
+  }
+
+  function renderPickup(o){
+    const card = document.getElementById('o-pickup-card');
+    const b = o.pickup_branch;
+    if (!card) return;
+    if (o.delivery_method !== 'pickup' || !b) { card.classList.add('hidden'); return; }
+
+    card.classList.remove('hidden');
+    document.getElementById('o-pickup-name').textContent    = b.name || '—';
+    document.getElementById('o-pickup-address').textContent = b.address || '';
+    document.getElementById('o-pickup-hours').textContent   = b.hours ? (@json(__('messages.PickupHours')) + ': ' + b.hours) : '';
+    document.getElementById('o-pickup-contact').textContent = b.contact ? (@json(__('messages.Phone')) + ': ' + b.contact) : '';
+    document.getElementById('o-pickup-notes').textContent   = b.notes || '';
+  }
+
+  document.getElementById('pf-submit')?.addEventListener('click', async function(){
+    const btn = this;
+    const err = document.getElementById('pf-error');
+    const ref = document.getElementById('pf-ref').value.trim();
+    const amount = Number(document.getElementById('pf-amount').value || 0);
+    const date = document.getElementById('pf-date').value;
+    const note = document.getElementById('pf-note').value.trim();
+    const file = document.getElementById('pf-file').files[0];
+
+    err.classList.add('hidden');
+    if (!ref || !(amount > 0) || !file) {
+      err.textContent = @json(__('messages.ProofIncomplete'));
+      err.classList.remove('hidden');
+      return;
+    }
+
+    const fd = new FormData();
+    fd.append('reference_number', ref);
+    fd.append('amount', amount);
+    if (date) fd.append('paid_at', date);
+    if (note) fd.append('note', note);
+    fd.append('file', file);
+
+    btn.disabled = true;
+    try {
+      const res = await fetch(PROOF_URL, {
+        method: 'POST',
+        headers: { 'Accept': 'application/json', 'X-CSRF-TOKEN': CSRF },
+        body: fd
+      });
+      const data = await res.json();
+      if (!res.ok) throw data;
+      await load();
+    } catch (e) {
+      err.textContent = (e && (e.error || e.message)) || @json(__('messages.CouldNotSubmit'));
+      err.classList.remove('hidden');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
   async function load(){
     if (!id) return showEmpty();
     try{
-      const res = await fetch(`/online_store/my/orders/${id}`, { headers:{'Accept':'application/json'} });
+      const res = await fetch(`{{ url('/'.store_path_to('my/orders')) }}/${id}`, { headers:{'Accept':'application/json'} });
       if (!res.ok) throw new Error('not ok');
       const o = await res.json();
 
@@ -227,6 +436,9 @@
       el.discount.textContent = '-' + money(o.discount||0);
       el.total.textContent    = money(o.total);
 
+      renderPayment(o);
+      renderPickup(o);
+
     } catch(e){
       showEmpty();
     }
@@ -249,7 +461,7 @@
   async function loadReturns(){
     if (!id) return;
     try {
-      const res = await fetch(`/online_store/account/orders/${id}/return-eligibility`, { headers:{'Accept':'application/json'} });
+      const res = await fetch(`{{ url('/'.store_path_to('account/orders')) }}/${id}/return-eligibility`, { headers:{'Accept':'application/json'} });
       if (!res.ok) return;
       const d = await res.json();
       let anything = false;
@@ -284,7 +496,7 @@
     if (!confirm('{{ __("messages.ConfirmCancelOrder") }}')) return;
     btnCancel.disabled = true;
     try {
-      const res = await fetch(`/online_store/account/orders/${id}/cancel`, {
+      const res = await fetch(`{{ url('/'.store_path_to('account/orders')) }}/${id}/cancel`, {
         method:'POST', headers:{'Content-Type':'application/json','Accept':'application/json','X-CSRF-TOKEN':CSRF},
         body: JSON.stringify({})
       });
@@ -308,7 +520,7 @@
     if (!items.length){ alert('{{ __("messages.SelectItemsToReturn") }}'); return; }
     const reason = document.getElementById('o-return-reason').value;
     try {
-      const res = await fetch(`/online_store/account/orders/${id}/return`, {
+      const res = await fetch(`{{ url('/'.store_path_to('account/orders')) }}/${id}/return`, {
         method:'POST', headers:{'Content-Type':'application/json','Accept':'application/json','X-CSRF-TOKEN':CSRF},
         body: JSON.stringify({ items: items, reason: reason })
       });
@@ -340,7 +552,7 @@
   async function loadReviews(){
     if (!id) return;
     try {
-      const res = await fetch(`/online_store/account/orders/${id}/reviewable`, { headers:{'Accept':'application/json'} });
+      const res = await fetch(`{{ url('/'.store_path_to('account/orders')) }}/${id}/reviewable`, { headers:{'Accept':'application/json'} });
       if (!res.ok) return;
       const d = await res.json();
       if (!d.eligible || !Array.isArray(d.items) || !d.items.length) return;
@@ -382,7 +594,7 @@
       if (!rating){ msg.textContent = @json(__('messages.PleaseSelectRating')); msg.className='review-msg text-xs ml-2 text-danger'; return; }
       submitBtn.disabled = true;
       try {
-        var res = await fetch(`/online_store/account/orders/${id}/review`, {
+        var res = await fetch(`{{ url('/'.store_path_to('account/orders')) }}/${id}/review`, {
           method:'POST', headers:{'Content-Type':'application/json','Accept':'application/json','X-CSRF-TOKEN':CSRF},
           body: JSON.stringify({ product_id: pid, rating: rating, comment: comment })
         });

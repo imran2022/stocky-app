@@ -29,9 +29,11 @@ class TaxRate extends Model
             return null;
         }
 
-        $rows = static::where('active', true)
-            ->whereRaw('LOWER(TRIM(country)) = ?', [mb_strtolower(trim($country))])
-            ->get();
+        // Match on the normalized country code so a rule saved as
+        // "México" still applies to an address that says "Mexico".
+        $rows = static::where('active', true)->get()
+            ->filter(fn ($r) => \App\Services\CountryService::sameCountry($r->country, $country))
+            ->values();
 
         if ($rows->isEmpty()) {
             return null;

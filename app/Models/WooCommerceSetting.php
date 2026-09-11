@@ -14,6 +14,7 @@ class WooCommerceSetting extends Model
         'consumer_secret',
         'wp_username',
         'wp_app_password',
+        'sync_options',
         'enable_auto_sync',
         'sync_interval',
         'last_sync_at',
@@ -22,5 +23,8 @@ class WooCommerceSetting extends Model
     protected $casts = [
         'enable_auto_sync' => 'boolean',
         'last_sync_at' => 'datetime',
+        // Sync tuning knobs (batch sizes, timeouts, retries, lookup caps).
+        // Read through App\Services\WooCommerce\SyncOptions, never directly.
+        'sync_options' => 'array',
     ];
 }

@@ -92,6 +92,9 @@
             {{ statusKey(PURCHASE_STATUSES, record.statut) ? $t(statusKey(PURCHASE_STATUSES, record.statut)) : record.statut }}
           </a-tag>
         </template>
+        <template v-else-if="column.key === 'currency_code'">
+          <a-tag v-if="record.currency_code" color="blue">{{ record.currency_code }}</a-tag>
+        </template>
         <template v-else-if="column.key === 'GrandTotal'">{{ money(record.GrandTotal) }}</template>
         <template v-else-if="column.key === 'paid_amount'">{{ money(record.paid_amount) }}</template>
         <template v-else-if="column.key === 'due'">
@@ -413,6 +416,11 @@ const columns = computed(() => [
   { title: t('Supplier'), dataIndex: 'provider_name', key: 'provider_name', sorter: true },
   { title: t('warehouse'), dataIndex: 'warehouse_name', key: 'warehouse_name', sorter: true },
   { title: t('Status'), dataIndex: 'statut', key: 'statut', sorter: true, exportValue: r => r.statut },
+  // Multi-Currency: badge with the document's currency code (amounts in the
+  // list stay base-currency). Hidden when the module is off.
+  ...(auth.multiCurrencyEnabled
+    ? [{ title: t('Currency'), dataIndex: 'currency_code', key: 'currency_code', width: 90, align: 'center', exportValue: r => r.currency_code || '' }]
+    : []),
   { title: t('Total'), dataIndex: 'GrandTotal', key: 'GrandTotal', sorter: true, align: 'right', exportValue: r => money(r.GrandTotal) },
   { title: t('Paid'), dataIndex: 'paid_amount', key: 'paid_amount', sorter: true, align: 'right', exportValue: r => money(r.paid_amount) },
   { title: t('Due'), dataIndex: 'due', key: 'due', align: 'right', exportValue: r => money(r.due) },

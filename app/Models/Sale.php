@@ -10,7 +10,7 @@ class Sale extends Model
 
     protected $fillable = [
         'date', 'Ref', 'is_pos', 'client_id', 'GrandTotal', 'qte_retturn', 'TaxNet', 'tax_rate', 'notes',
-        'total_retturn', 'warehouse_id', 'user_id', 'statut', 'discount', 'discount_Method', 'shipping', 'time', 'used_points', 'earned_points', 'discount_from_points',
+        'total_retturn', 'warehouse_id', 'user_id', 'seller_id', 'statut', 'discount', 'discount_Method', 'shipping', 'time', 'used_points', 'earned_points', 'discount_from_points',
         'paid_amount', 'payment_statut', 'created_at', 'updated_at', 'deleted_at', 'shipping_status', 'subscription_id', 'sales_agent_id',
         // Courier / delivery tracking
         'tracking_ref', 'zone_id', 'courier_id', 'consignment_id',
@@ -23,6 +23,8 @@ class Sale extends Model
         'quickbooks_realm_id',
         'quickbooks_synced_at',
         'quickbooks_sync_error',
+        // Multi-Currency snapshot; NULL = base currency, rate 1
+        'currency_id', 'exchange_rate',
     ];
 
     protected $casts = [
@@ -31,6 +33,7 @@ class Sale extends Model
         'qte_retturn' => 'double',
         'total_retturn' => 'double',
         'user_id' => 'integer',
+        'seller_id' => 'integer',
         'client_id' => 'integer',
         'warehouse_id' => 'integer',
         'sales_agent_id' => 'integer',
@@ -47,7 +50,14 @@ class Sale extends Model
         'discount_from_points' => 'double',
         'quickbooks_synced_at' => 'datetime',
         'woocommerce_order_id' => 'integer',
+        'currency_id' => 'integer',
+        'exchange_rate' => 'float',
     ];
+
+    public function currency()
+    {
+        return $this->belongsTo('App\Models\Currency');
+    }
 
     public function subscription()
     {
@@ -57,6 +67,16 @@ class Sale extends Model
     public function user()
     {
         return $this->belongsTo('App\Models\User');
+    }
+
+    /**
+     * Salesperson the sale is credited to (Change Salesperson at POS checkout).
+     * NULL means the credit belongs to the cashier (`user`), so readers should
+     * fall back: $sale->seller ?? $sale->user.
+     */
+    public function seller()
+    {
+        return $this->belongsTo('App\Models\User', 'seller_id');
     }
 
     public function details()

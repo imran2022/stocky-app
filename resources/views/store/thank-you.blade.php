@@ -2,10 +2,14 @@
 
 @section('content')
 @php
-  $currency = $s->currency_code ?? '$';
+  $currency = store_currency()['symbol'];
   use App\Models\StoreSetting;
 
   $s = $s ?? StoreSetting::first();
+
+  // Offline methods: repeat the account details here so the shopper can pay
+  // straight after ordering, and point them at the proof upload.
+  $manualMethods = \App\Services\StorePaymentMethodService::enabled($s);
 @endphp
 
 <section class="border-b border-line-subtle"
@@ -56,6 +60,32 @@
             </div>
           </div>
 
+          {{-- Offline payment: how to pay + where to send the proof --}}
+          @foreach($manualMethods as $code => $m)
+            @if($m['requires_proof'])
+            <div class="hidden ty-pay-block rounded-xl border border-line-subtle p-4 mb-4" data-method="{{ $code }}">
+              <div class="font-semibold text-sm mb-2 flex items-center gap-2">
+                <x-store.icon name="info" class="w-4 h-4 text-accent-500" />
+                {{ __('messages.HowToPayWith', ['method' => $m['label']]) }}
+              </div>
+              @include('store.partials.manual-payment-details', ['method' => $m])
+              <a href="#" class="btn btn-primary btn-sm ty-proof-link">
+                <x-store.icon name="camera" class="w-4 h-4" />{{ __('messages.UploadProofOfPayment') }}
+              </a>
+            </div>
+            @endif
+          @endforeach
+
+          {{-- Pickup: where to collect --}}
+          <div id="ty-pickup-block" class="hidden rounded-xl border border-line-subtle p-4 mb-4">
+            <div class="font-semibold text-sm mb-1 flex items-center gap-2">
+              <x-store.icon name="map-pin" class="w-4 h-4 text-accent-500" />{{ __('messages.CollectAtBranch') }}
+            </div>
+            <div class="text-sm" id="ty-pickup-name"></div>
+            <div class="text-xs text-fg-muted" id="ty-pickup-address"></div>
+            <div class="text-xs text-fg-muted" id="ty-pickup-hours"></div>
+          </div>
+
           <div class="space-y-2">
             <div class="flex justify-between text-sm text-fg-muted">
               <span>{{ __('messages.Subtotal') }}</span>
@@ -94,8 +124,9 @@
 (function(){
   const CURRENCY = document.querySelector('meta[name="currency"]')?.content || @json($currency);
   const PRICE_DECIMALS = parseInt(document.querySelector('meta[name="price-decimals"]')?.content, 10) || 2;
+  const CURRENCY_RATE = parseFloat(document.querySelector('meta[name="currency-rate"]')?.content) || 1;
   const NOIMG    = @json(asset('images/products/no-image.png'));
-  const fmt = v => CURRENCY + Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: PRICE_DECIMALS, maximumFractionDigits: PRICE_DECIMALS });
+  const fmt = v => CURRENCY + (Number(v || 0) * CURRENCY_RATE).toLocaleString('en-US', { minimumFractionDigits: PRICE_DECIMALS, maximumFractionDigits: PRICE_DECIMALS });
   function esc(s){ return String(s || '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 
   const empty   = document.getElementById('ty-empty');
@@ -113,7 +144,7 @@
   // Landing here from a captured/verified gateway payment (PayPal, Paystack,
   // Flutterwave): the receipt was pending before the redirect — reflect paid.
   const gwQuery = new URLSearchParams(window.location.search);
-  if (rec && ['paypal', 'paystack', 'flutterwave', 'razorpay'].some(g => gwQuery.get(g) === 'paid')) {
+  if (rec && ['paypal', 'paystack', 'flutterwave', 'razorpay', 'bkash', 'sslcommerz'].some(g => gwQuery.get(g) === 'paid')) {
     rec.payment_status = 'paid';
     try { localStorage.setItem('shop.last_order', JSON.stringify(rec)); } catch(e){}
     try { localStorage.removeItem('shop.cart.backup'); } catch(e){}
@@ -159,9 +190,12 @@
   if (rec.payment_method && paymentInfo) {
     paymentInfo.classList.remove('hidden');
     const methodMap = {
-      credit_card:  { icon: '💳', label: @json(__('messages.CreditCard')) },
-      mobile_money: { icon: '📱', label: @json(__('messages.MobileMoney')) },
-      cod:          { icon: '💵', label: @json(__('messages.CashOnDelivery')) }
+      credit_card:    { icon: '💳', label: @json(__('messages.CreditCard')) },
+      mobile_money:   { icon: '📱', label: @json(__('messages.MobileMoney')) },
+      cod:            { icon: '💵', label: @json(__('messages.CashOnDelivery')) },
+      gcash:          { icon: '📲', label: @json(__('messages.GCash')) },
+      bank_transfer:  { icon: '🏦', label: @json(__('messages.BankTransfer')) },
+      cash_on_pickup: { icon: '🏬', label: @json(__('messages.CashOnPickup')) }
     };
     const pm = methodMap[rec.payment_method] || { icon: '💰', label: rec.payment_method };
     paymentIcon.textContent  = pm.icon;
@@ -175,6 +209,35 @@
     paymentStat.textContent = ps.text;
     paymentStat.className   = 'text-xs ' + ps.cls;
   }
+
+  // Offline methods: reveal the matching pay-now block and point the upload
+  // link at this order. Pickup: fetch the branch the shopper chose.
+  (function offlineExtras(){
+    const ORDER_URL_BASE = @json(url('/'.store_path_to('account/orders')));
+    const MY_ORDER_BASE  = @json(url('/'.store_path_to('my/orders')));
+
+    const block = document.querySelector('.ty-pay-block[data-method="'+ rec.payment_method +'"]');
+    if (block) {
+      block.classList.remove('hidden');
+      const link = block.querySelector('.ty-proof-link');
+      if (link && rec.order_id) link.href = ORDER_URL_BASE + '/' + rec.order_id + '#payment-proof';
+    }
+
+    if (rec.payment_method !== 'cash_on_pickup' || !rec.order_id) return;
+
+    fetch(MY_ORDER_BASE + '/' + rec.order_id, { headers: { 'Accept': 'application/json' } })
+      .then(r => r.ok ? r.json() : null)
+      .then(o => {
+        const b = o && o.pickup_branch;
+        if (!b) return;
+        document.getElementById('ty-pickup-block').classList.remove('hidden');
+        document.getElementById('ty-pickup-name').textContent = b.name || '';
+        document.getElementById('ty-pickup-address').textContent = b.address || '';
+        document.getElementById('ty-pickup-hours').textContent = b.hours
+          ? (@json(__('messages.PickupHours')) + ': ' + b.hours) : '';
+      })
+      .catch(() => {});
+  })();
 
   printBtn?.addEventListener('click', () => window.print());
 })();

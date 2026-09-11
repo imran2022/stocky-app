@@ -172,7 +172,7 @@ class PaymentSalesController extends BaseController
 
         $clients = Client::where('deleted_at', '=', null)->get(['id', 'name']);
         $sales = Sale::get(['Ref', 'id']);
-        $payment_methods = PaymentMethod::where('deleted_at', '=', null)->get(['id', 'name']);
+        $payment_methods = PaymentMethod::active()->where('deleted_at', '=', null)->get(['id', 'name']);
 
         $methodNames = $payment_methods->pluck('name', 'id');
         $method_breakdown = $methodRows->map(function ($r) use ($methodNames) {
@@ -211,6 +211,10 @@ class PaymentSalesController extends BaseController
             $sale = Sale::findOrFail($request['sale_id']);
 
             // Check If User Has Permission view All Records
+            // Warehouse half of the same rule: record_view says whose documents,
+            // the assigned warehouses say which warehouses they may come from.
+            $this->abortIfDocumentWarehouseDenied($sale);
+
             if (! $view_records) {
                 // Check If User->id === sale->id
                 $this->authorizeForUser($request->user('api'), 'check_record', $sale);
@@ -328,6 +332,10 @@ class PaymentSalesController extends BaseController
             $payment = PaymentSale::findOrFail($id);
 
             // Check If User Has Permission view All Records
+            // Warehouse half of the same rule: record_view says whose documents,
+            // the assigned warehouses say which warehouses they may come from.
+            $this->abortIfDocumentWarehouseDenied($payment);
+
             if (! $view_records) {
                 // Check If User->id === payment->id
                 $this->authorizeForUser($request->user('api'), 'check_record', $payment);
@@ -410,6 +418,10 @@ class PaymentSalesController extends BaseController
             $payment = PaymentSale::findOrFail($id);
 
             // Check If User Has Permission view All Records
+            // Warehouse half of the same rule: record_view says whose documents,
+            // the assigned warehouses say which warehouses they may come from.
+            $this->abortIfDocumentWarehouseDenied($payment);
+
             if (! $view_records) {
                 // Check If User->id === payment->id
                 $this->authorizeForUser($request->user('api'), 'check_record', $payment);

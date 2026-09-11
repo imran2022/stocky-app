@@ -156,6 +156,7 @@ const year = computed(() => new Date().getFullYear());
 const version = document.querySelector('meta[name="app-version"]')?.getAttribute('content') || '';
 
 async function logout() {
+  try { window.localStorage.removeItem('stocky_auth_cache_v1'); } catch (e) {}
   try {
     await fetch('/logout', {
       method: 'POST',
@@ -355,9 +356,15 @@ async function logout() {
   position: fixed !important;
   left: 0;
   top: 0;
-  bottom: 0;
   z-index: 200;
+  /* dvh, not vh: on mobile 100vh is the LARGE viewport (toolbars retracted),
+     so while the URL/bottom bar is showing the sider's bottom — and with it
+     the bottom of the scrolling menu — sits under the browser chrome and the
+     last group (Reports) can't be scrolled into view. `bottom: 0` was no help:
+     top + bottom + height is over-constrained, so height wins and bottom is
+     ignored. vh first as the fallback for browsers without dvh. */
   height: 100vh;
+  height: 100dvh;
   transform: translateX(-100%);
   transition: transform 0.25s ease;
   box-shadow: 2px 0 16px rgba(0, 0, 0, 0.25);

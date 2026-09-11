@@ -2,6 +2,17 @@
   <div class="page">
     <PageHeader :title="$t('E_Wallet_Dashboard')" :breadcrumb="[$t('E_Wallet'), $t('E_Wallet_Dashboard')]" />
 
+    <a-alert
+      v-if="!isLoading && !walletMethodExists"
+      type="warning" show-icon style="margin-bottom: 16px"
+      :message="$t('Wallet_Payment_Method_Missing')"
+    >
+      <template #description>
+        {{ $t('Wallet_Payment_Method_Missing_Help') }}
+        <router-link to="/settings/payment-methods">{{ $t('Payment_Methods') }}</router-link>
+      </template>
+    </a-alert>
+
     <div v-if="isLoading" style="display: flex; justify-content: center; padding: 96px 0">
       <a-spin size="large" />
     </div>
@@ -216,6 +227,9 @@ const { t } = useI18n();
 const isLoading = ref(true);
 const activeTab = ref('overview');
 const currency = ref('');
+// POS spends wallets through the payment method named "Wallet" — warn when
+// it is missing (e.g. renamed back after the id-8 collision).
+const walletMethodExists = ref(true);
 const stats = ref({
   total_wallets: 0, active_wallets: 0, in_circulation: 0, total_credits: 0,
   total_debits: 0, pending_withdrawals: 0, pending_amount: 0, total_withdrawn: 0,
@@ -276,6 +290,7 @@ function wdColor(s) {
 async function loadDashboard() {
   try {
     const r = await http.get('store/wallet/dashboard');
+    walletMethodExists.value = r.wallet_payment_method_exists !== false;
     currency.value = r.currency || '';
     stats.value = r.stats || stats.value;
     topWallets.value = r.top_wallets || [];

@@ -25,11 +25,20 @@ class SubscriptionController extends BaseController
         $order = $request->SortField;
         $dir = $request->SortType;
 
-        $subscription_data = Subscription::where(function ($query) use ($request) {
-            return $query->when($request->filled('search'), function ($query) use ($request) {
-                return $query->where('name', 'LIKE', "%{$request->search}%");
+        $subscription_data = Subscription::with(['client', 'product', 'warehouse'])
+            ->whereNull('deleted_at')
+            ->where(function ($query) use ($request) {
+                return $query->when($request->filled('search'), function ($query) use ($request) {
+                    return $query->whereHas('client', function ($q) use ($request) {
+                        $q->where('name', 'LIKE', "%{$request->search}%");
+                    })->orWhereHas('product', function ($q) use ($request) {
+                        $q->where('name', 'LIKE', "%{$request->search}%");
+                    });
+                });
+            })
+            ->when($request->filled('status'), function ($query) use ($request) {
+                return $query->where('status', $request->status);
             });
-        });
 
         $totalRows = $subscription_data->count();
         if ($perPage == '-1') {
@@ -49,7 +58,12 @@ class SubscriptionController extends BaseController
             $item['warehouse_name'] = $subscription['warehouse'] ? $subscription['warehouse']->name : '---';
             $item['billing_cycle'] = $subscription->billing_cycle;
             $item['total_cycles'] = $subscription->total_cycles.' '.$subscription->cycle_type;
-            $item['price'] = $subscription->price;
+            $item['price'] = $subscription->price_per_cycle;
+            $item['price_per_cycle'] = $subscription->price_per_cycle;
+            $item['price_per_unit'] = $subscription->price_per_unit;
+            $item['quantity'] = $subscription->quantity;
+            $item['cycle_type'] = $subscription->cycle_type;
+            $item['total_cycles_count'] = $subscription->total_cycles;
             $item['remaining_cycles'] = $subscription->remaining_cycles;
             $item['next_billing_date'] = $subscription->next_billing_date;
             $item['status'] = $subscription->status;
@@ -169,16 +183,27 @@ class SubscriptionController extends BaseController
 
         $this->authorizeForUser($request->user('api'), 'view', Subscription::class);
 
-        $subscription = Subscription::with(['client', 'product', 'warehouse', 'invoices'])->findOrFail($id);
+        $subscription = Subscription::with(['client', 'product', 'warehouse', 'invoices'])
+            ->whereNull('deleted_at')->findOrFail($id);
 
         return response()->json([
             'subscription' => [
                 'id' => $subscription->id,
-                'client' => $subscription->client->name,
-                'product' => $subscription->product->name,
-                'warehouse' => $subscription->warehouse->name,
+                'date' => $subscription->date,
+                'client' => optional($subscription->client)->name,
+                'client_id' => $subscription->client_id,
+                'product' => optional($subscription->product)->name,
+                'product_id' => $subscription->product_id,
+                'warehouse' => optional($subscription->warehouse)->name,
+                'warehouse_id' => $subscription->warehouse_id,
                 'billing_cycle' => $subscription->billing_cycle,
+                'cycle_type' => $subscription->cycle_type,
+                'total_cycles' => $subscription->total_cycles,
+                'remaining_cycles' => $subscription->remaining_cycles,
                 'price_per_cycle' => number_format($subscription->price_per_cycle, 2, '.', ','),
+                'price_per_cycle_raw' => $subscription->price_per_cycle,
+                'price_per_unit' => $subscription->price_per_unit,
+                'quantity' => $subscription->quantity,
                 'next_billing_date' => $subscription->next_billing_date,
                 'status' => $subscription->status,
             ],
@@ -223,6 +248,8 @@ class SubscriptionController extends BaseController
 
     public function updateStatus(Request $request, $id)
     {
+        $this->authorizeForUser($request->user('api'), 'update', Subscription::class);
+
         $request->validate([
             'status' => 'required|in:active,canceled,completed',
         ]);

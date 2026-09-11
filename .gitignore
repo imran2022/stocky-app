@@ -4,6 +4,7 @@
 /public/hot
 /public/js/bundle
 /public/js/main.js
+/public/images/vendor
 /public/storage
 /storage/*.key
 /storage/framework/cache/
@@ -14,6 +15,7 @@
 !/storage/app/public/.gitignore
 /.env
 /.env.*
+.env.backup
 /database/database.sqlite
 /composer.phar
 /documentation.zip

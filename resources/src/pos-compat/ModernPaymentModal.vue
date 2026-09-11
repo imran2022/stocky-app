@@ -98,6 +98,26 @@
             <form @submit.prevent="submitPayment" class="enhanced-form">
               <!-- Payment Methods header removed as requested -->
 
+              <!-- Kitchen routing (only when the Kitchen Display feature is enabled) —
+                   placed above the payment lines so the routing choice is made first -->
+              <div class="form-group" v-if="kitchenEnabled">
+                <label class="field-label">{{ $t('KitchenRouting') || 'Kitchen' }}</label>
+                <div class="kitchen-routing">
+                  <label class="kitchen-routing-option" :class="{ active: kitchenAction === 'send' }">
+                    <input type="radio" value="send" v-model="kitchenAction" />
+                    {{ $t('SendToKitchen') || 'Send to Kitchen' }}
+                  </label>
+                  <label class="kitchen-routing-option" :class="{ active: kitchenAction === 'none' }">
+                    <input type="radio" value="none" v-model="kitchenAction" />
+                    {{ $t('SaveWithoutSending') || 'Save Without Sending' }}
+                  </label>
+                  <label class="kitchen-routing-option" :class="{ active: kitchenAction === 'later' }">
+                    <input type="radio" value="later" v-model="kitchenAction" />
+                    {{ $t('SendLater') || 'Send Later' }}
+                  </label>
+                </div>
+              </div>
+
               <!-- Multi Payment Lines with Right Vertical Quick Amounts -->
               <div class="form-group">
                 <div class="payment-lines-layout">
@@ -171,9 +191,10 @@
                       </div>
                       <!-- Wallet balance hint -->
                       <div class="form-group" v-if="isLineWallet(p)">
-                        <small :class="walletBalance != null && Number(p.amount) > Number(walletBalance) ? 'text-danger' : 'text-muted'">
+                        <!-- Wallet balances are base-currency; compare/display converted -->
+                        <small :class="walletBalance != null && Number(p.amount) > Number(walletBalance) * docRate ? 'text-danger' : 'text-muted'">
                           {{ $t('WalletBalance') }}:
-                          {{ walletBalance != null ? Number(walletBalance).toFixed(priceDecimals) : '—' }}
+                          {{ walletBalance != null ? (Number(walletBalance) * docRate).toFixed(priceDecimals) : '—' }}
                         </small>
                       </div>
                       <!-- Per-line Credit Card Section -->
@@ -238,25 +259,6 @@
                 </div>
               </div>
 
-              <!-- Kitchen routing (only when the Kitchen Display feature is enabled) -->
-              <div class="form-group" v-if="kitchenEnabled">
-                <label class="field-label">{{ $t('KitchenRouting') || 'Kitchen' }}</label>
-                <div class="kitchen-routing">
-                  <label class="kitchen-routing-option" :class="{ active: kitchenAction === 'send' }">
-                    <input type="radio" value="send" v-model="kitchenAction" />
-                    {{ $t('SendToKitchen') || 'Send to Kitchen' }}
-                  </label>
-                  <label class="kitchen-routing-option" :class="{ active: kitchenAction === 'none' }">
-                    <input type="radio" value="none" v-model="kitchenAction" />
-                    {{ $t('SaveWithoutSending') || 'Save Without Sending' }}
-                  </label>
-                  <label class="kitchen-routing-option" :class="{ active: kitchenAction === 'later' }">
-                    <input type="radio" value="later" v-model="kitchenAction" />
-                    {{ $t('SendLater') || 'Send Later' }}
-                  </label>
-                </div>
-              </div>
-
               <!-- Email/SMS (hidden in offline mode) -->
               <div class="form-group" v-if="isOnline">
                 <div class="checkboxes-group">
@@ -318,6 +320,7 @@ import { posCompatComponents } from "./components";
 import Util from "./util";
 import { getPriceDecimals } from "./priceFormat";
 import { receiptFontHeadTags, whenPrintFontsReady } from "../lib/receiptFont";
+import { useAuthStore } from "../stores/auth";
 export default {
   components: { ...posCompatComponents },
   name: 'ModernPaymentModal',
@@ -326,8 +329,17 @@ export default {
     accounts: { type: Array, default: () => [] },
     savedPaymentMethods: { type: Array, default: () => [] },
     currency: { type: String, default: '$' },
+    // Multi-Currency: rate of the POS-selected currency per 1 base unit and
+    // its id. The modal operates in that currency (amountDue, typed tender,
+    // quick amounts); the payload converts back to base at submit. Rate 1 /
+    // null id = base currency, exact legacy behavior.
+    currencyRate: { type: Number, default: 1 },
+    currencyId: { type: [Number, String], default: null },
     // Data required to submit payment like in old POS logic
     clientId: { type: [Number, String], default: null },
+    // Change Salesperson During Checkout: user id the sale is attributed to
+    // (null when the feature is off — the backend then uses the cashier).
+    sellerId: { type: [Number, String], default: null },
     warehouseId: { type: [Number, String], default: null },
     sale: { type: Object, default: () => ({}) },
     details: { type: Array, default: () => [] },
@@ -397,9 +409,18 @@ export default {
     priceDecimals() {
       return getPriceDecimals({ store: this.$store });
     },
+    // Multi-Currency: sanitized rate (1 = base currency).
+    docRate() {
+      const r = Number(this.currencyRate);
+      return Number.isFinite(r) && r > 0 ? r : 1;
+    },
+    // The grand total in the POS-selected currency — the modal's working unit.
+    docGrandTotal() {
+      return (Number(this.grandTotal) || 0) * this.docRate;
+    },
     // Whether the Kitchen Display feature is enabled (system setting, exposed via auth store).
     kitchenEnabled() {
-      const user = this.$store && this.$store.getters && this.$store.getters.currentUser;
+      const user = useAuthStore().user;
       return !!(user && user.enable_kitchen_display);
     },
     totalPaid() {
@@ -486,8 +507,9 @@ export default {
       return this.isCreditCardMethod(pm);
     },
     isWalletMethod(method) {
+      // Match by name only — id 8 can belong to a different method (e.g. Wave).
       if (!method) return false;
-      return String(method.id) === '8' || (method.name && method.name.trim().toLowerCase() === 'wallet');
+      return !!(method.name && method.name.trim().toLowerCase() === 'wallet');
     },
     isLineWallet(line) {
       if (!line) return false;
@@ -914,6 +936,7 @@ export default {
 
         const payload = {
           client_id: this.clientId,
+          seller_id: this.sellerId || undefined,
           warehouse_id: this.warehouseId,
           tax_rate: this.sale && this.sale.tax_rate ? this.sale.tax_rate : 0,
           TaxNet: this.sale && this.sale.TaxNet ? this.sale.TaxNet : 0,
@@ -924,10 +947,14 @@ export default {
             : '2',
           shipping: this.sale && this.sale.shipping ? this.sale.shipping : 0,
           details: this.details,
-          GrandTotal: this.grandTotal || this.paymentForm.amountDue || this.totalPaid,
-          // Multi-payment array with optional per-line account and saved card
+          GrandTotal: this.grandTotal || (this.paymentForm.amountDue / this.docRate) || (this.totalPaid / this.docRate),
+          // Multi-Currency snapshot (nulls when base — server treats as base)
+          currency_id: this.currencyId || null,
+          exchange_rate: this.currencyId ? this.docRate : null,
+          // Multi-payment array with optional per-line account and saved card.
+          // Tender is typed in the POS-selected currency; the server stores base.
           payments: (this.paymentLines || []).map((l) => ({
-            amount: Number(l.amount) || 0,
+            amount: (Number(l.amount) || 0) / this.docRate,
             payment_method_id: l.paymentMethodId,
             account_id: l.accountId || this.paymentForm.accountId || null
           })),
@@ -940,7 +967,11 @@ export default {
           card_tokens_by_line: tokensByLine,
           discount_from_points: this.discountFromPoints || 0,
           used_points: this.usedPoints || 0,
-          draft_sale_id: this.draftSaleId || null,
+          // Offline-held (local) draft ids never go to the server; the parent
+          // deletes the local record on payment-success.
+          draft_sale_id: (this.draftSaleId && !(Util && Util.offlinePos && Util.offlinePos.isLocalId && Util.offlinePos.isLocalId(this.draftSaleId)))
+            ? this.draftSaleId
+            : null,
           sale_uuid: saleUuid || null
         };
 
@@ -1009,20 +1040,24 @@ export default {
       // Credit Limit Validation (0 means no limit)
       // Only applies when this sale is adding new credit (paid amount < sale total)
       if (this.clientId && Number(this.clientCreditLimit || 0) > 0 && total < due) {
+        // Credit limits live in the base currency — convert the doc-currency
+        // shortfall before comparing.
         const currentDue = parseFloat(this.clientNetBalance || 0);
-        const newSaleDue = due - total; // Remaining due from this sale
+        const newSaleDue = (due - total) / this.docRate; // Remaining due from this sale
         const newTotalDue = currentDue + newSaleDue;
 
         if (newTotalDue > Number(this.clientCreditLimit)) {
           if (typeof NProgress !== 'undefined') NProgress.done();
           const exceededAmount = newTotalDue - Number(this.clientCreditLimit);
           const t = this.$t ? this.$t.bind(this) : (k => k);
+          // Credit limits are base-currency values; convert for display since
+          // formatCurrency renders with the POS-selected currency symbol.
           this.makeToast(
             'danger',
             t('Credit_Limit_Exceeded') + ': ' +
-              this.formatCurrency(exceededAmount) + ' ' +
+              this.formatCurrency(exceededAmount * this.docRate) + ' ' +
               t('exceeds_credit_limit_of') + ' ' +
-              this.formatCurrency(this.clientCreditLimit),
+              this.formatCurrency(Number(this.clientCreditLimit) * this.docRate),
             this.$t ? this.$t('Warning') : 'Warning'
           );
           return;
@@ -1041,6 +1076,7 @@ export default {
 
         return {
           client_id: this.clientId,
+          seller_id: this.sellerId || undefined,
           warehouse_id: this.warehouseId,
           tax_rate: this.sale && this.sale.tax_rate ? this.sale.tax_rate : 0,
           TaxNet: this.sale && this.sale.TaxNet ? this.sale.TaxNet : 0,
@@ -1052,10 +1088,14 @@ export default {
           shipping: this.sale && this.sale.shipping ? this.sale.shipping : 0,
           notes: this.saleNote || (this.sale && this.sale.notes) || '',
           details: normalizedDetails,
-          GrandTotal: this.grandTotal || this.paymentForm.amountDue || total,
-          // Multi-payment array including per-line account (no global)
+          GrandTotal: this.grandTotal || (this.paymentForm.amountDue / this.docRate) || (total / this.docRate),
+          // Multi-Currency snapshot (nulls when base — server treats as base)
+          currency_id: this.currencyId || null,
+          exchange_rate: this.currencyId ? this.docRate : null,
+          // Multi-payment array including per-line account (no global).
+          // Tender is typed in the POS-selected currency; the server stores base.
           payments: (this.paymentLines || []).map((l) => ({
-            amount: Number(l.amount) || 0,
+            amount: (Number(l.amount) || 0) / this.docRate,
             payment_method_id: l.paymentMethodId,
             account_id: l.accountId || null
           })),
@@ -1065,7 +1105,11 @@ export default {
           payment_note: this.paymentNote || '',
           discount_from_points: this.discountFromPoints || 0,
           used_points: this.usedPoints || 0,
-          draft_sale_id: this.draftSaleId || null,
+          // Offline-held (local) draft ids never go to the server; the parent
+          // deletes the local record on payment-success.
+          draft_sale_id: (this.draftSaleId && !(Util && Util.offlinePos && Util.offlinePos.isLocalId && Util.offlinePos.isLocalId(this.draftSaleId)))
+            ? this.draftSaleId
+            : null,
           sale_uuid: saleUuid || null,
           // Kitchen routing: only 'send' creates a kitchen ticket on the server (and only
           // when the feature is enabled). 'none' / 'later' leave the sales flow untouched.
@@ -1074,12 +1118,31 @@ export default {
       };
 
       // Prefer explicit POS online state from parent; fall back to navigator.
-      const isOnline = this.isOnline !== false
+      let isOnline = this.isOnline !== false
         ? true
         : ((typeof window === 'undefined' || !window.navigator)
             ? true
             : window.navigator.onLine !== false);
       const usingCard = this.anyCreditCardUsed;
+
+      // A customer created offline only exists locally until the sync pushes
+      // it; the server would reject its temporary id. Treat such sales as
+      // offline (queue them) even when the connection is back — the sync
+      // remaps the client id and submits them in order.
+      const clientIsLocal = !!(Util && Util.offlinePos && Util.offlinePos.isLocalId && Util.offlinePos.isLocalId(this.clientId));
+      if (clientIsLocal) {
+        if (usingCard) {
+          if (typeof NProgress !== 'undefined') NProgress.done();
+          this.paymentProcessing = false;
+          this.isSubmitting = false;
+          const msg = this.$t
+            ? (this.$t('pos.CreditCard_Requires_Online') || 'Credit card payments require an internet connection.')
+            : 'Credit card payments require an internet connection.';
+          this.makeToast && this.makeToast('warning', msg, this.$t ? this.$t('Warning') : 'Warning');
+          return;
+        }
+        isOnline = false;
+      }
 
       // If we are offline and no credit card is involved, queue sale locally instead of calling API
       if (!isOnline && !usingCard) {
@@ -1210,7 +1273,7 @@ export default {
     },
     resetForm() {
       this.paymentForm = {
-        amountDue: this.grandTotal || 0,
+        amountDue: this.docGrandTotal || 0,
         accountId: '',
         date: this.getCurrentDateInTimezone(),
         reference: '',
@@ -1245,11 +1308,12 @@ export default {
           this.paymentForm.notes = data.notes;
         }
       }
-      // Derive amountDue: prefer explicit data, then prop grandTotal, else 0
+      // Derive amountDue (in the POS-selected currency): prefer explicit
+      // data, then the converted grandTotal prop, else 0.
       if (Object.prototype.hasOwnProperty.call(data, 'amountDue') && data.amountDue !== undefined && data.amountDue !== null) {
         this.paymentForm.amountDue = Number(data.amountDue) || 0;
       } else {
-        this.paymentForm.amountDue = this.grandTotal || 0;
+        this.paymentForm.amountDue = this.docGrandTotal || 0;
       }
       // Initialize one payment line prefilled with amount due; use system defaults when available
       this.paymentLines = [];

@@ -32,6 +32,11 @@ import {
     // Manufacturing MRP (LayoutDashboard, BarChart3, Wrench, ShieldCheck and
     // Calculator are already imported above).
     Factory, FileStack, Cog,
+    // ZATCA e-invoicing
+    QrCode,
+    // Integrations platform (Store, Package, Calculator, Table?, Mail,
+    // MessageSquare and ShoppingBasket are already imported above).
+    LayoutGrid, Send, Slack as SlackIcon, Table, Globe,
 } from 'lucide-vue-next';
 
 export const MENU_ITEM_ICONS = {
@@ -177,6 +182,7 @@ export const MENU_ITEM_ICONS = {
     "/app/User_Management/permissions": Key,
     "/app/settings/System_settings": Settings,
     "/app/settings/quickbooks_sync": Banknote,
+    "/app/settings/zatca_settings": QrCode,
     "/app/settings/appearance_settings": DatabaseZap,
     "/app/settings/translations_settings": DatabaseZap,
     "/app/settings/payment_methods": Banknote,
@@ -230,6 +236,7 @@ export const MENU_ITEM_ICONS = {
     "/app/reports/return_ratio_report": TrendingUp,
     "/app/reports/sales_report": BarChart,
     "/app/reports/product_sales_report": TrendingUp,
+    "/app/reports/products_sold_summary": ReceiptText,
     "/app/reports/report_sales_by_category": Tag,
     "/app/reports/report_sales_by_brand": Store,
     "/app/reports/purchase_report": ShoppingCart,
@@ -264,6 +271,7 @@ export const MENU_ITEM_ICONS = {
     "/app/reports/customer_maintenance_history_report": ClipboardList,
     // Non-report items missing from the reference sidebar.
     "/app/kitchen-display": ChefHat,
+    "/app/kitchen/report": BarChart3,
     "/app/service/jobs?status=quoted": Clock,
     "/app/service/jobs?status=ready": PackageCheck,
     "/app/service/jobs?payment_status=unpaid": CircleDollarSign,
@@ -336,4 +344,13 @@ export const MENU_ITEM_ICONS = {
     "/app/mrp/quality": ShieldCheck,
     "/app/mrp/planning": Calculator,
     "/app/mrp/reports": BarChart3,
+    "/app/integrations": LayoutGrid,
+    "/app/integrations/salla": Store,
+    "/app/integrations/prestashop": Globe,
+    "/app/integrations/jumia": Package,
+    "/app/integrations/xero": Calculator,
+    "/app/integrations/google-sheets": Table,
+    "/app/integrations/mailchimp": Mail,
+    "/app/integrations/slack": SlackIcon,
+    "/app/integrations/telegram": Send,
 };

@@ -48,6 +48,12 @@ async function request(method, url, body, config = {}) {
     if (q) target += (target.indexOf('?') === -1 ? '?' : '&') + q;
   }
 
+  // axios lets DELETE carry a payload via `config.data`; the delete/get
+  // helpers pass no body, so pick it up here or it would be dropped.
+  if ((body === undefined || body === null) && config.data !== undefined && config.data !== null) {
+    body = config.data;
+  }
+
   if (body !== undefined && body !== null) {
     if (body instanceof FormData) {
       init.body = body; // let the browser set the multipart boundary

@@ -69,11 +69,6 @@
               />
             </a-form-item>
           </a-col>
-          <a-col :xs="24" :md="8">
-            <a-form-item label="Cash drawer printer name">
-              <a-input v-model:value="s.cash_drawer_printer_name" />
-            </a-form-item>
-          </a-col>
           <a-col :span="24">
             <a-row :gutter="[8, 8]">
               <a-col v-for="f in POS_FLAGS" :key="f.key" :xs="12" :md="8">
@@ -84,8 +79,67 @@
         </a-row>
       </a-card>
 
+      <!-- Cash drawer auto-open (QZ Tray + ESC/POS) — same section as legacy pos_settings.vue -->
+      <a-card size="small" :title="$t('Cash_Drawer_Settings')" style="margin-bottom: 16px">
+        <a-alert type="info" show-icon :message="$t('Cash_Drawer_Auto_Open_Help')" style="margin-bottom: 16px" />
+        <a-row :gutter="16">
+          <a-col :xs="24" :md="12">
+            <a-form-item :label="$t('Cash_Drawer_Auto_Open')">
+              <a-switch v-model:checked="s.cash_drawer_auto_open" />
+            </a-form-item>
+          </a-col>
+          <a-col :xs="24" :md="12">
+            <a-form-item :label="$t('Cash_Drawer_Printer_Name')" :extra="$t('Cash_Drawer_Printer_Name_Help')">
+              <a-input
+                v-model:value="s.cash_drawer_printer_name"
+                :placeholder="$t('Leave_blank_for_default_receipt_printer')"
+                :maxlength="192"
+              />
+            </a-form-item>
+          </a-col>
+        </a-row>
+      </a-card>
+
+      <!-- Keyboard shortcuts: per-device (localStorage), saved on toggle — not
+           part of the pos_settings payload, so no Save click is needed. -->
+      <a-card size="small" :title="$t('POS_Keyboard_Shortcuts')" style="margin-bottom: 16px">
+        <a-space direction="vertical" size="small">
+          <a-space>
+            <a-switch v-model:checked="keyboardShortcuts" @change="onToggleKeyboardShortcuts" />
+            <span>{{ $t('Enable_Keyboard_Shortcuts') }}</span>
+          </a-space>
+          <a-typography-text type="secondary">
+            {{ $t('Enable_Keyboard_Shortcuts_Help') }}
+            <a @click.prevent="shortcutsGuideOpen = true">{{ $t('View_Shortcuts') }}</a>
+          </a-typography-text>
+        </a-space>
+      </a-card>
+
       <a-button type="primary" size="large" :loading="saving" @click="save">{{ $t('submit') }}</a-button>
     </a-form>
+
+    <!-- POS Keyboard Shortcuts Guide (read-only reference) -->
+    <a-modal
+      v-model:open="shortcutsGuideOpen"
+      :title="$t('POS_Keyboard_Shortcuts')"
+      :footer="null"
+      :width="560"
+    >
+      <a-typography-paragraph type="secondary">{{ $t('Shortcuts_Guide_Intro') }}</a-typography-paragraph>
+      <a-table
+        :columns="shortcutColumns"
+        :data-source="shortcutRows"
+        row-key="id"
+        size="small"
+        :pagination="false"
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'keys'">
+            <a-tag>{{ record.keys }}</a-tag>
+          </template>
+        </template>
+      </a-table>
+    </a-modal>
   </div>
 </template>
 
@@ -99,11 +153,16 @@
  * other with stale values. allow_overselling lives in System Settings >
  * Features now.
  */
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { message } from 'ant-design-vue';
 import { useI18n } from 'vue-i18n';
 import PageHeader from '../../components/PageHeader.vue';
 import http from '../../lib/http';
+import {
+  POS_SHORTCUTS,
+  posShortcutsEnabled,
+  setPosShortcutsEnabled,
+} from '../../pos-compat/posKeyboardShortcuts';
 
 const { t } = useI18n();
 
@@ -116,16 +175,43 @@ const POS_FLAGS = [
   { key: 'enable_customer_points', label: 'Enable customer points' },
   { key: 'show_categories', label: 'Show categories' },
   { key: 'show_brands', label: 'Show brands' },
+  { key: 'show_customer_history', label: 'Show customer purchase history' },
   // allow_overselling moved to System Settings > Features (global switch).
-  { key: 'cash_drawer_auto_open', label: 'Cash drawer auto open' },
+  // cash_drawer_auto_open has its own card below (legacy "Cash Drawer" section).
 ];
 
-const ALL_FLAGS = POS_FLAGS.map(f => f.key);
+const ALL_FLAGS = [...POS_FLAGS.map(f => f.key), 'cash_drawer_auto_open'];
 
 const loading = ref(true);
 const saving = ref(false);
 const s = ref({});
 const invoiceFormat = ref('');
+
+// Per-device keyboard-shortcuts preference (localStorage, no backend field).
+const keyboardShortcuts = ref(posShortcutsEnabled());
+const shortcutsGuideOpen = ref(false);
+
+const shortcutColumns = computed(() => [
+  { title: t('Shortcut'), key: 'keys', dataIndex: 'keys', width: '45%' },
+  { title: t('Action'), dataIndex: 'description' },
+]);
+
+// vue-i18n returns the key itself when a translation is missing, so fall back
+// to the English label shipped with the shortcut definition.
+const shortcutRows = computed(() =>
+  POS_SHORTCUTS.map(sc => ({
+    id: sc.id,
+    keys: sc.keys,
+    description: t(sc.descriptionKey) === sc.descriptionKey
+      ? sc.descriptionFallback
+      : t(sc.descriptionKey),
+  })),
+);
+
+function onToggleKeyboardShortcuts(checked) {
+  setPosShortcutsEnabled(checked);
+  message.success(t('Successfully_Updated'));
+}
 
 async function save() {
   saving.value = true;

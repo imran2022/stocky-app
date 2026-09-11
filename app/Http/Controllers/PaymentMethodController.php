@@ -89,6 +89,29 @@ class PaymentMethodController extends BaseController
 
     }
 
+    // -------------- Enable / disable PaymentMethod ---------------\\
+
+    /**
+     * Separate from update() on purpose: the default methods (id 1-3) cannot
+     * be renamed or deleted, but disabling them is legitimate (e.g. a store
+     * that does not take cards). Inactive methods disappear from new-payment
+     * pickers only — history and reports keep showing them.
+     */
+    public function setActive(Request $request, $id)
+    {
+        $this->authorizeForUser($request->user('api'), 'update', PaymentMethod::class);
+
+        request()->validate([
+            'is_active' => 'required|boolean',
+        ]);
+
+        PaymentMethod::whereId($id)->update([
+            'is_active' => $request->boolean('is_active'),
+        ]);
+
+        return response()->json(['success' => true]);
+    }
+
     // -------------- Remove PaymentMethod ---------------\\
 
     public function destroy(Request $request, $id)

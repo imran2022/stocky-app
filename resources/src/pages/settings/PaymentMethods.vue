@@ -11,7 +11,17 @@
 
     <DataTable :crud="crud" :columns="columns">
       <template #bodyCell="{ column, record }">
-        <template v-if="column.key === 'actions'">
+        <!-- Enable/disable is allowed on every method, defaults included —
+             inactive methods disappear from new-payment pickers only. -->
+        <template v-if="column.key === 'is_active'">
+          <a-switch
+            :checked="!!record.is_active"
+            :loading="togglingId === record.id"
+            size="small"
+            @change="v => toggleActive(record, v)"
+          />
+        </template>
+        <template v-else-if="column.key === 'actions'">
           <!-- Methods 1-3 are system defaults — legacy blocks touching them. -->
           <span v-if="[1, 2, 3].includes(record.id)" style="color: #faad14; font-size: 12px">
             {{ $t('You_cant_edit_or_remove_default_payment_choices') }}
@@ -52,7 +62,10 @@
 /**
  * GET payment_methods → {methods, totalRows}; POST/PUT {name}. Rows with
  * id 1-3 are the built-in defaults and can't be edited or removed (legacy
- * rule, enforced by id).
+ * rule, enforced by id) — but CAN be enabled/disabled like any other row via
+ * PUT payment_methods/{id}/active {is_active}. Inactive methods are hidden
+ * from every new-payment picker (POS, sales/purchases/returns/expenses);
+ * reports and historical payments still show them.
  */
 import { ref, computed } from 'vue';
 import { message } from 'ant-design-vue';
@@ -65,13 +78,29 @@ import http from '../../lib/http';
 
 const { t } = useI18n();
 
-const crud = useCrudTable('payment_methods', { rowsKey: 'methods' });
+const crud = useCrudTable('payment_methods', { rowsKey: 'methods', sortType: 'asc' });
 crud.fetchRows();
 
 const columns = computed(() => [
   { title: t('Name'), dataIndex: 'name', key: 'name', sorter: true },
+  { title: t('Status'), key: 'is_active', width: 90, align: 'center' },
   { title: t('Action'), key: 'actions', width: 280, align: 'center' },
 ]);
+
+const togglingId = ref(null);
+
+async function toggleActive(record, checked) {
+  togglingId.value = record.id;
+  try {
+    await http.put(`payment_methods/${record.id}/active`, { is_active: !!checked });
+    record.is_active = !!checked;
+    message.success(t('Successfully_Updated'));
+  } catch (e) {
+    message.error(e?.data?.message || t('InvalidData'));
+  } finally {
+    togglingId.value = null;
+  }
+}
 
 const modalOpen = ref(false);
 const saving = ref(false);

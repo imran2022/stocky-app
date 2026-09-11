@@ -11,7 +11,13 @@
 
     <DataTable :crud="crud" :columns="columns" selectable>
       <template #bodyCell="{ column, record }">
-        <template v-if="column.key === 'is_default'">
+        <template v-if="column.key === 'exchange_rate'">
+          <a-tooltip v-if="record.id === defaultCurrencyId" :title="$t('Base_Currency_Rate_Locked')">
+            <span>1</span>
+          </a-tooltip>
+          <span v-else>{{ record.exchange_rate ?? 1 }}</span>
+        </template>
+        <template v-else-if="column.key === 'is_default'">
           <a-tooltip :title="record.id === defaultCurrencyId ? $t('Default') : 'Set as default'">
             <a-switch
               :checked="record.id === defaultCurrencyId"
@@ -56,6 +62,18 @@
         <a-form-item :label="$t('Symbol')" name="symbol">
           <a-input v-model:value="form.symbol" />
         </a-form-item>
+        <a-form-item v-if="auth.multiCurrencyEnabled" :label="$t('Exchange_Rate')" name="exchange_rate">
+          <a-input-number
+            v-model:value="form.exchange_rate"
+            :min="0.000001"
+            :precision="6"
+            :disabled="editMode && form.id === defaultCurrencyId"
+            style="width: 100%"
+          />
+          <div class="ant-form-item-extra" style="color: var(--text-3, #999); font-size: 12px; margin-top: 4px">
+            {{ editMode && form.id === defaultCurrencyId ? $t('Base_Currency_Rate_Locked') : $t('Exchange_Rate_Hint') }}
+          </div>
+        </a-form-item>
       </a-form>
     </a-modal>
   </div>
@@ -80,6 +98,10 @@ const columns = computed(() => [
   { title: t('CurrencyCode'), dataIndex: 'code', key: 'code', sorter: true },
   { title: t('CurrencyName'), dataIndex: 'name', key: 'name', sorter: true },
   { title: t('Symbol'), dataIndex: 'symbol', key: 'symbol' },
+  // Exchange rate only matters when the Multi-Currency module is on.
+  ...(auth.multiCurrencyEnabled
+    ? [{ title: t('Exchange_Rate'), key: 'exchange_rate', width: 140, align: 'center' }]
+    : []),
   { title: t('Default'), key: 'is_default', width: 110, align: 'center' },
   { title: t('Action'), key: 'actions', width: 110, align: 'center' },
 ]);
@@ -94,6 +116,8 @@ async function makeDefault(record) {
   try {
     await http.post(`currencies/${record.id}/set-default`);
     message.success(t('Successfully_Updated'));
+    // Rates are relative to the base currency and are NOT auto-rebased.
+    if (auth.multiCurrencyEnabled) message.warning(t('Set_As_Default_Rate_Warning'), 6);
     await crud.fetchRows();
     // Refresh auth so money formatting picks up the new currency app-wide.
     auth.loaded = false;
@@ -109,7 +133,7 @@ const modalOpen = ref(false);
 const editMode = ref(false);
 const submitting = ref(false);
 const formRef = ref();
-const emptyForm = () => ({ id: null, name: '', code: '', symbol: '' });
+const emptyForm = () => ({ id: null, name: '', code: '', symbol: '', exchange_rate: 1 });
 const form = ref(emptyForm());
 
 const rules = computed(() => ({
@@ -126,7 +150,13 @@ function openCreate() {
 
 function openEdit(record) {
   editMode.value = true;
-  form.value = { id: record.id, name: record.name || '', code: record.code || '', symbol: record.symbol || '' };
+  form.value = {
+    id: record.id,
+    name: record.name || '',
+    code: record.code || '',
+    symbol: record.symbol || '',
+    exchange_rate: record.exchange_rate ?? 1,
+  };
   modalOpen.value = true;
 }
 
@@ -137,7 +167,12 @@ async function submit() {
     return;
   }
   submitting.value = true;
-  const body = { name: form.value.name, code: form.value.code, symbol: form.value.symbol };
+  const body = {
+    name: form.value.name,
+    code: form.value.code,
+    symbol: form.value.symbol,
+    exchange_rate: form.value.exchange_rate || 1,
+  };
   try {
     if (editMode.value) {
       await http.put(`currencies/${form.value.id}`, body);

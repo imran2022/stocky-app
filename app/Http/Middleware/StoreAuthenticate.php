@@ -17,7 +17,7 @@ class StoreAuthenticate
     public function handle(Request $request, Closure $next)
     {
         if (! Auth::guard('store')->check()) {
-            return redirect('/online_store/login');
+            return redirect()->route('store.login.show');
         }
 
         return $next($request);

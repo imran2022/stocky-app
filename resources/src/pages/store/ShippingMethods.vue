@@ -53,7 +53,11 @@
           <a-input-number v-model:value="form.price" :min="0" :step="0.01" style="width: 100%" />
         </a-form-item>
         <a-form-item :label="$t('Countries')" :extra="$t('Leave_empty_all_regions')">
-          <a-select v-model:value="form.countries" mode="tags" :token-separators="[',']" :placeholder="$t('Add_country_Enter')" />
+          <a-select
+            v-model:value="form.countries" mode="multiple" allow-clear
+            :placeholder="$t('Choose_Countries')"
+            :options="countryOptions" show-search option-filter-prop="label" :max-tag-count="6"
+          />
         </a-form-item>
         <a-form-item :label="$t('Sort_Order')">
           <a-input-number v-model:value="form.sort_order" :min="0" style="width: 100%" />
@@ -71,7 +75,9 @@
 /**
  * Shipping methods — GET store/shipping-methods?search → {methods}; save
  * POST/PUT store/shipping-methods[/{id}] {name, price, countries[],
- * sort_order, active 1|0}. Countries as free tags; empty = all regions.
+ * sort_order, active 1|0}. Countries are picked from the canonical list the
+ * region matcher understands (empty = all regions) — free text used to let a
+ * spelling drift from the customer's address and read as "no shipping".
  */
 import { ref, computed, onMounted } from 'vue';
 import { message, Modal } from 'ant-design-vue';
@@ -86,6 +92,10 @@ const isLoading = ref(true);
 const saving = ref(false);
 const search = ref('');
 const methods = ref([]);
+// Canonical country list from the API: [{code, name, canonical}].
+const countries = ref([]);
+const countryOptions = computed(() =>
+  countries.value.map(x => ({ label: x.name, value: x.canonical })));
 const modalOpen = ref(false);
 
 const emptyForm = () => ({ id: null, name: '', price: 0, countries: [], sort_order: 0, active: true });
@@ -103,6 +113,7 @@ async function fetch() {
   try {
     const resp = await http.get('store/shipping-methods', { search: search.value });
     methods.value = resp.methods || [];
+    countries.value = resp.country_options || [];
   } catch (e) {
     message.error(t('Failed'));
   } finally {

@@ -882,6 +882,10 @@ export const PERMISSION_GROUPS = [
                 "l": "product_sales_report"
             },
             {
+                "v": "products_sold_summary",
+                "l": "products_sold_summary"
+            },
+            {
                 "v": "product_purchases_report",
                 "l": "Product_purchases_report"
             },
@@ -1340,6 +1344,51 @@ export const PERMISSION_GROUPS = [
                 "f": "Quickbooks settings"
             },
             {
+                "v": "slack_settings",
+                "l": "Slack",
+                "f": "Slack integration"
+            },
+            {
+                "v": "telegram_settings",
+                "l": "Telegram",
+                "f": "Telegram integration"
+            },
+            {
+                "v": "salla_settings",
+                "l": "Salla",
+                "f": "Salla integration"
+            },
+            {
+                "v": "xero_settings",
+                "l": "Xero",
+                "f": "Xero integration"
+            },
+            {
+                "v": "prestashop_settings",
+                "l": "PrestaShop",
+                "f": "PrestaShop integration"
+            },
+            {
+                "v": "google_sheets_settings",
+                "l": "Google Sheets",
+                "f": "Google Sheets integration"
+            },
+            {
+                "v": "mailchimp_settings",
+                "l": "Mailchimp",
+                "f": "Mailchimp integration"
+            },
+            {
+                "v": "jumia_settings",
+                "l": "Jumia",
+                "f": "Jumia integration"
+            },
+            {
+                "v": "zatca_settings",
+                "l": "Zatca_E_Invoicing",
+                "f": "ZATCA e-invoicing"
+            },
+            {
                 "v": "sms_settings",
                 "l": "sms_settings"
             },
@@ -1362,6 +1411,11 @@ export const PERMISSION_GROUPS = [
             {
                 "v": "currency",
                 "l": "Currencies"
+            },
+            {
+                "v": "multi_currency",
+                "l": "Multi_Currency",
+                "f": "Multi currency (change document currency)"
             },
             {
                 "v": "warehouse",

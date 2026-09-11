@@ -54,6 +54,15 @@
         </a-col>
         <a-col :xs="24" :md="8">
           <a-card size="small">
+            <a-statistic
+              :title="$t('Service_Due')" :value="money(serviceDue)"
+              :value-style="{ color: serviceDue > 0 ? '#ff4d4f' : '#52c41a' }"
+            />
+            <div class="muted">{{ $t('Open_Service_Jobs') }}</div>
+          </a-card>
+        </a-col>
+        <a-col :xs="24" :md="8">
+          <a-card size="small">
             <a-statistic :title="$t('Credit_Limit')" :value="creditLimitText" :value-style="{ color: '#1677ff' }" />
             <div class="muted">{{ $t('Maximum_credit_amount_allowed_for_this_customer') }}</div>
           </a-card>
@@ -98,9 +107,18 @@
                   <a-tag :color="paymentStatusColor(record.payment_status)">{{ record.payment_status }}</a-tag>
                 </template>
                 <template v-else-if="column.key === 'payment_type'">
-                  <a-tag :color="record.payment_type === 'opening_balance' ? 'processing' : 'success'">
-                    {{ record.payment_type === 'opening_balance' ? $t('Opening_Balance') : $t('Sale') }}
+                  <a-tag :color="paymentTypeColor(record.payment_type)">
+                    {{ paymentTypeLabel(record.payment_type) }}
                   </a-tag>
+                </template>
+                <template v-else-if="column.key === 'statut' && pane.key === 'service_jobs'">
+                  <a-tag :color="jobStatusColor(record.statut)">{{ record.statut }}</a-tag>
+                  <a-tooltip v-if="!record.counts_toward_due" :title="$t('Not_Counted_In_Due')">
+                    <a-tag color="default">{{ $t('Not_Counted_In_Due') }}</a-tag>
+                  </a-tooltip>
+                </template>
+                <template v-else-if="column.key === 'Ref' && pane.key === 'service_jobs'">
+                  <router-link :to="`/service/jobs/details/${record.id}`">{{ record.Ref }}</router-link>
                 </template>
                 <template v-else-if="column.key === 'Sale_Ref'">
                   <span v-if="record.Sale_Ref">{{ record.Sale_Ref }}</span>
@@ -130,6 +148,7 @@
       :client="client"
       :opening-balance="openingBalance"
       :sales-due="salesDue"
+      :service-due="serviceDue"
       :payment-methods="paymentMethods"
       :accounts="accounts"
       :company="company"
@@ -140,9 +159,12 @@
 
 <script setup>
 /**
- * Customer details — legacy CustomerDetails.vue. Header + three figures, four
- * independently paginated tabs (sales / payments / returns / payment returns),
- * custom fields, and the pay-due flow with its printable credit note.
+ * Customer details — legacy CustomerDetails.vue. Header + figures, five
+ * independently paginated tabs (sales / service jobs / payments / returns /
+ * payment returns), custom fields, and the pay-due flow with its printable
+ * credit note. Service jobs are part of what the customer owes: the brief
+ * endpoint returns service_due (accepted / in-progress / delivered jobs only)
+ * and clients_pay_due allocates to open jobs after sales.
  *
  * TWO legacy defects are deliberately not reproduced, both of which mislead
  * about money:
@@ -188,10 +210,11 @@ const MONEY_KEYS = ['GrandTotal', 'paid_amount', 'due', 'montant'];
 
 const openingBalance = computed(() => Number(brief.value.opening_balance ?? client.value.opening_balance) || 0);
 const salesDue = computed(() => Number(brief.value.sale_due) || 0);
-/** Legacy: opening balance + sales due. netBalance also nets off return dues. */
+const serviceDue = computed(() => Number(brief.value.service_due) || 0);
+/** Opening balance + sales due + service due. netBalance also nets off return dues. */
 // Rounded: the raw float sum is the :max of the paying-amount input, and the
 // clamp would otherwise display something like 121.99999999999994.
-const totalDue = computed(() => roundMoney(openingBalance.value + salesDue.value));
+const totalDue = computed(() => roundMoney(openingBalance.value + salesDue.value + serviceDue.value));
 const creditLimitText = computed(() =>
   Number(client.value.credit_limit) > 0 ? money(client.value.credit_limit) : t('No_limit'));
 const walletEnabled = computed(() => !!brief.value.wallet_enabled);
@@ -208,6 +231,23 @@ function paymentStatusColor(status) {
 }
 function dueClass(key, record) {
   return key === 'due' && Number(record.due) > 0 ? 'due-open' : '';
+}
+function jobStatusColor(status) {
+  const s = String(status || '').toLowerCase();
+  if (['completed', 'delivered'].includes(s)) return 'success';
+  if (['declined', 'cancelled'].includes(s)) return 'error';
+  if (['approved', 'in_progress', 'ready'].includes(s)) return 'processing';
+  return 'default';
+}
+function paymentTypeColor(type) {
+  if (type === 'opening_balance') return 'processing';
+  if (type === 'service') return 'warning';
+  return 'success';
+}
+function paymentTypeLabel(type) {
+  if (type === 'opening_balance') return t('Opening_Balance');
+  if (type === 'service') return t('Service_Job');
+  return t('Sale');
 }
 function customFieldValue(f) {
   if (!f.value && f.value !== 0 && f.value !== false) return '-';
@@ -236,12 +276,27 @@ const panes = computed(() => [
     ],
   },
   {
+    key: 'service_jobs', label: 'Service_Jobs', endpoint: 'service_jobs_client', rowsKey: 'service_jobs',
+    state: states.service_jobs,
+    columns: [
+      { title: t('Ref'), dataIndex: 'Ref', key: 'Ref' },
+      { title: t('date'), dataIndex: 'date', key: 'date' },
+      { title: t('Service_Item'), dataIndex: 'service_item', key: 'service_item' },
+      { title: t('Technician'), dataIndex: 'technician_name', key: 'technician_name' },
+      { title: t('Grand_Total'), dataIndex: 'GrandTotal', key: 'GrandTotal', align: 'right' },
+      { title: t('Paid'), dataIndex: 'paid_amount', key: 'paid_amount', align: 'right' },
+      { title: t('Due'), dataIndex: 'due', key: 'due', align: 'right' },
+      { title: t('Payment_Status'), dataIndex: 'payment_status', key: 'payment_status' },
+      { title: t('Status'), dataIndex: 'statut', key: 'statut' },
+    ],
+  },
+  {
     key: 'payments', label: 'Payments', endpoint: 'payments_client', rowsKey: 'payments', state: states.payments,
     columns: [
       { title: t('Ref'), dataIndex: 'Ref', key: 'Ref' },
       { title: t('date'), dataIndex: 'date', key: 'date' },
       { title: t('Type'), dataIndex: 'payment_type', key: 'payment_type' },
-      { title: t('Sale_Ref'), dataIndex: 'Sale_Ref', key: 'Sale_Ref' },
+      { title: t('Document_Ref'), dataIndex: 'Sale_Ref', key: 'Sale_Ref' },
       { title: t('Payment_Method'), dataIndex: 'payment_method', key: 'payment_method' },
       { title: t('Amount'), dataIndex: 'montant', key: 'montant', align: 'right' },
     ],
@@ -274,7 +329,7 @@ const panes = computed(() => [
 ]);
 
 const states = {
-  sales: makeState(), payments: makeState(), returns: makeState(), payment_returns: makeState(),
+  sales: makeState(), service_jobs: makeState(), payments: makeState(), returns: makeState(), payment_returns: makeState(),
 };
 
 async function fetchPane(pane) {

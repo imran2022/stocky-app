@@ -5,16 +5,16 @@
   /** @var \App\Models\StoreSetting $s */
   /** @var \App\Models\Product $product */
   $p = $product;
-  $currency = $s->currency_code ?? '$';
+  $currency = store_currency()['symbol'];
   $dec = \App\utils\helpers::price_decimals();
 
   // ----- Gallery -----
   $galleryFilenames = $p->productGalleryFilenames();
   $galleryUrls = collect($galleryFilenames)
-    ->map(fn ($f) => $f ? asset('images/products/'.$f) : null)
+    ->map(fn ($f) => product_image_url_or_null($f))
     ->filter()->values()->all();
   $primaryFile = $p->primaryProductImageFilename();
-  $imgUrl = $primaryFile ? asset('images/products/'.$primaryFile) : asset('images/products/no-image.png');
+  $imgUrl = product_image_url($primaryFile);
   if (empty($galleryUrls)) { $galleryUrls = [$imgUrl]; }
 
   // ----- Pricing -----
@@ -36,8 +36,8 @@
       'name' => (string) ($v->name ?? ''),
       'price' => (float) ($v->price ?? 0),
       'display_price' => $final,
-      'display_price_formatted' => $currency.number_format($final, $dec, '.', ','),
-      'image' => ! empty($v->image) ? asset('images/products/'.$v->image) : null,
+      'display_price_formatted' => store_money($final),
+      'image' => product_image_url_or_null($v->image ?? null),
       'stock' => (int) max(0, $v->stock ?? $v->qty ?? 0),
     ];
   })->values();
@@ -47,7 +47,7 @@
   $allowOverselling = (bool) ($s->allow_overselling ?? true);
   $isPreorder = (bool) ($p->is_preorder ?? false);
   $preorderAlways = (bool) ($p->preorder_always ?? false);
-  $preorderDate = $p->preorder_available_date ? $p->preorder_available_date->format('M d, Y') : null;
+  $preorderDate = $p->preorder_available_date ? store_date($p->preorder_available_date) : null;
   $quoteOnly = (($p->type ?? '') === 'is_service') || (bool) ($p->is_classified ?? false);
   $hidePrices = ! Auth::guard('store')->check() && ($s->hide_prices_for_guests ?? false);
 
@@ -90,6 +90,17 @@
   if ($p->pack_size) $specs[] = [__('messages.PackSize'), $p->pack_size];
 
   $returnDays = (int) ($s->return_window_days ?? 14);
+
+  // Shipping is priced per ORDER and per destination country, not per
+  // product — so the page can only preview the cheapest method that
+  // reaches the shopper, and says "calculated at checkout" when the
+  // destination is still unknown (a guest with no saved address).
+  $shipCountry = optional(optional(Auth::guard('store')->user())->client)->country;
+  $shipMethods = $shipCountry
+      ? app(\App\Services\CheckoutService::class)->availableShippingMethods($shipCountry)
+      : collect();
+  $shipCheapest = $shipMethods->sortBy('price')->first();
+  $shipAnyConfigured = \App\Models\ShippingMethod::where('active', true)->exists();
   $productUrl = route('store.product.show', $p->id);
 @endphp
 
@@ -150,13 +161,42 @@
       {{-- Price --}}
       @unless($hidePrices)
         <div class="flex items-center gap-3 mb-4 flex-wrap">
-          <span id="pdpPrice" class="text-3xl font-bold text-fg-primary">{{ $currency }}{{ number_format($minPrice, $dec, '.', ',') }}</span>
+          <span id="pdpPrice" class="text-3xl font-bold text-fg-primary">{{ store_money($minPrice) }}</span>
           @if($compareAt)
-            <span id="pdpCompare" class="text-lg text-fg-muted line-through">{{ $currency }}{{ number_format($compareAt, $dec, '.', ',') }}</span>
+            <span id="pdpCompare" class="text-lg text-fg-muted line-through">{{ store_money($compareAt) }}</span>
             <span class="chip chip-danger text-xs">-{{ round(($compareAt - $minPrice) / $compareAt * 100) }}%</span>
           @endif
         </div>
       @endunless
+
+      {{-- Wholesale Pricing by Quantity: the product's quantity breaks. The row
+           matching the chosen quantity is highlighted by JS, and the headline
+           price above follows it — no wholesale option to pick by hand. --}}
+      @if(! $hidePrices && ! $quoteOnly && count($wholesaleTiers ?? []))
+        <div class="mb-4 rounded-lg border border-line-subtle overflow-hidden" id="pdpTiers">
+          <div class="px-3 py-2 text-sm font-semibold bg-bg-muted text-fg-secondary">
+            {{ __('messages.BuyMoreSaveMore') }}
+          </div>
+          <table class="w-full text-sm">
+            <tbody>
+              @foreach($wholesaleTiers as $tier)
+                <tr class="pdp-tier border-t border-line-subtle" data-min="{{ $tier['min'] }}" data-max="{{ $tier['max'] ?? '' }}">
+                  <td class="px-3 py-2 text-fg-secondary">
+                    @if($tier['max'] === null)
+                      {{ __('messages.QtyOrMore', ['qty' => (int) $tier['min']]) }}
+                    @else
+                      {{ (int) $tier['min'] }} &ndash; {{ (int) $tier['max'] }}
+                    @endif
+                  </td>
+                  <td class="px-3 py-2 text-end font-semibold text-fg-primary">
+                    {{ store_money($tier['price']) }} <span class="text-fg-muted font-normal">{{ __('messages.PerPiece') }}</span>
+                  </td>
+                </tr>
+              @endforeach
+            </tbody>
+          </table>
+        </div>
+      @endif
 
       {{-- Short description --}}
       @if($p->note)
@@ -183,6 +223,16 @@
               </button>
             @endforeach
           </div>
+        </div>
+      @endif
+
+      {{-- Product labels (New / Used / Refurbished / the store's own) --}}
+      @php $pdpBadges = \App\Services\ProductLabelService::badges($p->labels ?? null); @endphp
+      @if(count($pdpBadges))
+        <div class="flex flex-wrap items-center gap-2 mb-4">
+          @foreach($pdpBadges as $badge)
+            <span class="product-badge {{ $badge['class'] }}" style="position: static;">{{ $badge['text'] }}</span>
+          @endforeach
         </div>
       @endif
 
@@ -265,11 +315,19 @@
                 data-product-id="{{ $p->id }}" aria-pressed="{{ $inWishlist ? 'true' : 'false' }}">
           <x-store.icon name="heart" class="w-4 h-4" /><span>{{ $inWishlist ? __('messages.InWishlist') : __('messages.AddToWishlist') }}</span>
         </button>
-        @if($p->sizeGuide && $p->sizeGuide->status)
+        {{-- Only offer the link when the guide actually has a chart to show. --}}
+        @if($p->sizeGuide && $p->sizeGuide->status && $p->sizeGuide->hasChart())
         <button type="button" id="pdpSizeGuideBtn" class="inline-flex items-center gap-1 text-fg-secondary hover:text-accent-500">
           <x-store.icon name="ruler" class="w-4 h-4" /><span>{{ __('messages.SizeGuide') }}</span>
         </button>
         @endif
+      </div>
+
+      {{-- Ask About This Item — opens the question form (sign-in required). --}}
+      <div class="mb-5">
+        <button type="button" id="pdpAskBtn" class="btn btn-secondary">
+          <x-store.icon name="message" class="w-4 h-4" />{{ __('messages.AskAboutThisItem') }}
+        </button>
       </div>
 
       {{-- Meta: SKU / Category / Tags --}}
@@ -309,8 +367,23 @@
 
       {{-- Trust badges --}}
       <div class="mt-5 rounded-lg border border-line-subtle p-4 space-y-2 text-sm text-fg-secondary">
+        @if($preorderDate)
+          <div class="flex items-center gap-2 text-fg-primary font-medium">
+            <x-store.icon name="truck" class="w-4 h-4 text-accent-500" />{{ __('messages.EstimatedDelivery') }}: {{ $preorderDate }}
+          </div>
+        @endif
         <div class="flex items-center gap-2"><x-store.icon name="refresh" class="w-4 h-4 text-accent-500" />{{ __('messages.XDaysEasyReturns', ['days' => $returnDays]) }}</div>
         <div class="flex items-center gap-2"><x-store.icon name="truck" class="w-4 h-4 text-accent-500" />{{ __('messages.SameDayDispatchNote') }}</div>
+        @if($shipAnyConfigured)
+          <div class="flex items-center gap-2">
+            <x-store.icon name="package" class="w-4 h-4 text-accent-500" />
+            @if($shipCheapest)
+              {{ __('messages.ShippingFrom', ['price' => store_money($shipCheapest->price)]) }}
+            @else
+              {{ __('messages.ShippingCalculatedAtCheckout') }}
+            @endif
+          </div>
+        @endif
         <div class="flex items-center gap-2"><x-store.icon name="shield-check" class="w-4 h-4 text-accent-500" />{{ __('messages.GuaranteedSafeCheckout') }}</div>
       </div>
     </div>
@@ -325,6 +398,7 @@
       @if(($fitmentInfo['enabled'] ?? false) && ($fitmentInfo['has_fitments'] ?? false))<button type="button" class="pdp-tab py-3 border-b-2 border-transparent text-fg-muted whitespace-nowrap" data-tab="fitment">{{ __('messages.VehicleFitmentTitle') }}</button>@endif
       @if($p->brand)<button type="button" class="pdp-tab py-3 border-b-2 border-transparent text-fg-muted whitespace-nowrap" data-tab="vendor">{{ __('messages.Vendor') }}</button>@endif
       @if($faqs->isNotEmpty())<button type="button" class="pdp-tab py-3 border-b-2 border-transparent text-fg-muted whitespace-nowrap" data-tab="faqs">{{ __('messages.FAQs') }}</button>@endif
+      <button type="button" class="pdp-tab py-3 border-b-2 border-transparent text-fg-muted whitespace-nowrap" data-tab="questions" id="pdpTabQuestions">{{ __('messages.QuestionsMade') }} (<span id="pdpTabQuestionCount">0</span>)</button>
     </div>
 
     <div class="py-6">
@@ -425,6 +499,17 @@
           </div>
         </div>
       @endif
+      {{-- Questions & answers from every customer --}}
+      <div class="pdp-panel hidden" data-panel="questions">
+        <div class="flex items-center justify-between gap-3 flex-wrap mb-4">
+          <p class="text-sm text-fg-muted m-0">{{ __('messages.QuestionsMadeHelp') }}</p>
+          <button type="button" class="btn btn-outline btn-sm js-ask-open">
+            <x-store.icon name="message" class="w-4 h-4" />{{ __('messages.AskAboutThisItem') }}
+          </button>
+        </div>
+        <div id="pdpQuestionsList" class="space-y-4 max-w-3xl"></div>
+        <div id="pdpQuestionsEmpty" class="text-fg-muted hidden">{{ __('messages.NoQuestionsYet') }}</div>
+      </div>
     </div>
   </div>
 
@@ -450,6 +535,7 @@
 @include('store.partials.shop-modals-scripts', ['currency' => $currency])
 
 {{-- Product size guide modal --}}
+@include('store.partials.ask-question-modal')
 @include('store.partials.size-guide-modal')
 
 <script>
@@ -470,6 +556,10 @@
   var ALLOW_OVERSELL = {{ $allowOverselling ? 'true' : 'false' }};
   // Vehicle Fitment: null = unknown/universal/no vehicle; false = does not fit.
   var VEHICLE_FITS = @json($fitmentInfo['fits'] ?? null);
+  // Wholesale Pricing by Quantity: [{min, max, price}] in display terms
+  // (tier price replaces the retail base, tax already applied). Empty when the
+  // feature is off or this product has no ladder.
+  var WHOLESALE_TIERS = @json($wholesaleTiers ?? []);
   var NO_FIT_MSG = @json(__('messages.DoesNotFitVehicle'));
   var selected = { id: null, price: BASE_PRICE, stock: null, image: IMG, name: '' };
   if (VARIANTS && VARIANTS.length) {
@@ -513,6 +603,9 @@
       if (priceEl){ priceEl.textContent = btn.getAttribute('data-price-formatted') || fmt(selected.price); }
       if (vimg && vimg !== 'null' && mainImg){ mainImg.src = vimg; selected.image = vimg; }
       refreshAvailability();
+      // The headline price was just reset to the variant's — re-apply the
+      // quantity bracket on top of it.
+      refreshTierPrice();
     });
   });
   refreshAvailability();
@@ -521,12 +614,51 @@
   var qtyEl = document.getElementById('pdpQty');
   function getQty(){ var q = parseInt(qtyEl ? qtyEl.value : '1', 10); return (isNaN(q) || q < 1) ? 1 : q; }
   var minus = document.getElementById('pdpQtyMinus'), plus = document.getElementById('pdpQtyPlus');
-  if (minus) minus.addEventListener('click', function(){ if(qtyEl){ qtyEl.value = Math.max(1, getQty() - 1); } });
-  if (plus)  plus.addEventListener('click',  function(){ if(qtyEl){ qtyEl.value = getQty() + 1; } });
+  if (minus) minus.addEventListener('click', function(){ if(qtyEl){ qtyEl.value = Math.max(1, getQty() - 1); } refreshTierPrice(); });
+  if (plus)  plus.addEventListener('click',  function(){ if(qtyEl){ qtyEl.value = getQty() + 1; } refreshTierPrice(); });
+  if (qtyEl) qtyEl.addEventListener('input', refreshTierPrice);
+  if (qtyEl) qtyEl.addEventListener('change', refreshTierPrice);
+
+  // ---- Wholesale Pricing by Quantity ----
+  // The bracket matching the current quantity wins (highest min that still
+  // contains it); below the first bracket the retail price stands.
+  function tierUnitPrice(qty){
+    if (!WHOLESALE_TIERS || !WHOLESALE_TIERS.length) return null;
+    var price = null, bestMin = -1;
+    for (var i = 0; i < WHOLESALE_TIERS.length; i++){
+      var t = WHOLESALE_TIERS[i];
+      var min = Number(t.min) || 0;
+      var max = (t.max === null || t.max === undefined || t.max === '') ? Infinity : Number(t.max);
+      if (qty + 1e-9 < min || qty > max + 1e-9) continue;
+      if (min >= bestMin){ bestMin = min; price = Number(t.price) || 0; }
+    }
+    return price;
+  }
+  // Headline price follows the quantity, and the active bracket is highlighted.
+  function refreshTierPrice(){
+    if (!WHOLESALE_TIERS || !WHOLESALE_TIERS.length) return;
+    var qty = getQty();
+    var tier = tierUnitPrice(qty);
+    if (priceEl) priceEl.textContent = fmt(tier != null ? tier : selected.price);
+    document.querySelectorAll('.pdp-tier').forEach(function(row){
+      var min = Number(row.getAttribute('data-min')) || 0;
+      var rawMax = row.getAttribute('data-max');
+      var max = (rawMax === null || rawMax === '') ? Infinity : Number(rawMax);
+      var on = qty + 1e-9 >= min && qty <= max + 1e-9;
+      row.classList.toggle('is-active-tier', on);
+    });
+  }
+  refreshTierPrice();
 
   // ---- Add to cart ----
   function buildItem(){
     var item = { name: NAME, price: selected.price, image: selected.image || IMG, slug: SLUG, currency: CURRENCY };
+    // Carry the ladder into the cart line so the cart, mini-cart and checkout
+    // summary re-price it themselves as the shopper edits the quantity.
+    if (WHOLESALE_TIERS && WHOLESALE_TIERS.length){
+      item.base_price = selected.price;
+      item.wholesale_tiers = WHOLESALE_TIERS;
+    }
     if (selected.id){
       item.id = PID + ':' + selected.id;
       item.product_id = PID;
@@ -592,7 +724,7 @@
     var list = document.getElementById('pdpReviewsList');
     var summary = document.getElementById('pdpReviewsSummary');
     var empty = document.getElementById('pdpReviewsEmpty');
-    fetch('/online_store/products/' + PID + '/reviews', { headers:{'Accept':'application/json'} })
+    fetch('{{ url('/'.store_path_to('products')) }}/' + PID + '/reviews', { headers:{'Accept':'application/json'} })
       .then(function(r){ return r.ok ? r.json() : null; })
       .then(function(d){
         if (!d) return;
@@ -612,6 +744,46 @@
               + '</div>';
           }).join('');
         } else if (empty){ empty.classList.remove('hidden'); }
+      }).catch(function(){});
+  })();
+
+  // ---- Questions & answers ----
+  (function loadQuestions(){
+    var list  = document.getElementById('pdpQuestionsList');
+    var empty = document.getElementById('pdpQuestionsEmpty');
+    if (!list) return;
+
+    fetch(@json(url('/'.store_path_to('products'))) + '/' + PID + '/questions',
+          { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(d){
+        if (!d) return;
+        var cnt = document.getElementById('pdpTabQuestionCount');
+        if (cnt) cnt.textContent = d.count;
+        if (!d.count){ if (empty) empty.classList.remove('hidden'); return; }
+
+        list.innerHTML = d.questions.map(function(q){
+          return '<div class="border border-line-subtle rounded-lg p-4">'
+            + '<div class="flex items-start gap-2">'
+              + '<span class="font-semibold text-accent-500 shrink-0">Q</span>'
+              + '<div class="min-w-0">'
+                + '<div class="text-fg-primary">' + esc(q.question) + '</div>'
+                + '<div class="text-xs text-fg-muted mt-1">' + esc(q.asker_name) + ' · ' + esc(q.asked_at || '')
+                + (q.is_mine ? ' · ' + @json(__('messages.YourQuestionTag')) : '') + '</div>'
+              + '</div>'
+            + '</div>'
+            + (q.answer
+                ? '<div class="flex items-start gap-2 mt-3 pt-3 border-t border-line-subtle">'
+                  + '<span class="font-semibold text-fg-muted shrink-0">A</span>'
+                  + '<div class="min-w-0">'
+                    + '<div class="text-fg-secondary">' + esc(q.answer) + '</div>'
+                    + '<div class="text-xs text-fg-muted mt-1">' + @json(__('messages.AnsweredByStore'))
+                    + (q.answered_at ? ' · ' + esc(q.answered_at) : '') + '</div>'
+                  + '</div>'
+                + '</div>'
+                : '<div class="text-xs text-fg-muted mt-2">' + @json(__('messages.AwaitingAnswer')) + '</div>')
+            + '</div>';
+        }).join('');
       }).catch(function(){});
   })();
 

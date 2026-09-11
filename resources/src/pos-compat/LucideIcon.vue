@@ -8,7 +8,7 @@ import {
   ShoppingCart, ShoppingBasket, ShoppingBag, Store, CreditCard, Wallet,
   Banknote, DollarSign, Receipt, ReceiptText, Tag, Ticket, Barcode,
   // people
-  User, UserPlus, UserMinus, Users, IdCard, BriefcaseBusiness, ShieldCheck,
+  User, UserPlus, UserMinus, UserCheck, Users, IdCard, BriefcaseBusiness, ShieldCheck,
   // tools / settings
   Settings, Wrench, Key, Lock, Shield, Bug,
   // analytics / charts
@@ -42,7 +42,7 @@ import {
   Volume2, VolumeX,
   ChefHat, RotateCw,
   CalendarCheck, CalendarClock, Layers, Video, Link, Paperclip, History,
-  Megaphone, MessageCircle, ToggleRight, ScanBarcode, Gift
+  Megaphone, MessageCircle, ToggleRight, ScanBarcode, Gift, Keyboard
 } from 'lucide-vue-next';
 
 const REGISTRY = {
@@ -78,6 +78,7 @@ const REGISTRY = {
   'user': User,
   'user-plus': UserPlus,
   'user-minus': UserMinus,
+  'user-check': UserCheck,
   'users': Users,
   'id-card': IdCard,
   'briefcase-business': BriefcaseBusiness,
@@ -157,6 +158,7 @@ const REGISTRY = {
   'search': Search,
   'flag': Flag,
   'list': List,
+  'keyboard': Keyboard,
   'columns-3': Columns3,
   'package-open': PackageOpen,
   'loader': Loader,

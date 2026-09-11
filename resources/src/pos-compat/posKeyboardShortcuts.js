@@ -93,7 +93,13 @@ export const POS_SHORTCUTS = [
     descriptionFallback: "Recall held sales",
     match: (e) => e.key === "F7",
     action: (vm) => {
-      if (typeof vm.loadDraftSale === "function") vm.loadDraftSale();
+      // Open the held-sales list; `loadDraftSale(id)` needs a draft id, so
+      // calling it directly from the shortcut did nothing useful.
+      if (typeof vm.Show_Draft_Sales === "function") {
+        vm.Show_Draft_Sales();
+      } else if (typeof vm.loadDraftSale === "function") {
+        vm.loadDraftSale();
+      }
     },
   },
   {

@@ -1,8 +1,10 @@
 /**
  * Bootstrap-Vue runtime shims for the POS port: the $bvModal show/hide
  * registry, a $bvToast.toast() that renders Bootstrap toast markup, and the
- * legacy global `Fire` event bus. Kept dependency-free.
+ * legacy global `Fire` event bus, plus a SweetAlert2-style $swal over antd Modal.
  */
+
+import { Modal } from 'ant-design-vue';
 
 // ---------------- modal registry ($bvModal) ----------------
 
@@ -78,3 +80,42 @@ export const Fire = {
         listeners.get(event)?.forEach(fn => fn(...args));
     },
 };
+
+// ---------------- SweetAlert2 ($swal) ----------------
+
+/**
+ * Minimal SweetAlert2 facade over Ant Design's static Modal. Covers the two
+ * shapes the ported POS script uses:
+ *   $swal({ title, text, type, showCancelButton, confirmButtonText, ... })
+ *     -> resolves { value: true } on confirm, { value: false, dismiss } on cancel
+ *   $swal(title, text, type)
+ *     -> plain informational alert, resolves { value: true } once closed
+ */
+const SWAL_MODAL = { success: 'success', error: 'error', warning: 'warning', info: 'info', question: 'confirm' };
+
+export function swal(arg, text, type) {
+    const opts = (arg && typeof arg === 'object') ? arg : { title: arg, text, type };
+    const icon = SWAL_MODAL[opts.icon || opts.type] || 'info';
+    const content = opts.text ?? opts.html ?? '';
+    const base = {
+        title: opts.title || '',
+        content,
+        centered: true,
+        okText: opts.confirmButtonText || 'OK',
+        zIndex: 12000,
+    };
+    return new Promise((resolve) => {
+        if (opts.showCancelButton) {
+            Modal.confirm({
+                ...base,
+                okType: icon === 'warning' || icon === 'error' ? 'danger' : 'primary',
+                cancelText: opts.cancelButtonText || 'Cancel',
+                onOk: () => resolve({ value: true, isConfirmed: true }),
+                onCancel: () => resolve({ value: false, isConfirmed: false, dismiss: 'cancel' }),
+            });
+            return;
+        }
+        const open = Modal[icon === 'confirm' ? 'info' : icon] || Modal.info;
+        open({ ...base, onOk: () => resolve({ value: true, isConfirmed: true }) });
+    });
+}

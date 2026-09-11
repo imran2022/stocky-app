@@ -41,6 +41,8 @@ class AssetTransferController extends BaseController
         $order = $sortable[$order] ?? 'asset_transfers.id';
 
         $query = AssetTransfer::leftJoin('assets', 'assets.id', '=', 'asset_transfers.asset_id')
+            ->tap(fn ($q) => $this->scopeToWarehousesEitherEnd(
+                $q, 'asset_transfers.from_warehouse_id', 'asset_transfers.to_warehouse_id'))
             ->leftJoin('warehouses as from_wh', 'from_wh.id', '=', 'asset_transfers.from_warehouse_id')
             ->leftJoin('warehouses as to_wh', 'to_wh.id', '=', 'asset_transfers.to_warehouse_id')
             ->whereNull('asset_transfers.deleted_at')
@@ -110,10 +112,17 @@ class AssetTransferController extends BaseController
             'transfer_date' => 'required|date',
         ]);
 
+        // Moving an asset is a two-warehouse action: the destination must be
+        // one of the caller's, and so must the asset's current home.
+        $this->abortIfWarehouseDenied($request->to_warehouse_id);
+
         return DB::transaction(function () use ($request) {
             $asset = Asset::whereNull('deleted_at')->lockForUpdate()->find($request->asset_id);
             if (! $asset) {
                 return response()->json(['success' => false, 'message' => 'Asset not found.'], 404);
+            }
+            if ($asset->warehouse_id) {
+                $this->abortIfWarehouseDenied($asset->warehouse_id);
             }
             if ((int) $asset->warehouse_id === (int) $request->to_warehouse_id) {
                 return response()->json([
@@ -146,6 +155,7 @@ class AssetTransferController extends BaseController
 
         return DB::transaction(function () use ($id) {
             $transfer = AssetTransfer::whereNull('deleted_at')->findOrFail($id);
+            $this->abortIfTransferDenied($transfer->from_warehouse_id, $transfer->to_warehouse_id);
             $this->undo($transfer);
 
             return response()->json(['success' => true], 200);
@@ -161,6 +171,8 @@ class AssetTransferController extends BaseController
             // asset back along the chain instead of stranding it.
             $transfers = AssetTransfer::whereNull('deleted_at')
                 ->whereIn('id', $request->selectedIds ?: [])
+                ->tap(fn ($q) => $this->scopeToWarehousesEitherEnd(
+                    $q, 'from_warehouse_id', 'to_warehouse_id'))
                 ->orderBy('transfer_date', 'desc')
                 ->orderBy('id', 'desc')
                 ->get();

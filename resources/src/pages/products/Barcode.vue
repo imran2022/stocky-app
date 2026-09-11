@@ -354,6 +354,8 @@ import BarcodeSvg from '../../components/BarcodeSvg.vue';
 import QrcodeScanner from '../../pos-compat/QrcodeScanner';
 import { useAuthStore } from '../../stores/auth';
 import http from '../../lib/http';
+import { qzPrintRaw, isQzConnectError } from '../../lib/qzPrint';
+import { renderLabelRaster } from '../../lib/labelRaster';
 import { start as startProgress, done as doneProgress } from '../../lib/progress';
 
 const { t } = useI18n();
@@ -381,6 +383,15 @@ const warehouseTouched = ref(false);
 
 // Label design settings — loaded from / saved to settings.barcode_label_settings.
 const labelPrinterEnabled = ref(false);
+const labelRenderMode = ref('native');
+// Physical sticker size from the printer settings — direct printing uses
+// this, NOT the on-screen sticker size: the preview default (50x25) has no
+// reason to match the roll, and a mismatched SIZE makes the printer hunt for
+// the gap in the wrong place so every following label drifts.
+const labelPrinterSize = ref({ width: null, height: null });
+const labelPrinterDpi = ref(203);
+const labelPrinterOffsets = ref({ x: 0, y: 0 });
+const currencyCode = ref('');
 const printingDirect = ref(false);
 const label_settings = ref({
   template: 'template1',
@@ -830,27 +841,44 @@ function directPrintLabels() {
     return;
   }
   printingDirect.value = true;
-  const payload = {
-    labels: products_added.value.map((p) => ({
-      name: p.name,
-      barcode: p.barcode,
-      Type_barcode: p.Type_barcode,
-      Net_price: p.Net_price,
-      qte: p.qte,
-    })),
-    design: {
-      ...label_settings.value,
-      width_mm: custom_sticker_width.value || 50,
-      height_mm: custom_sticker_height.value || 25,
-      currency: auth.currency,
-    },
+  const labels = products_added.value.map((p) => ({
+    name: p.name,
+    barcode: p.barcode,
+    Type_barcode: p.Type_barcode,
+    Net_price: p.Net_price,
+    qte: p.qte,
+  }));
+  const design = {
+    ...label_settings.value,
+    width_mm: labelPrinterSize.value.width || custom_sticker_width.value || 50,
+    height_mm: labelPrinterSize.value.height || custom_sticker_height.value || 25,
+    printer_dpi: labelPrinterDpi.value,
+    offset_x_mm: labelPrinterOffsets.value.x,
+    offset_y_mm: labelPrinterOffsets.value.y,
+    // Symbol for display; ASCII code as fallback where the symbol can't be
+    // drawn (printer bitmap fonts) or isn't configured.
+    currency: auth.currency || currencyCode.value,
+    currency_ascii: currencyCode.value,
   };
+  // In raster mode the browser draws each label at 203 dpi and the printer
+  // just stamps the image, so the print matches the preview exactly.
+  const payload = labelRenderMode.value === 'raster'
+    ? { rasters: labels.map((label) => renderLabelRaster(label, design)), design }
+    : { labels, design };
+
   http.post('print_labels_direct', payload)
-    .then((res) => {
+    .then(async (res) => {
+      // QZ Tray connection: the server returned the raw TSPL payload and the
+      // browser hands it to the printer on THIS computer.
+      if (res && res.qz) {
+        await qzPrintRaw(res.printer, res.payload_base64);
+      }
       makeToast('success', (res && res.message) || t('Sent_to_label_printer'), t('Success'));
     })
     .catch((e) => {
-      makeToast('danger', e?.data?.message || t('Label_print_failed'), t('Error'));
+      const msg = isQzConnectError(e) ? t('QZ_Not_Running')
+        : (e?.data?.message || e?.message || t('Label_print_failed'));
+      makeToast('danger', msg, t('Error'));
     })
     .finally(() => {
       printingDirect.value = false;
@@ -981,7 +1009,30 @@ onMounted(async () => {
     const data = await http.get('barcode_create_page');
     warehouses.value = data.warehouses || [];
     labelPrinterEnabled.value = !!data.label_printer_enabled;
+    labelRenderMode.value = data.label_printer_render_mode === 'raster' ? 'raster' : 'native';
+    labelPrinterSize.value = {
+      width: Number(data.label_printer_width_mm) || null,
+      height: Number(data.label_printer_height_mm) || null,
+    };
+    labelPrinterDpi.value = Number(data.label_printer_dpi) === 300 ? 300 : 203;
+    labelPrinterOffsets.value = {
+      x: Number(data.label_printer_offset_x_mm) || 0,
+      y: Number(data.label_printer_offset_y_mm) || 0,
+    };
+    currencyCode.value = data.currency_code || '';
     applySavedLabelSettings(data.barcode_label_settings);
+    // Direct label printing uses the printer's physical sticker size from
+    // Settings → Direct Network Printing, never the paper choice on this
+    // page — force the preview to that size so what is shown matches what
+    // prints. (The paper presets remain relevant only for browser printing,
+    // i.e. when the direct label printer is disabled.)
+    if (labelPrinterEnabled.value && labelPrinterSize.value.width && labelPrinterSize.value.height) {
+      paper_size.value = 'customstyle';
+      Selected_Paper_size('customstyle');
+      custom_sticker_width.value = labelPrinterSize.value.width;
+      custom_sticker_height.value = labelPrinterSize.value.height;
+      applyCustomStickerDimensions();
+    }
     isLoading.value = false;
   } catch (e) {
     setTimeout(() => { isLoading.value = false; }, 500);

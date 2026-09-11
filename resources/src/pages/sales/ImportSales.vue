@@ -44,7 +44,9 @@
               />
             </a-form-item>
 
-            <a-form-item :label="$t('Sales_Agent')">
+            <!-- Sales agents belong to the Commissions module; hide the field
+                 when the module is toggled off (Settings → Modules). -->
+            <a-form-item v-if="auth.moduleEnabled('commissions')" :label="$t('Sales_Agent')">
               <a-select
                 v-model:value="sale.sales_agent_id"
                 :options="salesAgents.map(ag => ({ label: ag.name, value: ag.id }))"

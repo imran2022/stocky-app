@@ -1,6 +1,11 @@
 <template>
   <div class="page">
-    <PageHeader :title="$t('CustomersReport')" :breadcrumb="[$t('Reports'), $t('CustomersReport')]" />
+    <PageHeader :title="$t('CustomersReport')" :breadcrumb="[$t('Reports'), $t('CustomersReport')]">
+      <template #actions>
+        <!-- Multi-Currency: view amounts converted (display-only) -->
+        <ViewCurrencySelect />
+      </template>
+    </PageHeader>
 
     <a-row :gutter="[16, 16]" style="margin-bottom: 16px">
       <a-col v-for="card in cards" :key="card.label" :xs="24" :sm="12" :lg="6">
@@ -104,6 +109,7 @@ import { useI18n } from 'vue-i18n';
 import PageHeader from '../../components/PageHeader.vue';
 import ReportTab from '../../components/ReportTab.vue';
 import StatusTag from '../../components/StatusTag.vue';
+import ViewCurrencySelect from '../../components/ViewCurrencySelect.vue';
 import { TAG_KEYS, documentTag } from '../../lib/statusTags';
 import { useFormat } from '../../composables/useFormat';
 import http from '../../lib/http';

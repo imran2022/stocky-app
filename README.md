@@ -833,3 +833,119 @@ SQL injection protection
 
 - Updated documentation for better clarity and setup guidance.
 - Resolved multiple minor bugs to improve performance and reliability.
+
+
+
+# 🚀 Version 5.8 — Release Notes
+
+## ✨ What’s New in Version 5.8
+
+Version 5.8 introduces powerful new features, integrations, offline capabilities, enhanced kitchen operations, and major improvements to the online store experience.
+
+### 📊 Reports & Pricing
+
+* Added **Product Sales Summary Report**.
+* Added **Quantity-Based Wholesale Pricing**.
+* Added **Multi-Currency** support.
+* Added **ZATCA 2** support.
+
+### 🛒 Online Store & E-commerce
+
+* **Configurable Online Store URL** — run your storefront from a custom path such as `/shop` or directly from the root domain.
+* Added **bKash** and **SSLCommerz** payment integrations for the Online Store.
+* Added new Online Store themes:
+
+  * **Electronics** — designed for electronics, PC, and laptop stores.
+  * **Toys & Baby** — *Jouets & Bébé*.
+  * **Grocery & Supermarket**.
+* Redesigned the **Real Estate** theme.
+* Upgraded the **Default Online Store** theme.
+* Added **Product Images by Link** — paste hosted image URLs from Unsplash, CDNs, supplier catalogs, and other sources directly into the product gallery alongside uploaded images.
+
+### 📴 Offline POS
+
+* The POS now works fully offline.
+* Refreshing the POS while offline keeps the system fully functional, providing a more reliable experience in environments with unstable or limited internet connectivity.
+
+### 📱 PWA & Auto Updates
+
+* Added **Install App (PWA)** directly to the dashboard header.
+* Added **Automatic Updates**.
+
+
+### 📱 Portan Client
+
+* Improve the interface for portal client .
+
+### 🔗 Integrations Hub
+
+* Added a new **Integrations Hub** for managing connected services.
+* Added new sidebar sections:
+
+  * **E-commerce Platforms**
+  * **Integrations**
+
+#### New Integrations
+
+* **Salla**
+* **PrestaShop**
+* **Jumia**
+* **Xero**
+* **Google Sheets**
+* **Mailchimp**
+
+#### Notifications
+
+* Added **Slack Notifications**.
+* Added **Telegram Notifications**.
+
+#### Automation & Sync
+
+* Added **Xero Auto-Sync** for new sales.
+* Added **Mailchimp Auto-Sync** for new customers.
+* Added **Nightly Google Sheets Auto-Export**.
+* Added automatic **Keep-Alive** for Salla and Xero connections.
+* Fixed module toggles for **WooCommerce, Shopify, and Zapier** in the sidebar.
+
+---
+
+## 👨‍🍳 Kitchen Display System
+
+Version 5.8 brings a major upgrade to the Kitchen Display System (KDS), making kitchen workflows faster, clearer, and easier to manage.
+
+* Added **daily token/call numbers** on tickets, chits, and kitchen displays.
+* Added **Fullscreen Kitchen Mode** for wall-mounted TVs.
+* Added **Overdue Color Escalation** with configurable preparation-time targets.
+* Added **Per-Item Check-Off** with auto-start, auto-complete, and progress indicators.
+* Added **Kitchen Stations by Product Category** with per-device station pinning.
+* Added optional **automatic routing of confirmed Online Store orders** to the kitchen.
+* Added a **10-second Undo** option after completing a ticket.
+* Added **72mm Kitchen Chit Printing** with station-aware printing.
+* Added a new **Kitchen Report** with:
+
+  * Preparation and wait times
+  * Staff performance
+  * Performance trends
+  * Top-selling products
+  * Export functionality
+* Added a public **Order Ready Customer Screen** featuring:
+
+  * Token board
+  * Notification chime
+  * Secure pairing link
+* Added a **Voided** badge to tickets when the associated sale has been deleted.
+
+---
+
+## 🧰 Bug Fixes & Enhancements
+
+* Updated documentation with clearer instructions and improved setup guidance.
+* Fixed multiple minor bugs across the system.
+* Improved overall **performance, stability, and reliability**.
+* Improved the overall user experience across POS, Online Store, Kitchen, and Integrations.
+
+---
+
+### 🎉 Thank You
+
+Thank you for using our platform and helping us make it better. Version 5.8 delivers a more powerful, reliable, and connected experience for your business.

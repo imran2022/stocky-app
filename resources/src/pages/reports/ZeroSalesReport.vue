@@ -9,6 +9,10 @@
     :export-params="filterParams"
     export-rows-key="report"
   >
+    <template #actions>
+      <!-- Multi-Currency: view amounts converted (display-only) -->
+      <ViewCurrencySelect />
+    </template>
     <!-- Dormant-catalogue overview across the WHOLE filtered set (backend
          summary / idle_buckets / by_category), not the visible page. -->
     <template #chart>
@@ -96,6 +100,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import ReportPage from '../../components/ReportPage.vue';
+import ViewCurrencySelect from '../../components/ViewCurrencySelect.vue';
 import { useCrudTable } from '../../composables/useCrudTable';
 import { useFormat } from '../../composables/useFormat';
 import { useUiStore } from '../../stores/ui';

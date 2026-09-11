@@ -1,209 +1,251 @@
 <template>
-  <div class="portal-dashboard portal-page">
-    <div v-if="loading" class="pc-page-loading">
-      <div class="pc-spinner"></div>
-      <p>Loading your dashboard...</p>
+  <div>
+    <div v-if="loading" class="text-center py-6">
+      <div class="spinner-border text-primary" role="status"></div>
+      <div class="text-secondary mt-2">{{ $t('loading_dashboard') }}</div>
     </div>
 
     <template v-else>
-      <!-- Greeting -->
-      <header class="pc-hero">
-        <div>
-          <p class="pc-eyebrow">{{ greeting }}</p>
-          <h1 class="pc-hero-title">Welcome back<span v-if="clientName">, {{ firstName }}</span></h1>
-          <p class="pc-hero-sub">Here’s a quick overview of your account.</p>
-        </div>
-        <router-link to="/invoices" class="pc-hero-cta">
-          <span>View invoices</span>
-          <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 10h10M11 5l5 5-5 5"/></svg>
-        </router-link>
-      </header>
+      <div class="mb-3">
+        <div class="h3 mb-0">{{ greeting }}, {{ firstName || d.client.name }}</div>
+        <div class="text-secondary">{{ today }}</div>
+      </div>
 
-      <!-- Stats -->
-      <section class="pc-stats">
-        <div class="pc-stat pc-stat-blue">
-          <div class="pc-stat-icon">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l5 5v13a1 1 0 01-1 1H6a1 1 0 01-1-1V4a1 1 0 011-1z"/><path d="M14 3v6h6"/></svg>
-          </div>
-          <div class="pc-stat-body">
-            <span class="pc-stat-label">Total Invoices</span>
-            <span class="pc-stat-value">{{ stats.total_invoices || 0 }}</span>
-          </div>
+      <!-- ══ Headline figures ═══════════════════════════════════════ -->
+      <div class="row row-deck row-cards mb-3">
+        <div class="col-sm-6 col-xl-3">
+          <StatCard :label="$t('amount_due')" :value="money(d.total_due)" icon="currency-dollar" :tone="Number(d.total_due) > 0 ? 'red' : 'primary'"
+            :sub="dueSub" />
         </div>
-        <div class="pc-stat pc-stat-amber">
-          <div class="pc-stat-icon">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9 10h5a1.5 1.5 0 010 3h-4a1.5 1.5 0 000 3h5"/></svg>
-          </div>
-          <div class="pc-stat-body">
-            <span class="pc-stat-label">Total Amount</span>
-            <span class="pc-stat-value">{{ formatMoney(stats.total_amount) }}</span>
-          </div>
+        <div class="col-sm-6 col-xl-3">
+          <StatCard :label="tr('invoiced_this_month', 'Invoiced this month')" :value="money(d.month.invoiced)" icon="receipt" tone="blue" :change="d.month.change_invoiced" :sub="d.month.label" />
         </div>
-        <div class="pc-stat pc-stat-green">
-          <div class="pc-stat-icon">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
-          </div>
-          <div class="pc-stat-body">
-            <span class="pc-stat-label">Total Paid</span>
-            <span class="pc-stat-value">{{ formatMoney(stats.total_paid) }}</span>
-          </div>
+        <div class="col-sm-6 col-xl-3">
+          <StatCard :label="tr('paid_this_month', 'Paid this month')" :value="money(d.month.paid)" icon="chart-bar" tone="teal" :change="d.month.change_paid" :sub="d.month.label" />
         </div>
-        <div class="pc-stat pc-stat-red pc-stat-highlight">
-          <div class="pc-stat-icon">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
-          </div>
-          <div class="pc-stat-body">
-            <span class="pc-stat-label">Amount Due</span>
-            <span class="pc-stat-value">{{ formatMoney(stats.total_due) }}</span>
-            <small v-if="Number(stats.opening_balance) > 0" class="pc-stat-hint">
-              Sales {{ formatMoney(stats.sales_due) }} + Opening {{ formatMoney(stats.opening_balance) }}
-            </small>
-          </div>
+        <div class="col-sm-6 col-xl-3">
+          <StatCard :label="$t('total_invoices')" :value="number(d.total_invoices)" icon="file-invoice" tone="green"
+            :sub="tr('average_invoice_sub', 'average {amount}', { amount: money(d.average_invoice) })" />
         </div>
-      </section>
+      </div>
 
-      <!-- Quick Actions -->
-      <section class="pc-section">
-        <h2 class="pc-section-title">Quick actions</h2>
-        <div class="pc-quick-grid">
-          <router-link to="/invoices" class="pc-quick">
-            <span class="pc-quick-icon pc-quick-blue">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l5 5v13a1 1 0 01-1 1H6a1 1 0 01-1-1V4a1 1 0 011-1z"/><path d="M14 3v6h6"/></svg>
-            </span>
-            <span class="pc-quick-text">
-              <strong>Invoices</strong>
-              <small>View all invoices</small>
-            </span>
-          </router-link>
-          <router-link to="/payments" class="pc-quick">
-            <span class="pc-quick-icon pc-quick-green">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 11h20"/></svg>
-            </span>
-            <span class="pc-quick-text">
-              <strong>Payments</strong>
-              <small>Payment history</small>
-            </span>
-          </router-link>
-          <router-link to="/statement" class="pc-quick">
-            <span class="pc-quick-icon pc-quick-violet">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>
-            </span>
-            <span class="pc-quick-text">
-              <strong>Statement</strong>
-              <small>Account activity</small>
-            </span>
-          </router-link>
-        </div>
-      </section>
-
-      <!-- Recent Invoices + Payments -->
-      <div class="pc-two-col">
-        <section class="pc-card">
-          <div class="pc-card-head">
-            <h2 class="pc-card-title">Recent invoices</h2>
-            <router-link to="/invoices" class="pc-link">View all →</router-link>
-          </div>
-          <div class="pc-card-body pc-list-body">
-            <div v-if="!recentInvoices.length" class="pc-empty">
-              <div class="pc-empty-icon">📄</div>
-              <p>No invoices yet</p>
+      <!-- ══ Needs attention ═════════════════════════════════════════ -->
+      <div v-if="d.alerts.length" class="row row-cards mb-3">
+        <div v-for="(alert, i) in d.alerts" :key="i" class="col-md-6 col-xl-4">
+          <div class="card h-100" :class="`border-${alert.tone}`">
+            <div class="card-body">
+              <div class="d-flex align-items-start gap-2 mb-2">
+                <i :class="`ti ti-${alert.icon} fs-2 text-${alert.tone}`"></i>
+                <div class="fw-semibold">{{ alert.title }}</div>
+              </div>
+              <p class="text-secondary small mb-2">{{ alert.detail }}</p>
+              <router-link :to="alert.url" class="btn btn-sm" :class="`btn-outline-${alert.tone}`">{{ alert.action }}</router-link>
             </div>
+          </div>
+        </div>
+      </div>
 
-            <!-- Desktop table -->
-            <div v-else class="pc-table-wrap pc-hide-mobile">
-              <table class="pc-table">
+      <div class="row row-cards mb-3">
+        <!-- ══ The trend ══════════════════════════════════════════════ -->
+        <div class="col-xl-8">
+          <div class="card h-100">
+            <div class="card-header">
+              <div>
+                <h3 class="card-title">{{ tr('invoiced_last_months', 'Invoiced, last {months} months', { months: d.by_month.length }) }}</h3>
+                <p class="card-subtitle">{{ tr('invoiced_vs_paid', 'Invoiced against what was paid') }}</p>
+              </div>
+              <div class="card-actions text-end">
+                <div class="h2 mb-0">{{ money(trendTotal) }}</div>
+                <div class="text-secondary small">{{ tr('a_month_on_average', '{amount} a month on average', { amount: money(trendAverage) }) }}</div>
+              </div>
+            </div>
+            <div class="card-body">
+              <EmptyState v-if="trendTotal <= 0" icon="chart-line" :title="tr('no_invoices_in_window', 'No invoices in this window yet')" :subtitle="tr('trend_fills_in', 'The trend fills in as invoices are issued.')" />
+              <RstChart v-else :height="300" :labels="d.by_month.map(m => m.label)" :series="[
+                { label: tr('invoiced', 'Invoiced'), data: d.by_month.map(m => m.gross), color: 'accent' },
+                { label: $t('paid'), data: d.by_month.map(m => m.paid), color: 'slate', fill: false, dashed: true, width: 2 },
+              ]" :aria-label="tr('invoiced_last_months', 'Invoiced, last {months} months', { months: d.by_month.length })" />
+            </div>
+            <div class="card-footer d-flex flex-wrap gap-4 text-secondary small">
+              <span>{{ tr('busiest_month', 'Busiest month') }} <strong class="text-reset">{{ busiestMonth }}</strong></span>
+              <span>{{ $t('invoices') }} <strong class="text-reset">{{ number(d.total_invoices) }}</strong></span>
+              <span>{{ $t('total_paid') }} <strong class="text-reset">{{ money(d.total_paid) }}</strong></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══ Right now ══════════════════════════════════════════════ -->
+        <div class="col-xl-4">
+          <div class="card h-100">
+            <div class="card-header"><h3 class="card-title">{{ tr('right_now', 'Right now') }}</h3></div>
+            <div class="list-group list-group-flush">
+              <router-link v-for="row in liveRows" :key="row.to" :to="row.to" class="list-group-item list-group-item-action d-flex align-items-center gap-3">
+                <i :class="`ti ti-${row.icon} fs-2 text-secondary`"></i>
+                <span class="flex-fill">{{ row.label }}</span>
+                <span class="h3 mb-0">{{ row.value }}</span>
+              </router-link>
+            </div>
+            <div class="card-footer">
+              <div class="row g-3 text-center">
+                <div class="col-6">
+                  <div class="text-secondary small">{{ $t('opening_balance') }}</div>
+                  <div class="h3 mb-0">{{ money(d.opening_balance) }}</div>
+                </div>
+                <div class="col-6">
+                  <div class="text-secondary small">{{ tr('last_payment', 'Last payment') }}</div>
+                  <div class="h3 mb-0">{{ d.last_payment ? money(d.last_payment.amount) : '—' }}</div>
+                  <div v-if="d.last_payment" class="text-secondary small">{{ d.last_payment.date }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row row-cards mb-3">
+        <!-- ══ Latest invoices ═══════════════════════════════════════ -->
+        <div class="col-xl-8">
+          <div class="card h-100">
+            <div class="card-header">
+              <h3 class="card-title">{{ $t('recent_invoices') }}</h3>
+              <div class="card-actions">
+                <router-link to="/invoices" class="btn btn-sm btn-ghost-secondary">{{ $t('view_all') }}</router-link>
+              </div>
+            </div>
+            <div v-if="!d.recent_invoices.length" class="card-body">
+              <EmptyState icon="receipt-off" :title="$t('no_invoices_yet')" />
+            </div>
+            <div v-else class="table-responsive">
+              <table class="table table-vcenter card-table">
                 <thead>
                   <tr>
-                    <th>Ref</th>
-                    <th>Date</th>
-                    <th>Total</th>
-                    <th>Due</th>
-                    <th>Status</th>
-                    <th></th>
+                    <th>{{ $t('invoice') }}</th>
+                    <th>{{ $t('date') }}</th>
+                    <th>{{ $t('status') }}</th>
+                    <th class="text-end">{{ $t('total') }}</th>
+                    <th class="text-end">{{ $t('due') }}</th>
+                    <th class="w-1"></th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="inv in recentInvoices" :key="inv.id">
-                    <td><router-link :to="`/invoices/${inv.id}`" class="pc-link">{{ inv.Ref }}</router-link></td>
-                    <td>{{ inv.date }}</td>
-                    <td>{{ formatMoney(inv.GrandTotal) }}</td>
-                    <td>{{ formatMoney(inv.due) }}</td>
-                    <td><span :class="'pc-badge pc-badge-' + badgeClass(inv.payment_status)">{{ inv.payment_status }}</span></td>
-                    <td><a :href="`/api/portal/invoices/${inv.id}/pdf`" target="_blank" rel="noopener" class="pc-chip">PDF</a></td>
+                  <tr v-for="inv in d.recent_invoices" :key="inv.id">
+                    <td>
+                      <router-link :to="`/invoices/${inv.id}`" class="fw-semibold text-reset text-decoration-none font-monospace">{{ inv.Ref }}</router-link>
+                    </td>
+                    <td class="text-secondary">{{ inv.date }}</td>
+                    <td><span :class="badge(invoiceTone(inv.payment_status))">{{ statusLabel(inv.payment_status) }}</span></td>
+                    <td class="text-end font-monospace">{{ money(inv.GrandTotal) }}</td>
+                    <td class="text-end font-monospace" :class="Number(inv.due) > 0 ? 'text-danger' : 'text-secondary'">{{ money(inv.due) }}</td>
+                    <td class="text-end">
+                      <div class="rst-row-actions justify-content-end">
+                        <router-link :to="`/invoices/${inv.id}`" :title="$t('view')" class="text-secondary"><i class="ti ti-eye"></i></router-link>
+                        <a :href="`/api/portal/invoices/${inv.id}/pdf`" target="_blank" rel="noopener" :title="$t('pdf')" class="text-primary"><i class="ti ti-download"></i></a>
+                      </div>
+                    </td>
                   </tr>
                 </tbody>
               </table>
             </div>
-
-            <!-- Mobile list -->
-            <ul class="pc-mobile-list pc-show-mobile">
-              <li v-for="inv in recentInvoices" :key="'m-' + inv.id" class="pc-mobile-row">
-                <router-link :to="`/invoices/${inv.id}`" class="pc-mobile-row-main">
-                  <div class="pc-mobile-top">
-                    <strong class="pc-mobile-ref">{{ inv.Ref }}</strong>
-                    <span :class="'pc-badge pc-badge-' + badgeClass(inv.payment_status)">{{ inv.payment_status }}</span>
-                  </div>
-                  <div class="pc-mobile-mid">
-                    <span class="pc-mobile-muted">{{ inv.date }}</span>
-                    <span class="pc-mobile-amount">{{ formatMoney(inv.GrandTotal) }}</span>
-                  </div>
-                  <div v-if="Number(inv.due) > 0" class="pc-mobile-due">Due {{ formatMoney(inv.due) }}</div>
-                </router-link>
-              </li>
-            </ul>
           </div>
-        </section>
+        </div>
 
-        <section class="pc-card">
-          <div class="pc-card-head">
-            <h2 class="pc-card-title">Recent payments</h2>
-            <router-link to="/payments" class="pc-link">View all →</router-link>
-          </div>
-          <div class="pc-card-body pc-list-body">
-            <div v-if="!recentPayments.length" class="pc-empty">
-              <div class="pc-empty-icon">💳</div>
-              <p>No payments yet</p>
+        <!-- ══ Payment mix ═══════════════════════════════════════════ -->
+        <div class="col-xl-4">
+          <div class="card h-100">
+            <div class="card-header">
+              <div>
+                <h3 class="card-title">{{ tr('payment_mix', 'Payment mix') }}</h3>
+                <p class="card-subtitle">{{ tr('all_time', 'All time') }}</p>
+              </div>
             </div>
-
-            <div v-else class="pc-table-wrap pc-hide-mobile">
-              <table class="pc-table">
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Ref</th>
-                    <th>Invoice</th>
-                    <th>Method</th>
-                    <th>Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="pay in recentPayments" :key="pay.id + '-' + (pay.payment_type || '')">
-                    <td>{{ pay.date }}</td>
-                    <td>{{ pay.Ref }}</td>
-                    <td>{{ pay.Sale_Ref || '—' }}</td>
-                    <td>{{ pay.payment_method || '—' }}</td>
-                    <td class="pc-amount-pos">{{ formatMoney(pay.montant) }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            <ul class="pc-mobile-list pc-show-mobile">
-              <li v-for="pay in recentPayments" :key="'pm-' + pay.id + '-' + (pay.payment_type || '')" class="pc-mobile-row">
-                <div class="pc-mobile-row-main">
-                  <div class="pc-mobile-top">
-                    <strong class="pc-mobile-ref">{{ pay.Ref }}</strong>
-                    <span class="pc-mobile-amount pc-amount-pos">{{ formatMoney(pay.montant) }}</span>
-                  </div>
-                  <div class="pc-mobile-mid">
-                    <span class="pc-mobile-muted">{{ pay.date }} · {{ pay.payment_method || '—' }}</span>
-                    <span class="pc-mobile-muted pc-mobile-right">{{ pay.Sale_Ref || '—' }}</span>
+            <div class="card-body">
+              <EmptyState v-if="!d.by_method.length" icon="credit-card-off" :title="$t('no_payments_yet')" />
+              <template v-else>
+                <div class="rst-donut mb-3">
+                  <RstChart type="doughnut" :height="180" :legend="false" :total="methodTotal"
+                    :labels="d.by_method.map(m => m.label)"
+                    :series="[{ data: d.by_method.map(m => m.total), colors: slots.slice(0, d.by_method.length) }]"
+                    :aria-label="tr('payment_mix', 'Payment mix')" />
+                  <div class="rst-donut-centre">
+                    <div class="text-secondary small">{{ $t('paid') }}</div>
+                    <div class="h3 mb-0">{{ money(methodTotal) }}</div>
                   </div>
                 </div>
-              </li>
-            </ul>
+                <ul class="rst-legend">
+                  <li v-for="(row, i) in d.by_method" :key="row.label">
+                    <span class="rst-swatch" :style="{ background: `var(--rst-${slots[i]})` }"></span>
+                    <span class="rst-legend-label">{{ row.label }}</span>
+                    <span class="rst-legend-value">{{ money(row.total) }}</span>
+                    <span class="badge bg-secondary-lt">{{ row.share }}%</span>
+                  </li>
+                </ul>
+              </template>
+            </div>
           </div>
-        </section>
+        </div>
+      </div>
+
+      <div class="row row-cards">
+        <!-- ══ What you buy most ═════════════════════════════════════ -->
+        <div class="col-xl-7">
+          <div class="card h-100">
+            <div class="card-header">
+              <div>
+                <h3 class="card-title mb-0">{{ tr('top_purchases', 'What you buy most') }}</h3>
+                <p class="card-subtitle mb-0">{{ tr('by_revenue', 'By amount') }}</p>
+              </div>
+            </div>
+            <div v-if="!d.top_products.length" class="card-body">
+              <EmptyState icon="shopping-bag" :title="tr('nothing_purchased_yet', 'Nothing purchased yet')" />
+            </div>
+            <div v-else class="table-responsive">
+              <table class="table table-vcenter card-table">
+                <thead>
+                  <tr>
+                    <th>{{ $t('product') }}</th>
+                    <th class="text-end">{{ $t('qty') }}</th>
+                    <th class="text-end">{{ $t('amount') }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in d.top_products" :key="item.name">
+                    <td>
+                      {{ item.name }}
+                      <div class="rst-meter"><span :style="{ width: item.share + '%' }"></span></div>
+                    </td>
+                    <td class="text-end font-monospace">{{ number(item.qty) }}</td>
+                    <td class="text-end font-monospace">{{ money(item.revenue) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══ Account summary ═══════════════════════════════════════ -->
+        <div class="col-xl-5">
+          <div class="card h-100">
+            <div class="card-header">
+              <div>
+                <h3 class="card-title">{{ tr('account_summary', 'Account summary') }}</h3>
+                <p class="card-subtitle">{{ tr('all_time', 'All time') }}</p>
+              </div>
+              <div class="card-actions">
+                <router-link to="/statement" class="btn btn-sm btn-ghost-secondary">{{ $t('nav_statement') }}</router-link>
+              </div>
+            </div>
+            <div class="table-responsive">
+              <table class="table table-sm table-vcenter card-table">
+                <tbody>
+                  <tr v-for="line in summaryLines" :key="line.label">
+                    <td class="text-secondary">{{ line.label }}</td>
+                    <td class="text-end font-monospace" :class="{ 'fw-bold': line.strong, 'text-danger': line.danger }">{{ line.value }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       </div>
     </template>
   </div>
@@ -211,400 +253,90 @@
 
 <script>
 import http from '../lib/http';
+import { money, number, badge, invoiceTone } from '../lib/ui';
+import { i18n } from '../i18n';
+import StatCard from '../components/StatCard.vue';
+import EmptyState from '../components/EmptyState.vue';
+import RstChart from '../components/RstChart.vue';
+
+const EMPTY = {
+  client: { name: '' }, total_invoices: 0, total_amount: 0, total_paid: 0, sales_due: 0, opening_balance: 0, total_due: 0,
+  unpaid_count: 0, average_invoice: 0, last_payment: null,
+  month: { invoices: 0, invoiced: 0, paid: 0, due: 0, average: 0, change_invoiced: null, change_paid: null, label: '' },
+  by_month: [], by_method: [], top_products: [], live: { open_invoices: 0, pending_quotations: 0, upcoming_appointments: 0, active_contracts: 0 },
+  alerts: [], recent_invoices: [],
+};
+
 export default {
+  components: { StatCard, EmptyState, RstChart },
   data() {
-    return {
-      loading: true,
-      stats: {},
-      recentInvoices: [],
-      recentPayments: [],
-      clientName: '',
-    };
+    return { loading: true, d: { ...EMPTY }, slots: ['s1', 's2', 's3', 's4', 's5', 's6'] };
   },
   computed: {
     greeting() {
       const h = new Date().getHours();
-      if (h < 12) return 'Good morning';
-      if (h < 18) return 'Good afternoon';
-      return 'Good evening';
+      if (h < 12) return this.$t('good_morning');
+      if (h < 18) return this.$t('good_afternoon');
+      return this.$t('good_evening');
     },
-    firstName() {
-      if (!this.clientName) return '';
-      return this.clientName.split(/\s+/)[0];
+    today() {
+      try {
+        return new Date().toLocaleDateString(i18n.global.locale.value, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+      } catch (_) { return new Date().toDateString(); }
+    },
+    firstName() { return this.d.client && this.d.client.name ? this.d.client.name.split(/\s+/)[0] : ''; },
+    dueSub() {
+      const d = this.d;
+      if (!(Number(d.total_due) > 0)) return this.tr('nothing_outstanding', 'Nothing outstanding');
+      if (Number(d.opening_balance) > 0) return this.$t('due_breakdown', { sales: money(d.sales_due), opening: money(d.opening_balance) });
+      return this.tr('unpaid_invoices_count', `${d.unpaid_count} unpaid invoice(s)`, { count: d.unpaid_count });
+    },
+    trendTotal() { return this.d.by_month.reduce((s, m) => s + (Number(m.gross) || 0), 0); },
+    trendAverage() { return this.d.by_month.length ? this.trendTotal / this.d.by_month.length : 0; },
+    busiestMonth() {
+      const best = [...this.d.by_month].sort((a, b) => b.gross - a.gross)[0];
+      return best && best.gross > 0 ? best.label : '—';
+    },
+    methodTotal() { return this.d.by_method.reduce((s, m) => s + (Number(m.total) || 0), 0); },
+    liveRows() {
+      const l = this.d.live;
+      return [
+        { label: this.tr('open_invoices', 'Unpaid invoices'), value: number(l.open_invoices), icon: 'file-invoice', to: '/invoices' },
+        { label: this.tr('open_quotations', 'Quotations awaiting'), value: number(l.pending_quotations), icon: 'file-description', to: '/quotations' },
+        { label: this.tr('upcoming_appointments', 'Upcoming appointments'), value: number(l.upcoming_appointments), icon: 'calendar-event', to: '/appointments' },
+        { label: this.tr('active_contracts', 'Active contracts'), value: number(l.active_contracts), icon: 'file-certificate', to: '/contracts' },
+      ];
+    },
+    summaryLines() {
+      const d = this.d;
+      return [
+        { label: this.tr('lifetime_invoiced', 'Invoiced'), value: money(d.total_amount), strong: true },
+        { label: this.$t('total_paid'), value: money(d.total_paid) },
+        { label: this.$t('opening_balance'), value: money(d.opening_balance) },
+        { label: this.$t('amount_due'), value: money(d.total_due), strong: true, danger: Number(d.total_due) > 0 },
+        { label: this.$t('total_invoices'), value: number(d.total_invoices) },
+        { label: this.tr('average_invoice', 'Average invoice'), value: money(d.average_invoice) },
+        { label: this.tr('invoiced_this_month', 'Invoiced this month'), value: money(d.month.invoiced) },
+        { label: this.tr('paid_this_month', 'Paid this month'), value: money(d.month.paid) },
+      ];
     },
   },
-  mounted() {
-    this.fetch();
-  },
+  mounted() { this.fetch(); },
   methods: {
+    money, number, badge, invoiceTone,
+    pageMeta() {
+      return { title: this.$t('nav_home'), pretitle: this.$t('client_portal'), crumbs: [] };
+    },
     async fetch() {
       this.loading = true;
       try {
-        const [dashboardRes, paymentsRes, meRes] = await Promise.all([
-          http.get('/portal/dashboard'),
-          http.get('/portal/payments', { params: { limit: 5, page: 1 } }),
-          http.get('/portal/me').catch(() => ({ data: null })),
-        ]);
-        const data = dashboardRes.data;
-        this.stats = data;
-        this.recentInvoices = data.recent_invoices || [];
-        this.recentPayments = (paymentsRes.data && paymentsRes.data.payments) || [];
-        const me = meRes && meRes.data;
-        this.clientName = (me && me.portal_client && me.portal_client.client && me.portal_client.client.name) || '';
+        const { data } = await http.get('/portal/dashboard');
+        this.d = { ...EMPTY, ...data, month: { ...EMPTY.month, ...(data.month || {}) }, live: { ...EMPTY.live, ...(data.live || {}) } };
       } catch (_) {
-        this.stats = {};
-        this.recentInvoices = [];
-        this.recentPayments = [];
+        this.d = { ...EMPTY };
       }
       this.loading = false;
-    },
-    formatMoney(n) {
-      if (n == null) return '0.00';
-      return Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    },
-    badgeClass(status) {
-      if (!status) return 'pending';
-      const s = (status + '').toLowerCase();
-      if (s === 'paid' || s === 'completed') return 'paid';
-      if (s === 'partial') return 'partial';
-      return 'pending';
     },
   },
 };
 </script>
-
-<style scoped>
-.portal-dashboard { padding-bottom: 1rem; }
-
-/* Page loading */
-.pc-page-loading {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 40vh;
-  color: var(--pc-text-muted);
-  gap: 1rem;
-}
-.pc-spinner {
-  width: 36px;
-  height: 36px;
-  border: 3px solid rgba(79, 70, 229, 0.15);
-  border-top-color: var(--pc-primary);
-  border-radius: 50%;
-  animation: pc-spin 0.8s linear infinite;
-}
-@keyframes pc-spin { to { transform: rotate(360deg); } }
-
-/* Hero */
-.pc-hero {
-  background: linear-gradient(135deg, #4f46e5 0%, #6366f1 45%, #7c3aed 100%);
-  color: #fff;
-  border-radius: var(--pc-radius-lg);
-  padding: 1.75rem;
-  margin-bottom: 1.5rem;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  box-shadow: 0 18px 40px -18px rgba(79, 70, 229, 0.5);
-  position: relative;
-  overflow: hidden;
-}
-.pc-hero::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(600px circle at 100% 0%, rgba(255,255,255,0.18), transparent 60%);
-  pointer-events: none;
-}
-.pc-eyebrow {
-  margin: 0 0 0.2rem;
-  font-size: 0.82rem;
-  font-weight: 500;
-  opacity: 0.85;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-.pc-hero-title {
-  margin: 0 0 0.35rem;
-  font-size: 1.75rem;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-}
-.pc-hero-sub { margin: 0; opacity: 0.9; font-size: 0.95rem; }
-.pc-hero-cta {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  background: rgba(255, 255, 255, 0.18);
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  padding: 0.55rem 1rem;
-  border-radius: 999px;
-  text-decoration: none;
-  font-weight: 500;
-  font-size: 0.9rem;
-  backdrop-filter: blur(8px);
-  transition: background 0.15s, transform 0.15s;
-  flex-shrink: 0;
-  position: relative;
-}
-.pc-hero-cta:hover { background: rgba(255, 255, 255, 0.28); transform: translateY(-1px); }
-
-/* Stats */
-.pc-stats {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 0.9rem;
-  margin-bottom: 1.75rem;
-}
-.pc-stat {
-  background: var(--pc-surface);
-  border: 1px solid var(--pc-border);
-  border-radius: var(--pc-radius);
-  padding: 1rem 1.1rem;
-  display: flex;
-  align-items: center;
-  gap: 0.9rem;
-  box-shadow: var(--pc-shadow-sm);
-  transition: transform 0.15s, box-shadow 0.15s;
-}
-.pc-stat:hover { transform: translateY(-1px); box-shadow: var(--pc-shadow); }
-.pc-stat-icon {
-  width: 42px;
-  height: 42px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.pc-stat-blue .pc-stat-icon { background: #dbeafe; color: #1d4ed8; }
-.pc-stat-amber .pc-stat-icon { background: #fef3c7; color: #b45309; }
-.pc-stat-green .pc-stat-icon { background: #d1fae5; color: #047857; }
-.pc-stat-red .pc-stat-icon { background: #fee2e2; color: #b91c1c; }
-.pc-stat-highlight {
-  background: linear-gradient(180deg, #fff 0%, #fff7f7 100%);
-  border-color: #fecaca;
-}
-.pc-stat-body { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
-.pc-stat-label { font-size: 0.78rem; color: var(--pc-text-muted); font-weight: 500; }
-.pc-stat-value {
-  font-size: 1.3rem;
-  font-weight: 700;
-  color: var(--pc-text);
-  letter-spacing: -0.01em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.pc-stat-hint {
-  font-size: 0.7rem;
-  color: var(--pc-text-muted);
-  font-weight: 500;
-  margin-top: 0.1rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Quick actions */
-.pc-section { margin-bottom: 1.75rem; }
-.pc-section-title {
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--pc-text);
-  margin: 0 0 0.75rem;
-  letter-spacing: -0.005em;
-}
-.pc-quick-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 0.85rem;
-}
-.pc-quick {
-  display: flex;
-  align-items: center;
-  gap: 0.85rem;
-  padding: 0.95rem 1rem;
-  background: var(--pc-surface);
-  border: 1px solid var(--pc-border);
-  border-radius: var(--pc-radius);
-  text-decoration: none;
-  color: var(--pc-text);
-  transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
-  box-shadow: var(--pc-shadow-sm);
-}
-.pc-quick:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--pc-shadow);
-  border-color: var(--pc-border-strong);
-}
-.pc-quick-icon {
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.pc-quick-blue { background: #dbeafe; color: #1d4ed8; }
-.pc-quick-green { background: #d1fae5; color: #047857; }
-.pc-quick-violet { background: #ede9fe; color: #6d28d9; }
-.pc-quick-text { display: flex; flex-direction: column; gap: 0.1rem; }
-.pc-quick-text strong { font-weight: 600; font-size: 0.92rem; }
-.pc-quick-text small { color: var(--pc-text-muted); font-size: 0.8rem; }
-
-/* Two columns */
-.pc-two-col {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 1.25rem;
-}
-.pc-card {
-  background: var(--pc-surface);
-  border: 1px solid var(--pc-border);
-  border-radius: var(--pc-radius);
-  box-shadow: var(--pc-shadow-sm);
-  overflow: hidden;
-}
-.pc-card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.95rem 1.15rem;
-  border-bottom: 1px solid var(--pc-border);
-}
-.pc-card-title { font-size: 0.95rem; font-weight: 600; color: var(--pc-text); margin: 0; }
-.pc-link {
-  color: var(--pc-primary);
-  text-decoration: none;
-  font-size: 0.85rem;
-  font-weight: 500;
-}
-.pc-link:hover { color: var(--pc-primary-600); }
-.pc-card-body { padding: 0; }
-
-/* Table */
-.pc-table-wrap { overflow-x: auto; }
-.pc-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
-.pc-table th, .pc-table td { padding: 0.7rem 1.15rem; text-align: left; border-bottom: 1px solid var(--pc-border); }
-.pc-table th {
-  background: var(--pc-surface-alt);
-  font-weight: 600;
-  color: var(--pc-text-muted);
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.pc-table tbody tr:last-child td { border-bottom: none; }
-.pc-table tbody tr:hover { background: var(--pc-surface-alt); }
-
-.pc-chip {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.2rem 0.55rem;
-  border: 1px solid var(--pc-border-strong);
-  border-radius: 6px;
-  font-size: 0.75rem;
-  font-weight: 500;
-  color: var(--pc-text-muted);
-  text-decoration: none;
-  background: #fff;
-  transition: border-color 0.15s, color 0.15s;
-}
-.pc-chip:hover { border-color: var(--pc-primary); color: var(--pc-primary); }
-
-.pc-badge {
-  display: inline-block;
-  padding: 0.22rem 0.55rem;
-  border-radius: 999px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  text-transform: capitalize;
-}
-.pc-badge-paid { background: var(--pc-success-bg); color: var(--pc-success); }
-.pc-badge-pending, .pc-badge-unpaid { background: var(--pc-warning-bg); color: var(--pc-warning); }
-.pc-badge-partial { background: #dbeafe; color: #1d4ed8; }
-
-.pc-amount-pos { color: var(--pc-success); font-weight: 600; }
-
-/* Empty */
-.pc-empty {
-  padding: 2rem 1rem;
-  text-align: center;
-  color: var(--pc-text-soft);
-}
-.pc-empty-icon {
-  font-size: 2.25rem;
-  opacity: 0.75;
-  margin-bottom: 0.5rem;
-}
-.pc-empty p { margin: 0; font-size: 0.9rem; }
-
-/* Mobile list */
-.pc-mobile-list { list-style: none; margin: 0; padding: 0; }
-.pc-mobile-row { border-bottom: 1px solid var(--pc-border); }
-.pc-mobile-row:last-child { border-bottom: none; }
-.pc-mobile-row-main {
-  display: block;
-  padding: 0.85rem 1.15rem;
-  text-decoration: none;
-  color: var(--pc-text);
-  transition: background 0.15s;
-}
-.pc-mobile-row-main:hover, .pc-mobile-row-main:active { background: var(--pc-surface-alt); }
-.pc-mobile-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.3rem;
-}
-.pc-mobile-ref { font-weight: 600; font-size: 0.92rem; }
-.pc-mobile-mid {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.85rem;
-}
-.pc-mobile-muted { color: var(--pc-text-muted); }
-.pc-mobile-right { text-align: right; }
-.pc-mobile-amount { font-weight: 600; font-size: 0.95rem; }
-.pc-mobile-due {
-  margin-top: 0.3rem;
-  display: inline-block;
-  font-size: 0.78rem;
-  color: var(--pc-danger);
-  font-weight: 500;
-}
-
-/* Responsive visibility */
-.pc-show-mobile { display: none; }
-.pc-hide-mobile { display: block; }
-
-/* Tablet */
-@media (max-width: 1024px) {
-  .pc-stats { grid-template-columns: repeat(2, 1fr); }
-}
-
-/* Mobile */
-@media (max-width: 768px) {
-  .pc-hero { padding: 1.35rem; flex-direction: column; align-items: flex-start; }
-  .pc-hero-title { font-size: 1.4rem; }
-  .pc-hero-sub { font-size: 0.9rem; }
-  .pc-two-col { grid-template-columns: 1fr; gap: 1rem; }
-  .pc-quick-grid { grid-template-columns: 1fr; }
-  .pc-show-mobile { display: block; }
-  .pc-hide-mobile { display: none; }
-}
-
-@media (max-width: 480px) {
-  .pc-stats { grid-template-columns: 1fr; }
-  .pc-stat-value { font-size: 1.15rem; }
-  .pc-hero { padding: 1.15rem; }
-}
-</style>

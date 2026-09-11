@@ -231,6 +231,27 @@
         </a-table>
       </a-card>
 
+      <!-- Wholesale quantity breaks -->
+      <a-card
+        v-if="(product.price_tiers || []).length"
+        size="small" :title="$t('Wholesale_Pricing_By_Quantity')" style="margin-bottom: 16px" :body-style="{ padding: 0 }"
+      >
+        <a-table
+          :columns="[
+            { title: t('Min_Quantity'), dataIndex: 'min_qty', key: 'min_qty', align: 'right' },
+            { title: t('Max_Quantity'), key: 'max_qty', align: 'right' },
+            { title: t('Price_Per_Piece'), dataIndex: 'price', key: 'price', align: 'right' },
+          ]"
+          :data-source="product.price_tiers" :pagination="false" size="middle" :row-key="(r, i) => i"
+        >
+          <template #bodyCell="{ column, record }">
+            <template v-if="column.key === 'max_qty'">
+              {{ record.max_qty === null ? $t('No_maximum') : record.max_qty }}
+            </template>
+          </template>
+        </a-table>
+      </a-card>
+
       <!-- Batches -->
       <a-card
         v-if="product.is_batch_tracked"
@@ -252,6 +273,63 @@
             <a-empty :description="$t('No_Batches_Available')" style="padding: 24px 0" />
           </template>
         </a-table>
+      </a-card>
+      <!-- Customer questions ("Ask About This Item") -->
+      <a-card size="small" style="margin-top: 16px">
+        <template #title>
+          {{ $t('Customer_Questions') }}
+          <a-tag v-if="unansweredCount" color="warning" style="margin-left: 8px">
+            {{ unansweredCount }} {{ $t('Unanswered') }}
+          </a-tag>
+        </template>
+
+        <a-spin :spinning="questionsLoading">
+          <a-empty v-if="!questions.length" :description="$t('No_Questions_Yet')" style="padding: 16px 0" />
+
+          <div v-for="q in questions" :key="q.id" class="pd-q">
+            <div class="pd-q-head">
+              <span class="pd-q-mark">Q</span>
+              <div class="pd-q-body">
+                <div>{{ q.question }}</div>
+                <div class="muted">{{ q.asker_name }} · {{ q.created_at }}</div>
+              </div>
+              <a-tag :color="q.answer ? 'success' : 'warning'">
+                {{ q.answer ? $t('Answered') : $t('Unanswered') }}
+              </a-tag>
+            </div>
+
+            <div v-if="q.answer && editingId !== q.id" class="pd-q-answer">
+              <span class="pd-q-mark">A</span>
+              <div class="pd-q-body">
+                <div>{{ q.answer }}</div>
+                <div class="muted">
+                  <template v-if="q.answered_by">{{ q.answered_by }} · </template>{{ q.answered_at }}
+                </div>
+              </div>
+            </div>
+
+            <div v-if="editingId === q.id" class="pd-q-form">
+              <a-textarea v-model:value="answerText" :rows="3" :maxlength="2000"
+                          :placeholder="$t('Write_an_answer')" />
+              <a-space style="margin-top: 8px">
+                <a-button type="primary" size="small" :loading="answering" @click="submitAnswer(q)">
+                  {{ $t('Publish_Answer') }}
+                </a-button>
+                <a-button size="small" @click="editingId = null">{{ $t('Cancel') }}</a-button>
+              </a-space>
+            </div>
+
+            <a-space v-else style="margin-top: 8px">
+              <a-button size="small" @click="startAnswer(q)">
+                {{ q.answer ? $t('Edit') : $t('Answer') }}
+              </a-button>
+              <a-button v-if="q.status !== 'rejected'" size="small" danger @click="setStatus(q, 'rejected')">
+                {{ $t('Reject') }}
+              </a-button>
+              <a-button v-else size="small" @click="setStatus(q, 'pending')">{{ $t('Restore') }}</a-button>
+            </a-space>
+          </div>
+        </a-spin>
       </a-card>
     </template>
   </div>
@@ -294,6 +372,52 @@ const router = useRouter();
 
 const loading = ref(true);
 const product = ref({});
+
+// ---- customer questions ("Ask About This Item") ----
+const questions = ref([]);
+const questionsLoading = ref(false);
+const editingId = ref(null);
+const answerText = ref('');
+const answering = ref(false);
+const unansweredCount = computed(() => questions.value.filter(q => !q.answer).length);
+
+async function loadQuestions(productId) {
+  questionsLoading.value = true;
+  try {
+    const r = await http.get('store/questions', { product_id: productId, per_page: 100 });
+    questions.value = r.data || [];
+  } catch (e) {
+    questions.value = [];
+  } finally {
+    questionsLoading.value = false;
+  }
+}
+function startAnswer(q) {
+  editingId.value = q.id;
+  answerText.value = q.answer || '';
+}
+async function submitAnswer(q) {
+  if (!(answerText.value || '').trim()) return;
+  answering.value = true;
+  try {
+    await http.post(`store/questions/${q.id}/answer`, { answer: answerText.value.trim(), publish: 1 });
+    message.success(t('Successfully_Updated'));
+    editingId.value = null;
+    await loadQuestions(product.value.id);
+  } catch (e) {
+    message.error(t('Failed'));
+  } finally {
+    answering.value = false;
+  }
+}
+async function setStatus(q, status) {
+  try {
+    await http.post(`store/questions/${q.id}/status`, { status });
+    await loadQuestions(product.value.id);
+  } catch (e) {
+    message.error(t('Failed'));
+  }
+}
 const barcodeWrap = ref(null);
 const pdfExporting = ref(false);
 
@@ -314,7 +438,9 @@ const gallery = computed(() => {
     : String(p.image || '').split(',');
   base.forEach(push);
   (p.products_variants_data || []).forEach(v => push(v.image));
-  return files.length ? files.map(f => `/images/products/${f}`) : [NO_IMAGE];
+  return files.length
+    ? files.map(f => (/^https?:\/\//i.test(f) ? f : `/images/products/${f}`))
+    : [NO_IMAGE];
 });
 const carouselRef = ref(null);
 const currentSlide = ref(0);
@@ -421,6 +547,13 @@ function buildSections() {
       rows: p.packs.map(x => [...(withVariant ? [x.variant_name || ''] : []), x.name, x.multiplier, x.price]),
     });
   }
+  if ((p.price_tiers || []).length) {
+    secs.push({
+      title: t('Wholesale_Pricing_By_Quantity'),
+      head: [t('Min_Quantity'), t('Max_Quantity'), t('Price_Per_Piece')],
+      rows: p.price_tiers.map(x => [x.min_qty, x.max_qty === null ? t('No_maximum') : x.max_qty, x.price]),
+    });
+  }
   if (p.is_batch_tracked && batches.value.length) {
     secs.push({
       title: t('Batches'),
@@ -445,7 +578,7 @@ function printSheet() {
   const svg = barcodeWrap.value?.querySelector('svg');
   const barcodeHtml = svg ? svg.outerHTML : '';
   const imgHtml = mainImage.value && !mainImage.value.endsWith('no-image.png')
-    ? `<img class="photo" src="${window.location.origin}${mainImage.value}" alt="" />`
+    ? `<img class="photo" src="${/^https?:\/\//i.test(mainImage.value) ? mainImage.value : window.location.origin + mainImage.value}" alt="" />`
     : '';
   const infoHtml = infoRows.value
     .map(r => `<tr><th>${esc(r.label)}</th><td>${esc(r.value)}</td></tr>`)
@@ -666,6 +799,7 @@ onMounted(async () => {
   try {
     product.value = await http.get(`get_product_detail_api/${route.params.id}`);
     if (product.value.is_batch_tracked) loadBatches();
+    loadQuestions(product.value.id);
   } catch (e) {
     message.error(t('InvalidData'));
     router.push('/products');
@@ -676,6 +810,41 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.pd-q {
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(5, 5, 5, 0.06);
+}
+.pd-q:last-child {
+  border-bottom: 0;
+}
+.pd-q-head,
+.pd-q-answer {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.pd-q-answer {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(5, 5, 5, 0.08);
+}
+.pd-q-mark {
+  flex: none;
+  width: 18px;
+  font-weight: 700;
+  color: #6c5ce7;
+}
+.pd-q-answer .pd-q-mark {
+  color: rgba(0, 0, 0, 0.35);
+}
+.pd-q-body {
+  flex: 1;
+  min-width: 0;
+}
+.pd-q-form {
+  margin-top: 8px;
+  padding-inline-start: 26px;
+}
 .muted {
   color: rgba(0, 0, 0, 0.45);
   font-size: 12px;

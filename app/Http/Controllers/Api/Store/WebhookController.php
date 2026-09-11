@@ -8,6 +8,7 @@ use App\Services\FlutterwaveService;
 use App\Services\PayPalService;
 use App\Services\PaystackService;
 use App\Services\RazorpayService;
+use App\Services\SslcommerzService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
@@ -64,6 +65,51 @@ class WebhookController extends Controller
         return $this->process('razorpay', $result);
     }
 
+    public function sslcommerz(Request $request, SslcommerzService $sslcommerz)
+    {
+        // IPN is a form-encoded POST authenticated by the verify_sign MD5
+        // inside the body — there is no signature header to pass here.
+        $result = $sslcommerz->verifyWebhook($request->getContent());
+
+        // A "paid" IPN is still confirmed through the validation API (with the
+        // order's tran_id + amount cross-checks) before anything is written —
+        // the posted status alone never marks an order paid.
+        if (! empty($result['valid']) && $result['status'] === 'paid') {
+            $order = $this->findOrder('sslcommerz', $result);
+
+            // Idempotent with the browser return: the common "already paid"
+            // retry skips the remote validation round-trip entirely.
+            if ($order && $order->payment_status === 'paid') {
+                return response('OK', 200);
+            }
+
+            $validated = false;
+            if ($order && $result['transaction_id'] !== '') {
+                $currency = \App\Services\StoreCurrencyService::forDocument($order);
+                // Same conversion (incl. zero-decimal rounding) the checkout
+                // opened the session with — a hand-rolled round() here would
+                // reject valid IPNs for zero-decimal display currencies.
+                $expected = CheckoutController::toGatewayAmount((float) $order->total, (float) $currency['rate'], (string) $currency['code']);
+                try {
+                    $verify = $sslcommerz->validateTransaction(
+                        $result['transaction_id'],
+                        (string) $order->sslcommerz_tran_id,
+                        $expected,
+                        (string) $currency['code']
+                    );
+                    $validated = ! empty($verify['success']);
+                } catch (\Throwable $e) {
+                    Log::error('SSLCommerz IPN validation threw: '.$e->getMessage());
+                }
+            }
+            if (! $validated) {
+                $result['status'] = 'unknown';
+            }
+        }
+
+        return $this->process('sslcommerz', $result);
+    }
+
     private function process(string $gateway, array $result)
     {
         if (empty($result['valid'])) {
@@ -112,6 +158,7 @@ class WebhookController extends Controller
             'paystack' => ['paystack_transaction_id' => $result['transaction_id'] ?: $order->paystack_transaction_id],
             'flutterwave' => ['flutterwave_transaction_id' => $result['transaction_id'] ?: $order->flutterwave_transaction_id],
             'razorpay' => ['razorpay_payment_id' => $result['transaction_id'] ?: $order->razorpay_payment_id],
+            'sslcommerz' => ['sslcommerz_val_id' => $result['transaction_id'] ?: $order->sslcommerz_val_id],
             default => [],
         });
 
@@ -186,6 +233,13 @@ class WebhookController extends Controller
             return OnlineOrder::where(function ($q) use ($txn, $ref) {
                 $q->when($txn !== '', fn ($w) => $w->orWhere('razorpay_payment_id', $txn)->orWhere('razorpay_payment_link_id', $txn));
                 $q->when($ref !== '', fn ($w) => $w->orWhere('razorpay_payment_link_id', $ref)->orWhere('razorpay_payment_id', $ref));
+            })->first();
+        }
+
+        if ($gateway === 'sslcommerz') {
+            return OnlineOrder::where(function ($q) use ($txn, $ref) {
+                $q->when($txn !== '', fn ($w) => $w->orWhere('sslcommerz_val_id', $txn)->orWhere('sslcommerz_tran_id', $txn));
+                $q->when($ref !== '', fn ($w) => $w->orWhere('sslcommerz_tran_id', $ref)->orWhere('sslcommerz_val_id', $ref));
             })->first();
         }
 

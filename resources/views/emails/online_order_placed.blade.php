@@ -3,10 +3,29 @@
 
 <span>{{ __('Hi') }} {{ $order->customer_name }}, {{ __('we have received your order.') }}</span>
 
-**{{ __('Order Reference') }}:** {{ $order->ref }}
-**{{ __('Date') }}:** {{ $order->date }} {{ $order->time }}
-**{{ __('Payment Method') }}:** {{ $order->payment_method }}
-**{{ __('Payment Status') }}:** {{ $order->payment_status }}
+@php
+  // Blade eats the newline after a trailing @endif, so interpolating the
+  // address parts inline glued the zip to the country ("31160México") and
+  // left stray separators for blank fields. Build the lines in PHP instead.
+  $orderedAt = trim(
+      ($order->date instanceof \Carbon\CarbonInterface ? $order->date->format('Y-m-d') : (string) $order->date)
+      .' '.(string) $order->time
+  );
+
+  $shipTo = store_address_lines([
+      'name' => $order->customer_name,
+      'address' => $order->shipping_address,
+      'city' => $order->shipping_city ?? null,
+      'state' => $order->shipping_state ?? null,
+      'zip' => $order->shipping_zip ?? null,
+      'country' => $order->shipping_country ?? null,
+  ]);
+@endphp
+
+- **{{ __('Order Reference') }}:** {{ $order->ref }}
+- **{{ __('Date') }}:** {{ $orderedAt }}
+- **{{ __('Payment Method') }}:** {{ $order->payment_method }}
+- **{{ __('Payment Status') }}:** {{ $order->payment_status }}
 
 @component('mail::table')
 | {{ __('Summary') }} | |
@@ -18,9 +37,8 @@
 @endcomponent
 
 **{{ __('Shipping to') }}:**
-{{ $order->customer_name }}
-{{ $order->shipping_address }}@if($order->shipping_city), {{ $order->shipping_city }}@endif @if($order->shipping_state){{ $order->shipping_state }}@endif @if($order->shipping_zip){{ $order->shipping_zip }}@endif
-{{ $order->shipping_country }}
+
+<span>{!! implode('<br>', array_map('e', $shipTo)) !!}</span>
 
 <span>{{ __('We will notify you when your order is processed.') }}</span>
 

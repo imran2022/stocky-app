@@ -20,19 +20,37 @@ class PortalInvoicesController extends Controller
         $perPage = (int) $request->input('limit', 10);
         $page = max(1, (int) $request->input('page', 1));
         $search = $request->input('search');
+        $status = $request->input('status');
+        $dateFrom = $request->input('date_from');
+        $dateTo = $request->input('date_to');
 
-        $q = Sale::query()
+        $base = Sale::query()
             ->whereNull('deleted_at')
             ->where('client_id', $portalClient->client_id)
-            ->where('statut', 'completed')
+            ->where('statut', 'completed');
+
+        $q = (clone $base)
             ->with(['warehouse:id,name'])
             ->when($search, function ($query) use ($search) {
                 $query->where(function ($qr) use ($search) {
                     $qr->where('Ref', 'LIKE', "%{$search}%")
+                        ->orWhere('date', 'LIKE', "%{$search}%")
                         ->orWhere('payment_statut', 'LIKE', "%{$search}%");
                 });
             })
-            ->orderByDesc('id');
+            ->when($status, fn ($query) => $query->where('payment_statut', $status))
+            ->when($dateFrom, fn ($query) => $query->whereDate('date', '>=', $dateFrom))
+            ->when($dateTo, fn ($query) => $query->whereDate('date', '<=', $dateTo));
+
+        $q = $this->applyPortalSort($q, $request, [
+            'date' => 'date',
+            'Ref' => 'Ref',
+            'GrandTotal' => 'GrandTotal',
+            'paid_amount' => 'paid_amount',
+            'payment_status' => 'payment_statut',
+        ], 'date');
+
+        $statuses = (clone $base)->whereNotNull('payment_statut')->distinct()->orderBy('payment_statut')->pluck('payment_statut')->values();
 
         $totalRows = (clone $q)->count();
 
@@ -58,7 +76,19 @@ class PortalInvoicesController extends Controller
         return response()->json([
             'totalRows' => $totalRows,
             'invoices' => $data,
+            'statuses' => $statuses,
         ]);
+    }
+
+    /**
+     * Whitelisted sort for the portal list endpoints: ?sort=<column>&dir=asc|desc.
+     */
+    private function applyPortalSort($query, Request $request, array $allowed, string $default)
+    {
+        $sort = (string) $request->input('sort', '');
+        $dir = strtolower((string) $request->input('dir', 'desc')) === 'asc' ? 'asc' : 'desc';
+        $column = array_key_exists($sort, $allowed) ? $allowed[$sort] : $allowed[$default];
+        return $query->orderBy($column, $dir)->orderByDesc('id');
     }
 
     /**

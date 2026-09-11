@@ -9,6 +9,10 @@
     :export-params="filterParams"
     export-rows-key="purchases"
   >
+    <template #actions>
+      <!-- Multi-Currency: view amounts converted (display-only) -->
+      <ViewCurrencySelect />
+    </template>
     <!-- Summary + charts over the whole filtered set (backend summary /
          timeseries / payment_breakdown), not just the page. -->
     <template #chart>
@@ -108,6 +112,7 @@ import { useUiStore } from '../../stores/ui';
 import { t as tf } from '../../i18n';
 import { docStatusColor, payStatusColor } from '../../lib/statusColors';
 import DateRangePicker from '../../components/DateRangePicker.vue';
+import ViewCurrencySelect from '../../components/ViewCurrencySelect.vue';
 
 const { t } = useI18n();
 const { money, date } = useFormat();

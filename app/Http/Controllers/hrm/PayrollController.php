@@ -74,7 +74,7 @@ class PayrollController extends Controller
 
         $accounts = Account::where('deleted_at', '=', null)->orderBy('id', 'desc')->get(['id', 'account_name']);
         $employees = Employee::where('deleted_at', '=', null)->orderBy('id', 'desc')->get(['id', 'username']);
-        $payment_methods = PaymentMethod::where('deleted_at', '=', null)->get(['id', 'name']);
+        $payment_methods = PaymentMethod::active()->where('deleted_at', '=', null)->get(['id', 'name']);
 
         return response()->json([
             'payrolls' => $data,

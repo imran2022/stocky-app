@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\GiftCard;
+use App\Models\PaymentMethod;
 use App\Models\StoreSetting;
 use App\Models\Wallet;
 use App\Models\WalletTransaction;
@@ -17,6 +18,29 @@ use Illuminate\Support\Str;
  */
 class WalletService
 {
+    protected ?int $walletMethodId = null;
+
+    protected bool $walletMethodIdLoaded = false;
+
+    /**
+     * Id of the "Wallet" tender in payment_methods, resolved by name because
+     * an install may already use any given id (e.g. Wave at id 8) for another
+     * method. Returns null when no Wallet method exists.
+     */
+    public function paymentMethodId(): ?int
+    {
+        if (! $this->walletMethodIdLoaded) {
+            $this->walletMethodIdLoaded = true;
+            $id = PaymentMethod::query()
+                ->whereNull('deleted_at')
+                ->whereRaw('LOWER(TRIM(name)) = ?', ['wallet'])
+                ->value('id');
+            $this->walletMethodId = $id !== null ? (int) $id : null;
+        }
+
+        return $this->walletMethodId;
+    }
+
     /**
      * Get (or lazily create) the wallet for a POS client id. Storefront accounts
      * map to a client via ecommerce_clients.client_id, so the wallet is shared.

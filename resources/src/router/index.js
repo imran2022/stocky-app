@@ -81,6 +81,7 @@ const StockDetailReport = lazy('StockDetailReport', () => import('../pages/repor
 const UserDetailReport = lazy('UserDetailReport', () => import('../pages/reports/UserDetailReport.vue'));
 const BatchHistoryReport = lazy('BatchHistoryReport', () => import('../pages/reports/BatchHistoryReport.vue'));
 const ProductSalesReport = lazy('ProductSalesReport', () => import('../pages/reports/ProductSalesReport.vue'));
+const ProductsSoldSummaryReport = lazy('ProductsSoldSummaryReport', () => import('../pages/reports/ProductsSoldSummaryReport.vue'));
 const ProductPurchasesReport = lazy('ProductPurchasesReport', () => import('../pages/reports/ProductPurchasesReport.vue'));
 const SellerReport = lazy('SellerReport', () => import('../pages/reports/SellerReport.vue'));
 const TransactionsReport = lazy('TransactionsReport', () => import('../pages/reports/TransactionsReport.vue'));
@@ -141,7 +142,18 @@ const Modules = lazy('Modules', () => import('../pages/settings/Modules.vue'));
 const UpdateSettings = lazy('UpdateSettings', () => import('../pages/settings/UpdateSettings.vue'));
 const SystemSettings = lazy('SystemSettings', () => import('../pages/settings/SystemSettings.vue'));
 const QuickBooksSync = lazy('QuickBooksSync', () => import('../pages/settings/QuickBooksSync.vue'));
+const ZatcaSettings = lazy('ZatcaSettings', () => import('../pages/settings/ZatcaSettings.vue'));
 const WooCommerceSettings = lazy('WooCommerceSettings', () => import('../pages/settings/WooCommerceSettings.vue'));
+// Integrations platform
+const IntegrationsHub = lazy('IntegrationsHub', () => import('../pages/integrations/IntegrationsHub.vue'));
+const SlackSettings = lazy('SlackSettings', () => import('../pages/integrations/SlackSettings.vue'));
+const TelegramSettings = lazy('TelegramSettings', () => import('../pages/integrations/TelegramSettings.vue'));
+const SallaSettings = lazy('SallaSettings', () => import('../pages/integrations/SallaSettings.vue'));
+const XeroSettings = lazy('XeroSettings', () => import('../pages/integrations/XeroSettings.vue'));
+const PrestashopSettings = lazy('PrestashopSettings', () => import('../pages/integrations/PrestashopSettings.vue'));
+const GoogleSheetsSettings = lazy('GoogleSheetsSettings', () => import('../pages/integrations/GoogleSheetsSettings.vue'));
+const MailchimpSettings = lazy('MailchimpSettings', () => import('../pages/integrations/MailchimpSettings.vue'));
+const JumiaSettings = lazy('JumiaSettings', () => import('../pages/integrations/JumiaSettings.vue'));
 const DueAssets = lazy('DueAssets', () => import('../pages/assets/DueAssets.vue'));
 const Subscriptions = lazy('Subscriptions', () => import('../pages/subscriptions/Subscriptions.vue'));
 const SubscriptionForm = lazy('SubscriptionForm', () => import('../pages/subscriptions/SubscriptionForm.vue'));
@@ -169,6 +181,7 @@ const StorePendingCustomers = lazy('StorePendingCustomers', () => import('../pag
 const StorePages = lazy('StorePages', () => import('../pages/store/Pages.vue'));
 const StorePopups = lazy('StorePopups', () => import('../pages/store/Popups.vue'));
 const StoreShippingMethods = lazy('StoreShippingMethods', () => import('../pages/store/ShippingMethods.vue'));
+const StoreShippingZones = lazy('StoreShippingZones', () => import('../pages/store/ShippingZones.vue'));
 const StoreBanners = lazy('StoreBanners', () => import('../pages/store/Banners.vue'));
 const StoreBannerForm = lazy('StoreBannerForm', () => import('../pages/store/BannerForm.vue'));
 const Properties = lazy('Properties', () => import('../pages/realestate/Properties.vue'));
@@ -225,6 +238,8 @@ const CustomFields = lazy('CustomFields', () => import('../pages/settings/Custom
 const Backup = lazy('Backup', () => import('../pages/settings/Backup.vue'));
 const PosSettings = lazy('PosSettings', () => import('../pages/settings/PosSettings.vue'));
 const AppearanceSettings = lazy('AppearanceSettings', () => import('../pages/settings/AppearanceSettings.vue'));
+const PwaSettings = lazy('PwaSettings', () => import('../pages/settings/PwaSettings.vue'));
+const MobileAppSettings = lazy('MobileAppSettings', () => import('../pages/settings/MobileAppSettings.vue'));
 const SmsSettings = lazy('SmsSettings', () => import('../pages/settings/SmsSettings.vue'));
 const Languages = lazy('Languages', () => import('../pages/settings/Languages.vue'));
 const TranslationsView = lazy('TranslationsView', () => import('../pages/settings/TranslationsView.vue'));
@@ -291,6 +306,7 @@ const MrpReports = lazy('MrpReports', () => import('../pages/manufacturing/MrpRe
 const Bookings = lazy('Bookings', () => import('../pages/bookings/Bookings.vue'));
 const BookingForm = lazy('BookingForm', () => import('../pages/bookings/BookingForm.vue'));
 const KitchenDisplay = lazy('KitchenDisplay', () => import('../pages/kitchen/KitchenDisplay.vue'));
+const KitchenReport = lazy('KitchenReport', () => import('../pages/kitchen/KitchenReport.vue'));
 const Trays = lazy('Trays', () => import('../pages/bookings/Trays.vue'));
 const Meetings = lazy('Meetings', () => import('../pages/meeting/Meetings.vue'));
 // --- Knowledge base (Wave C) ---
@@ -439,6 +455,7 @@ const routes = [
             { path: 'reports/users/:id(\\d+)', name: 'user-detail-report', component: UserDetailReport, meta: { title: 'User Report', permission: 'users_report' } },
             { path: 'reports/batch-history/:id(\\d+)', name: 'batch-history-report', component: BatchHistoryReport, meta: { title: 'Batch History', permission: 'Batch_Register_Report' } },
             { path: 'reports/product-sales', name: 'product-sales-report', component: ProductSalesReport, meta: { title: 'Product Sales Report', permission: 'product_sales_report' } },
+            { path: 'reports/products-sold-summary', name: 'products-sold-summary-report', component: ProductsSoldSummaryReport, meta: { title: 'Products Sold Summary', permission: 'products_sold_summary' } },
             { path: 'reports/product-purchases', name: 'product-purchases-report', component: ProductPurchasesReport, meta: { title: 'Product Purchases Report', permission: 'product_purchases_report' } },
             { path: 'reports/seller', name: 'seller-report', component: SellerReport, meta: { title: 'Seller Report', permission: 'seller_report' } },
             { path: 'reports/transactions', name: 'transactions-report', component: TransactionsReport, meta: { title: 'Transactions', permission: 'report_transactions' } },
@@ -556,6 +573,7 @@ const routes = [
             { path: 'store/pages', name: 'store-pages', component: StorePages, meta: { title: 'Pages', permission: 'Store_settings_view' } },
             { path: 'store/popups', name: 'store-popups', component: StorePopups, meta: { title: 'Popup Messages', permission: 'Store_settings_view' } },
             { path: 'store/shipping-methods', name: 'store-shipping-methods', component: StoreShippingMethods, meta: { title: 'Shipping Methods', permission: 'Store_settings_view' } },
+            { path: 'store/shipping-zones', name: 'store-shipping-zones', component: StoreShippingZones, meta: { title: 'Shipping Zones', permission: 'Store_settings_view' } },
             { path: 'store/banners', name: 'store-banners', component: StoreBanners, meta: { title: 'Banners', permission: 'Banners_view' } },
             { path: 'store/banners/edit/:id', name: 'store-banner-edit', component: StoreBannerForm, meta: { title: 'Banner', permission: 'Banners_view' } },
             { path: 'realestate/properties', name: 'realestate-properties', component: Properties, meta: { title: 'Properties', permission: 'realestate_properties' } },
@@ -596,6 +614,7 @@ const routes = [
             { path: 'bookings/create', name: 'booking-create', component: BookingForm, meta: { title: 'Create Booking', permission: 'bookings' } },
             { path: 'bookings/:id(\\d+)/edit', name: 'booking-edit', component: BookingForm, meta: { title: 'Edit Booking', permission: 'bookings' } },
             { path: 'kitchen-display', name: 'kitchen-display', component: KitchenDisplay, meta: { title: 'Kitchen Display', permission: 'kitchen_display_view' } },
+            { path: 'kitchen/report', name: 'kitchen-report', component: KitchenReport, meta: { title: 'Kitchen Report', permission: 'kitchen_display_view' } },
             { path: 'bookings/trays', name: 'booking-trays', component: Trays, meta: { title: 'Trays', permission: 'trays' } },
             { path: 'meetings', name: 'meetings', component: Meetings, meta: { title: 'Meetings', permission: 'meeting' } },
             // Knowledge base
@@ -775,6 +794,8 @@ const routes = [
             { path: 'settings/backup', name: 'backup', component: Backup, meta: { title: 'Backup', permission: 'backup' } },
             { path: 'settings/pos', name: 'pos-settings', component: PosSettings, meta: { title: 'POS Settings', permission: 'pos_settings' } },
             { path: 'settings/appearance', name: 'appearance-settings', component: AppearanceSettings, meta: { title: 'Appearance', permission: 'appearance_settings' } },
+            { path: 'settings/pwa', name: 'pwa-settings', component: PwaSettings, meta: { title: 'PWA Settings', permission: 'appearance_settings' } },
+            { path: 'settings/mobile-app', name: 'mobile-app-settings', component: MobileAppSettings, meta: { title: 'Mobile App Settings', permission: 'appearance_settings' } },
             { path: 'settings/sms', name: 'sms-settings', component: SmsSettings, meta: { title: 'SMS Settings', permission: 'sms_settings' } },
             { path: 'settings/languages', name: 'languages', component: Languages, meta: { title: 'Languages', permission: 'translations_settings' } },
             { path: 'settings/translations/:locale', name: 'translations-view', component: TranslationsView, meta: { title: 'Translations', permission: 'translations_settings' } },
@@ -785,7 +806,18 @@ const routes = [
             { path: 'settings/update', name: 'update-settings', component: UpdateSettings, meta: { title: 'Update Settings', permission: 'update_settings' } },
             { path: 'settings/system', name: 'system-settings', component: SystemSettings, meta: { title: 'System Settings', permission: 'setting_system' } },
             { path: 'settings/quickbooks', name: 'quickbooks-sync', component: QuickBooksSync, meta: { title: 'QuickBooks Sync', permission: 'quickbooks_settings' } },
+            { path: 'settings/zatca', name: 'zatca-settings', component: ZatcaSettings, meta: { title: 'ZATCA E-Invoicing', permission: 'zatca_settings' } },
             { path: 'woocommerce', name: 'woocommerce-settings', component: WooCommerceSettings, meta: { title: 'WooCommerce', permission: 'woocommerce_settings' } },
+            // Integrations platform — hub is visible with ANY connector permission.
+            { path: 'integrations', name: 'integrations-hub', component: IntegrationsHub, meta: { title: 'Integrations', permission: ['woocommerce_settings', 'shopify_stores', 'shopify_sync', 'shopify_logs', 'salla_settings', 'prestashop_settings', 'jumia_settings', 'quickbooks_settings', 'xero_settings', 'google_sheets_settings', 'mailchimp_settings', 'slack_settings', 'telegram_settings', 'webhooks_view'] } },
+            { path: 'integrations/slack', name: 'slack-settings', component: SlackSettings, meta: { title: 'Slack', permission: 'slack_settings' } },
+            { path: 'integrations/telegram', name: 'telegram-settings', component: TelegramSettings, meta: { title: 'Telegram', permission: 'telegram_settings' } },
+            { path: 'integrations/salla', name: 'salla-settings', component: SallaSettings, meta: { title: 'Salla', permission: 'salla_settings' } },
+            { path: 'integrations/xero', name: 'xero-settings', component: XeroSettings, meta: { title: 'Xero', permission: 'xero_settings' } },
+            { path: 'integrations/prestashop', name: 'prestashop-settings', component: PrestashopSettings, meta: { title: 'PrestaShop', permission: 'prestashop_settings' } },
+            { path: 'integrations/google-sheets', name: 'google-sheets-settings', component: GoogleSheetsSettings, meta: { title: 'Google Sheets', permission: 'google_sheets_settings' } },
+            { path: 'integrations/mailchimp', name: 'mailchimp-settings', component: MailchimpSettings, meta: { title: 'Mailchimp', permission: 'mailchimp_settings' } },
+            { path: 'integrations/jumia', name: 'jumia-settings', component: JumiaSettings, meta: { title: 'Jumia', permission: 'jumia_settings' } },
             { path: ':pathMatch(.*)*', name: 'not-found', component: NotFound, meta: { title: 'Not found' } },
         ],
     },
@@ -828,6 +860,24 @@ router.beforeEach(async to => {
 // Covers both the guard and the lazy chunk load (afterEach fires only once the
 // chunk resolved). onError catches failed chunks/guards so the bar never hangs.
 router.afterEach(() => progressDone());
-router.onError(() => progressDone());
+router.onError((error, to) => {
+    progressDone();
+    // Stale-deploy recovery: after a rebuild the old hashed chunks are deleted,
+    // so navigating to a not-yet-visited section 404s on its dynamic import.
+    // Reload the browser AT THE TARGET route — reloading in place (the
+    // vite:preloadError fallback in main.js) looked like "navigation is stuck":
+    // the page refreshed but stayed on the section the user was leaving.
+    const msg = String((error && error.message) || '');
+    if (/Failed to fetch dynamically imported module|error loading dynamically imported module|Importing a module script failed|ChunkLoadError/i.test(msg)) {
+        if (sessionStorage.getItem('stocky-chunk-reload') === '1') return;
+        sessionStorage.setItem('stocky-chunk-reload', '1');
+        window.__stockyChunkRedirect = true;
+        try {
+            window.location.assign(router.resolve(to && to.fullPath ? to.fullPath : '/').href);
+        } catch (e) {
+            window.location.reload();
+        }
+    }
+});
 
 export default router;

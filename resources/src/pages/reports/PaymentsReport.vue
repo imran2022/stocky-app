@@ -9,6 +9,10 @@
     :export-params="filterParams"
     export-rows-key="payments"
   >
+    <template #actions>
+      <!-- Multi-Currency: view amounts converted (display-only) -->
+      <ViewCurrencySelect />
+    </template>
     <template #filters>
       <DateRangePicker v-model:value="range" :allow-clear="false" @change="crud.reload()" />
       <a-input
@@ -115,6 +119,7 @@ import { useFormat } from '../../composables/useFormat';
 import { useUiStore } from '../../stores/ui';
 import { t as tf } from '../../i18n';
 import DateRangePicker from '../../components/DateRangePicker.vue';
+import ViewCurrencySelect from '../../components/ViewCurrencySelect.vue';
 
 const { t } = useI18n();
 const { money, date } = useFormat();
