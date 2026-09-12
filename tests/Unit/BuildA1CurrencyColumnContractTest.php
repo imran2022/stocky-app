@@ -47,6 +47,11 @@ class BuildA1CurrencyColumnContractTest extends TestCase
     {
         $serviceWorker = $this->source('public/sw.js');
 
-        $this->assertStringContainsString("const VERSION = 'stocky-pwa-v10';", $serviceWorker);
+        $this->assertMatchesRegularExpression(
+            "/const VERSION = 'stocky-pwa-v(\d+)';/",
+            $serviceWorker
+        );
+        preg_match("/const VERSION = 'stocky-pwa-v(\d+)';/", $serviceWorker, $m);
+        $this->assertGreaterThanOrEqual(10, (int) $m[1]);
     }
 }

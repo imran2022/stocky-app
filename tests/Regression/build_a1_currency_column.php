@@ -36,10 +36,13 @@ $contains(
     "dataIndex: 'currency_code', key: 'currency_code', width: 90, align: 'center', defaultHidden: true",
     'Currency column must be available but hidden by default.'
 );
-$contains(
-    $serviceWorker,
-    "const VERSION = 'stocky-pwa-v10';",
-    'A.1 deployment must bump the PWA cache namespace for the changed Sales chunk.'
+$versionOk = false;
+if (preg_match("/const VERSION = 'stocky-pwa-v(\d+)';/", $serviceWorker, $m)) {
+    $versionOk = ((int) $m[1]) >= 10;
+}
+$assert(
+    $versionOk,
+    'A.1 deployment must bump the PWA cache namespace to v10 or later for the changed Sales chunk.'
 );
 
 if ($failures) {

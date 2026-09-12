@@ -89,8 +89,33 @@
               <div style="font-weight: 500">{{ record.name }}</div>
               <div class="muted">{{ record.code }}</div>
               <a-tag v-if="record.is_batch_tracked" color="warning" style="margin-top: 2px">Batch</a-tag>
+              <div v-if="record.last_purchase" class="muted" style="font-size: 12px">
+                Last Purchase: {{ docMoney(record.last_purchase.cost) }} ({{ record.last_purchase.date }}<template v-if="record.last_purchase.supplier_name">, {{ record.last_purchase.supplier_name }}</template>)
+              </div>
             </template>
-            <template v-else-if="column.key === 'net_cost'">{{ docMoney(record.Net_cost) }}</template>
+            <template v-else-if="column.key === 'net_cost'">
+              <!-- Inline-editable for the common case (fast cost correction
+                   without opening the full line-edit modal). Bound to the
+                   same Unit_cost field and recomputeCostLine() the modal's
+                   Save uses — so a line with per-line discount/tax still
+                   computes Net Cost correctly; this only adds a quicker way
+                   to change the underlying cost, not a second source of
+                   truth for it. -->
+              <a-input-number
+                :value="toDocAmt(record.Unit_cost)"
+                :min="0"
+                :precision="2"
+                style="width: 110px"
+                @update:value="v => setUnitCost(record, v)"
+              />
+              <div class="muted" style="margin-top: 2px">{{ docMoney(record.Net_cost) }} net</div>
+            </template>
+            <template v-else-if="column.key === 'sell_price'">{{ docMoney(record.Unit_price) }}</template>
+            <template v-else-if="column.key === 'profit_pct'">
+              <span :style="{ color: profitPct(record) >= 0 ? '#3f8600' : '#cf1322' }">
+                {{ profitPct(record) === null ? '—' : profitPct(record).toFixed(1) + '%' }}
+              </span>
+            </template>
             <template v-else-if="column.key === 'stock'">
               {{ record.stock ?? '—' }} {{ record.unitPurchase }}
             </template>
@@ -440,6 +465,8 @@ function addBatchRow(line) {
 const lineColumns = computed(() => [
   { title: t('ProductName'), key: 'product' },
   { title: t('Net_Unit_Cost'), key: 'net_cost', align: 'right' },
+  { title: 'Sell Price', key: 'sell_price', align: 'right' },
+  { title: 'Profit %', key: 'profit_pct', align: 'right' },
   { title: t('Stock'), key: 'stock', align: 'right' },
   { title: t('Quantity'), key: 'quantity', align: 'center' },
   { title: t('Discount'), key: 'discount', align: 'right' },
@@ -503,6 +530,11 @@ async function onProductPicked(idx) {
       quantity: 1,
       Unit_cost: d.Unit_cost,
       Net_cost: d.Net_cost,
+      // Reference-only fields for the new columns/hint below — not sent back
+      // to the server, purely display aids already present in this same
+      // per-item lookup response (no extra request).
+      Unit_price: d.Unit_price,
+      last_purchase: d.last_purchase || null,
       discount: d.discount,
       discount_Method: d.discount_method,
       DiscountNet: d.DiscountNet,
@@ -530,6 +562,26 @@ function setQty(line, value) {
   if (Number.isNaN(qty)) qty = 0;
   line.quantity = qty;
   recomputeCostLine(line);
+}
+
+// Fast inline cost edit — same field and recompute path as the line-edit
+// modal's Unit_cost save, just without opening the modal for the common
+// "just fix the cost" case.
+function setUnitCost(line, value) {
+  let docCost = Number(value);
+  if (Number.isNaN(docCost) || docCost < 0) docCost = 0;
+  line.Unit_cost = toBaseAmt(docCost);
+  recomputeCostLine(line);
+}
+
+// Profit % = (Sell Price - Net Cost) / Sell Price × 100. Both values already
+// live on the line (Unit_price came back with the same show_product_data
+// call that supplied Net_cost) — purely a display calculation, no request.
+function profitPct(line) {
+  const sell = Number(line.Unit_price);
+  if (!sell) return null;
+  const cost = Number(line.Net_cost) || 0;
+  return ((sell - cost) / sell) * 100;
 }
 
 // ---------------- line edit modal ----------------

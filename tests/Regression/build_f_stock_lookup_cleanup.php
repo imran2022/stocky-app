@@ -19,9 +19,20 @@ $contains = static function (string $haystack, string $needle, string $message) 
 $root = dirname(__DIR__, 2);
 $controller = file_get_contents($root.'/app/Http/Controllers/ProductsController.php');
 $page = file_get_contents($root.'/resources/src/pages/products/StockLookup.vue');
-$compiled = file_get_contents($root.'/public/js/chunks/StockLookup.D-UahGfI.js');
 $manifest = file_get_contents($root.'/public/js/.vite/manifest.json');
 $serviceWorker = file_get_contents($root.'/public/sw.js');
+
+// Resolve the StockLookup chunk's current filename from the manifest rather
+// than hardcoding a build-specific hash — a later ordinary `npm run build`
+// (not just another SAFE overlay) legitimately renames every chunk, and this
+// gate should keep working across that, not just across scoped syncs.
+$compiled = false;
+$manifestData = $manifest !== false ? json_decode($manifest, true) : null;
+$stockLookupEntry = $manifestData['resources/src/pages/products/StockLookup.vue'] ?? null;
+$stockLookupChunkPath = $stockLookupEntry['file'] ?? null;
+if ($stockLookupChunkPath) {
+    $compiled = file_get_contents($root.'/public/js/'.$stockLookupChunkPath);
+}
 
 foreach ([
     'ProductsController.php' => $controller,
@@ -50,14 +61,17 @@ if ($page !== false) {
 }
 
 if ($compiled !== false) {
-    $contains($compiled, 'function C0(', 'Deployment chunk must include variant-aware price rendering.');
+    // Minified function/variable names are non-deterministic across any
+    // rebuild (not just this one) — assert on stable string literals from
+    // priceLabel()'s own logic instead of a specific minified identifier.
+    $contains($compiled, 'Varies', 'Deployment chunk must include variant-aware price rendering (the no-active-price fallback).');
     $contains($compiled, 'unit_label', 'Deployment chunk must include dynamic unit rendering.');
     $contains($compiled, 'price_min', 'Deployment chunk must include variant price-range rendering.');
     $assert(! str_contains($compiled, 'Pcs'), 'Deployment chunk must not hardcode Pcs.');
 }
 
 if ($manifest !== false) {
-    $contains($manifest, 'chunks/StockLookup.D-UahGfI.js', 'Vite manifest must still point to the synchronized Stock Lookup chunk.');
+    $assert($stockLookupChunkPath !== null, 'Vite manifest must have an entry for StockLookup.vue.');
 }
 
 if ($serviceWorker !== false) {

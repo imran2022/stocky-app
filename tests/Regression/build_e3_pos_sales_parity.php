@@ -19,8 +19,20 @@ $contains = static function (string $haystack, string $needle, string $message) 
 $root = dirname(__DIR__, 2);
 $sales = file_get_contents($root.'/resources/src/pages/sales/Sales.vue');
 $posSales = file_get_contents($root.'/resources/src/pages/sales/PosSales.vue');
-$compiledSales = file_get_contents($root.'/public/js/chunks/Sales.DrRmbclp.js');
-$compiledPosSales = file_get_contents($root.'/public/js/chunks/PosSales.Tm8D__HT.js');
+
+// Resolve compiled chunk paths from the manifest rather than hardcoding a
+// build-specific hash — see the same fix in build_f_stock_lookup_cleanup.php
+// and its rationale.
+$manifestRaw = file_get_contents($root.'/public/js/.vite/manifest.json');
+$manifestData = $manifestRaw !== false ? json_decode($manifestRaw, true) : null;
+$compiledSales = false;
+$compiledPosSales = false;
+if ($salesChunk = $manifestData['resources/src/pages/sales/Sales.vue']['file'] ?? null) {
+    $compiledSales = file_get_contents($root.'/public/js/'.$salesChunk);
+}
+if ($posSalesChunk = $manifestData['resources/src/pages/sales/PosSales.vue']['file'] ?? null) {
+    $compiledPosSales = file_get_contents($root.'/public/js/'.$posSalesChunk);
+}
 $serviceWorker = file_get_contents($root.'/public/sw.js');
 $controller = file_get_contents($root.'/app/Http/Controllers/SalesController.php');
 
@@ -60,7 +72,15 @@ if ($compiledPosSales !== false) {
 }
 
 if ($serviceWorker !== false) {
-    $contains($serviceWorker, "const VERSION = 'stocky-pwa-v11';", 'PWA cache version must bump for the synchronized Sales/POS Sales chunks.');
+    // A resilient minimum-version check rather than an exact string: any
+    // later build (whether another scoped SAFE overlay or an ordinary full
+    // Vite rebuild) may legitimately bump this further, and this gate
+    // shouldn't need editing every time that happens.
+    $versionOk = false;
+    if (preg_match("/const VERSION = 'stocky-pwa-v(\d+)';/", $serviceWorker, $m)) {
+        $versionOk = ((int) $m[1]) >= 11;
+    }
+    $assert($versionOk, 'PWA cache version must be at v11 or later (bumped for the synchronized Sales/POS Sales chunks, or by a later build).');
 }
 
 if ($controller !== false) {

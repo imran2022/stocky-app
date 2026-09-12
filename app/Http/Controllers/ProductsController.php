@@ -25,6 +25,8 @@ use App\Models\UserWarehouse;
 use App\Models\Warehouse;
 use App\Models\WarehouseLocation;
 use App\Models\ProductWarehouseLocation;
+use App\Models\Provider;
+use App\Models\PurchaseDetail;
 use App\Models\SaleDetail;
 use App\Services\ProductGalleryService;
 use App\Services\Custom\ProductInsightService;
@@ -2786,6 +2788,37 @@ class ProductsController extends BaseController
                     'is_active' => (bool) $pwl->location->is_active,
                 ];
             }
+        }
+
+        // Last Purchase reference (cost, date, supplier) — a cost-planning aid
+        // shown when adding this item to a new Purchase. Global (not
+        // warehouse-scoped): the point is "what did we last pay for this,
+        // from whom", which is useful regardless of which warehouse this new
+        // purchase is going into. A single most-recent-row lookup on this
+        // already per-item, on-demand endpoint — negligible added cost, same
+        // pattern as the Warehouse Location lookup just above.
+        $item['last_purchase'] = null;
+        $lastPurchaseQuery = PurchaseDetail::join('purchases', 'purchases.id', '=', 'purchase_details.purchase_id')
+            ->leftJoin('providers', 'providers.id', '=', 'purchases.provider_id')
+            ->where('purchase_details.product_id', $id)
+            ->where('purchases.statut', 'received')
+            ->whereNull('purchases.deleted_at');
+        if ($variant_id && $variant_id != 'null') {
+            $lastPurchaseQuery->where('purchase_details.product_variant_id', $variant_id);
+        } else {
+            $lastPurchaseQuery->whereNull('purchase_details.product_variant_id');
+        }
+        $lastPurchase = $lastPurchaseQuery
+            ->orderByDesc('purchases.date')
+            ->orderByDesc('purchase_details.id')
+            ->select('purchase_details.cost', 'purchases.date', 'providers.name as supplier_name')
+            ->first();
+        if ($lastPurchase) {
+            $item['last_purchase'] = [
+                'cost' => (float) $lastPurchase->cost,
+                'date' => $lastPurchase->date,
+                'supplier_name' => $lastPurchase->supplier_name,
+            ];
         }
 
         // Multi-Pack Selling: expose active packs when the feature is enabled —
