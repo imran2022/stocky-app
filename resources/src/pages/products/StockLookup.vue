@@ -34,7 +34,7 @@
           <div style="font-weight: 600">{{ r.name }}</div>
           <div class="muted">SKU: {{ r.code }}</div>
         </div>
-        <div style="font-weight: 600; color: #6d28d9">{{ money(r.price) }}</div>
+        <div style="font-weight: 600; color: #6d28d9">{{ priceLabel(r) }}</div>
       </div>
     </a-card>
 
@@ -58,13 +58,13 @@
           <div style="font-weight: 700; font-size: 19px">{{ detail.product.name }}</div>
           <a-space style="margin-top: 8px">
             <a-tag>SKU: {{ detail.product.code }}</a-tag>
-            <a-tag color="purple">{{ money(detail.product.price) }}</a-tag>
+            <a-tag color="purple">{{ priceLabel(detail.product) }}</a-tag>
             <a-tag v-if="detail.product.is_variant" color="blue">{{ detail.warehouses[0]?.variants?.length || 0 }} variants</a-tag>
           </a-space>
         </div>
         <div class="lookup-total-badge">
           <div class="lookup-total-badge-num">{{ detail.total_qty }}</div>
-          <div class="lookup-total-badge-label">Total Pcs</div>
+          <div class="lookup-total-badge-label">Total {{ detail.product.unit_label }}</div>
         </div>
       </div>
 
@@ -83,7 +83,7 @@
             <div v-if="record.location" class="muted">{{ record.location }}</div>
           </template>
           <template v-else-if="column.key === 'qty'">
-            <a-tag :color="record.qty > 0 ? 'green' : 'red'">{{ record.qty }} Pcs</a-tag>
+            <a-tag :color="record.qty > 0 ? 'green' : 'red'">{{ record.qty }} {{ detail.product.unit_label }}</a-tag>
           </template>
         </template>
         <template v-if="detail.product.is_variant" #expandedRowRender="{ record }">
@@ -97,7 +97,7 @@
             <template #bodyCell="{ column, record: v }">
               <template v-if="column.key === 'price'">{{ money(v.price) }}</template>
               <template v-else-if="column.key === 'qty'">
-                <a-tag :color="v.qty > 0 ? 'green' : 'red'">{{ v.qty }} Pcs</a-tag>
+                <a-tag :color="v.qty > 0 ? 'green' : 'red'">{{ v.qty }} {{ detail.product.unit_label }}</a-tag>
               </template>
             </template>
           </a-table>
@@ -109,7 +109,7 @@
               <div class="muted">Across all warehouses</div>
             </a-table-summary-cell>
             <a-table-summary-cell>
-              <a-tag color="purple">{{ detail.total_qty }} Pcs</a-tag>
+              <a-tag color="purple">{{ detail.total_qty }} {{ detail.product.unit_label }}</a-tag>
             </a-table-summary-cell>
           </a-table-summary-row>
         </template>
@@ -161,6 +161,13 @@ const variantColumns = [
   { title: 'Price', key: 'price', align: 'right' },
   { title: 'Stock', key: 'qty', align: 'right' },
 ];
+
+function priceLabel(product) {
+  if (!product?.is_variant) return money(product?.price ?? 0);
+  if (product.price_min == null || product.price_max == null) return 'Varies';
+  if (Number(product.price_min) === Number(product.price_max)) return money(product.price_min);
+  return `${money(product.price_min)} – ${money(product.price_max)}`;
+}
 
 async function runSearch() {
   const q = query.value.trim();

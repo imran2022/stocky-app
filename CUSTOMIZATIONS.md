@@ -822,3 +822,887 @@ result against a hand-computed expected COGS. Any future change to
 `SalesController`, `PurchasesController`, or the cost-calculation trait
 should be checked the same way before shipping — this app's calculations
 being wrong is a business-critical failure, not a cosmetic bug.
+
+## 16. Stocky 5.8 Build A stabilization — six low-risk fixes after post-merge audit
+
+**Status:** ACTIVE — applied after the initial 5.8 merge. This section is an
+append-only remediation record; sections 1–15 above are intentionally kept as
+the historical implementation context. Do not rewrite those older sections to
+make the history look cleaner — future vendor upgrades need to know what was
+built first and what was corrected later.
+
+**Scope rule for this build:** deliberately small. No stock-movement rules,
+Product Insight formulas, warehouse analytics semantics, POS workflow, FIFO/
+COGS, database schema, permission architecture, or Sales/POS page redesign was
+changed here. The purpose is to remove six confirmed, reachable defects while
+keeping the existing work pattern stable.
+
+### 16.1 Bulk A4 invoice now matches Stocky 5.8 document-currency behavior
+
+**Classification:** STOCKY 5.8 MERGE REGRESSION.
+
+The custom `SalesController::renderSaleInvoiceHtml()` was created before the
+vendor introduced the 5.8 document-currency snapshot. After the vendor merge,
+`Sale_PDF()` converted tax/fixed discounts/shipping/totals/line money using
+`helpers::Get_Document_Currency()`, while the custom bulk renderer still printed
+base-currency values with the base currency code. That made the same foreign-
+currency sale produce different single and bulk invoices.
+
+**Fix:** the bulk-only renderer now resolves the sale's stored document currency
+and applies the same 5.8 arithmetic as `Sale_PDF()`:
+- percent discounts remain percentages;
+- fixed discounts and monetary fields are multiplied by the stored document
+  rate;
+- line `price`, `total`, and fixed line discounts are converted before the
+  existing tax/net calculations;
+- previous dues are converted using the same rate;
+- the PDF currency code comes from the document currency, not the current base
+  currency.
+
+A small pure helper, `app/Support/SaleDocumentMath.php`, was added for custom
+document arithmetic. It intentionally does **not** replace the vendor's proven
+single-invoice path in this stabilization build; this keeps the blast radius
+small while giving custom PDF/label code one testable arithmetic contract.
+
+**Files:**
+- `app/Http/Controllers/SalesController.php`
+- `app/Support/SaleDocumentMath.php`
+
+**Vendor-update warning:** whenever Stocky changes `Sale_PDF()` currency/
+discount semantics, compare `renderSaleInvoiceHtml()` again and run the Build A
+regression tests before release.
+
+### 16.2 Shipping Label COD now prints the outstanding balance
+
+**Classification:** CUSTOM BUG.
+
+The original custom label printed `GrandTotal` whenever `payment_status` was not
+`paid`, so a partially paid order could ask the courier to collect the full
+invoice again.
+
+**Fix:** both single and bulk labels calculate:
+
+`max(GrandTotal - paid_amount, 0)`
+
+and the Blade template prints that `cod_amount` only when it is greater than
+zero. This build intentionally preserves the label's existing base-currency
+presentation; document-currency redesign of the shipping label is outside Build
+A and must not be mixed into this small stabilization patch without a separate
+business decision/test round.
+
+**Files:**
+- `app/Http/Controllers/SalesController.php`
+- `resources/views/pdf/shipping_label.blade.php`
+- `app/Support/SaleDocumentMath.php`
+
+### 16.3 Product computed insight sorting no longer sends fake columns to SQL
+
+**Classification:** CUSTOM BUG / REACHABLE UI CRASH.
+
+`Sold (30d)` (`total_sold_30d`) and `Last Sold` (`last_sold_date`) are computed
+response fields, not columns on `products`. Declaring `sorter: true` made
+`useCrudTable` send those keys as `SortField`, eventually causing SQL "unknown
+column" errors.
+
+**Fix:** the existing Vue columns remain unchanged, so no frontend rebuild is
+required for this replacement package. `ProductsController@index` now validates
+`SortField` against an explicit whitelist and handles `total_sold_30d` and
+`last_sold_date` with correlated aggregate subqueries that mirror the existing
+displayed formulas. Real-column sorting and the special warehouse-aware
+`quantity` sort remain unchanged, while direct/malformed sort keys safely fall
+back to `id`.
+
+**File:** `app/Http/Controllers/ProductsController.php`
+
+**Important:** this does **not** optimize Product Insights N+1 queries and does
+not change any Product Insight calculation. Performance/warehouse/unit
+corrections remain a later, isolated batch.
+
+### 16.4 Shipment computed/joined sorting can no longer crash SQL
+
+**Classification:** VENDOR/CUSTOM INTEGRATION DEFECT, reachable through the
+customized Shipments table.
+
+The Vue table exposed server sorting for aliases/relations such as
+`shipment_ref`, `sale_ref`, `customer_name`, and `warehouse_name`; those are not
+real columns on `shipments` and could be passed to `orderBy()`.
+
+**Fix:** the existing compiled/frontend behavior is preserved. The backend now
+whitelists accepted sort keys, maps `shipment_ref` to the real `Ref` column, and
+uses correlated subqueries for Sale Ref, Customer, and Warehouse. This keeps
+true server-side sorting across pagination without sending aliases directly to
+SQL. Unknown keys safely fall back to `id`, and sort direction is normalized to
+`asc`/`desc`.
+
+**File:** `app/Http/Controllers/ShipmentController.php`
+
+### 16.5 Shipment creation now persists `phone_number`
+
+**Classification:** CUSTOM IMPLEMENTATION OMISSION.
+
+The edit/update path already stored `phone_number`, but the create path omitted
+it. `ShipmentController::store()` now writes the submitted phone number using a
+nullable fallback. No schema/API redesign was made.
+
+**File:** `app/Http/Controllers/ShipmentController.php`
+
+### 16.6 Sale update no longer clears custom metadata merely because a caller omitted it
+
+**Classification:** CUSTOM BACKWARD-COMPATIBILITY BUG.
+
+On update, `filled()` previously treated both "key absent" and "key present but
+empty" as the same case and wrote `NULL`, so an older/partial API client could
+silently erase `tracking_ref`, `consignment_id`, `zone_id`, or `courier_id`.
+
+**Fix semantics (update only):**
+- key absent → preserve the stored value;
+- key present with empty/null → explicitly clear;
+- key present with a value → update.
+
+The **create** path is intentionally unchanged: a new Sale has no previous
+metadata to preserve, so an omitted optional field correctly starts as `NULL`.
+
+**File:** `app/Http/Controllers/SalesController.php`
+
+### 16.7 Explicitly NOT changed in Build A
+
+The post-merge audit found additional items, but they are intentionally deferred
+so this stabilization build remains low-risk. In particular, Build A does not
+change:
+- Product Insights N+1/query aggregation;
+- Product Insights warehouse scoping or soft-deleted-parent handling;
+- Unit/Multi-Pack normalization for analytics/Sales Qty/Packing totals;
+- POS Recent Invoices visibility/currency semantics;
+- bulk-sale/Shipment authorization hardening;
+- POS Sales Seller/Currency parity;
+- credit-limit/minimum-price/tax-discount server-side guardrails;
+- FIFO/COGS/revenue redesign;
+- Sales/PosSales architectural consolidation.
+
+Treat those as separate review/fix batches with their own behavior tests. Do not
+silently bundle them into Build A when replaying this patch on a future vendor
+version.
+
+## 17. Build A automated regression contract
+
+Two complementary test layers were added:
+
+1. `tests/Unit/SaleDocumentMathTest.php` — normal PHPUnit unit tests for pure
+   document arithmetic (currency conversion, percent-vs-fixed discount, and
+   non-negative outstanding COD).
+2. `tests/Unit/BuildAIntegrationContractTest.php` — PHPUnit upgrade-contract
+   checks that ensure a future merge does not silently reconnect computed table
+   keys to SQL sorting, drop Shipment phone persistence, drop document-currency
+   integration, or revert preserve-on-omit semantics.
+3. `tests/Regression/build_a_stability.php` — a **no-dependency** regression
+   gate covering the same six stabilization fixes. It can run immediately after
+   extracting the source, even before `composer install`:
+
+```bash
+php tests/Regression/build_a_stability.php
+```
+
+The no-dependency gate is not a replacement for Laravel/MySQL feature tests; it
+is a fast upgrade safety net for this exact small patch. Full database-backed
+coverage should be expanded in the later authorization/Product-optimization
+batches where database behavior actually changes.
+
+### Build A release checks
+
+At minimum, before deployment/future replay run:
+
+```bash
+php tests/Regression/build_a_stability.php
+find app tests routes database -name '*.php' -print0 | xargs -0 -n1 php -l
+```
+
+With normal Composer dependencies and required PHP extensions installed, also
+run the regular PHPUnit suite. Frontend source must compile successfully with
+the project's existing Vite build before production deployment.
+
+### Build A delivery convention
+
+The production replacement ZIP intentionally excludes the older
+`stocky-vendor58-merged.bundle`: that bundle predates this remediation and would
+be misleading if shipped beside newer source. An updated Git bundle is delivered
+as a separate developer artifact so production code and repository-history
+artifacts remain cleanly separated. No live `.env` is included or overwritten.
+
+## 18. Build A.1 — Sales Currency column fallback + default-hidden UX
+
+**Status:** ACTIVE. This is a deliberately tiny follow-up to Build A after
+verifying the 5.8 Sales list on a real UI. No sale totals, payment math, stock,
+warehouse rules, database schema, or document calculations were changed.
+
+### 18.1 Base-currency Sales no longer show a blank Currency cell
+
+**Classification:** STOCKY 5.8 DISPLAY/INTEGRATION GAP.
+
+Stocky 5.8 stores legacy/base-currency documents with `currency_id = NULL` and
+uses `helpers::Get_Document_Currency()` as the canonical fallback to the
+configured base currency. The Sales list previously read only the optional
+`currency` relation, so those perfectly valid base-currency rows rendered a
+blank Currency badge while foreign-currency rows rendered their code.
+
+**Fix:** `SalesController::index()` now resolves each row through
+`helpers::Get_Document_Currency($Sale)` and returns that resolved code. This
+preserves Stocky's intended semantics: a base/legacy sale displays the configured
+base code (for example BDT), while a stored USD/EUR document displays its own
+code. The Sales list monetary columns are still base-currency amounts; this
+change is display metadata only.
+
+### 18.2 Currency remains available but is hidden by default
+
+The Currency column is useful for multi-currency auditing but is not needed in
+everyday single/base-currency operation. `Sales.vue` therefore marks the column
+`defaultHidden: true`. It remains available from the existing DataTable column
+picker for the current session; no feature/menu is removed.
+
+The deployment build also bumps the PWA cache namespace (`public/sw.js`) so a
+browser that previously cached the old Sales chunk does not keep the always-
+visible Currency column after the replacement package is deployed. This is a
+frontend cache invalidation change only; it does not alter POS/offline business
+logic.
+
+**Files:**
+- `app/Http/Controllers/SalesController.php`
+- `resources/src/pages/sales/Sales.vue`
+- `tests/Regression/build_a1_currency_column.php`
+- `tests/Unit/BuildA1CurrencyColumnContractTest.php`
+
+**Vendor-update warning:** if Stocky changes the document-currency snapshot or
+Sales-list amount semantics in a later release, keep using the vendor's
+canonical `Get_Document_Currency()` behavior rather than reimplementing fallback
+logic in the list.
+
+## 19. Build B — narrow authorization hardening (Bulk Sales + Shipments only)
+
+**Status:** ACTIVE. Build B is intentionally limited to two independently
+confirmed IDOR/data-isolation problems. It does not change Sale totals, Product
+Insights, stock movement, Unit/Multi-Pack logic, POS Recent Invoices, currency
+math, database schema, or normal authorized UI workflows.
+
+### 19.1 Bulk Sale metadata update now re-applies Sale visibility before UPDATE
+
+**Classification:** CUSTOM SECURITY BUG (horizontal authorization / IDOR).
+
+The custom Sales-list bulk action accepted browser-supplied `selectedIds` and
+previously executed a direct `Sale::whereIn(...)->update(...)` after only the
+class-level `Sales_edit` permission check. A crafted request could therefore
+include a Sale id outside the user's assigned warehouse or outside their
+`record_view` ownership boundary.
+
+**Fix:** `SalesController::bulkUpdate()` now builds the update query from the
+same two row-level rules used by the Sales list:
+- when `record_view` is disabled, only Sales whose `user_id` is the current user;
+- when `is_all_warehouses` is disabled, only Sales in the user's
+  `user_warehouse` assignments.
+
+The existing bulk payload semantics are unchanged. Authorized selections update
+exactly as before; out-of-scope ids are ignored by the SQL update and cannot be
+modified. No additional Sale fields were added to the bulk action.
+
+**File:** `app/Http/Controllers/SalesController.php`
+
+### 19.2 Shipment endpoints inherit Sale ownership/warehouse visibility
+
+**Classification:** VENDOR/CUSTOM INTEGRATION SECURITY BUG.
+
+Shipment permission was class-level, while several routes trusted route/body
+ids directly. In particular, `show()` had no Shipment authorization call, list
+and status counters were global, and `update()` could accept Shipment A's id
+with Sale B's `sale_id`, update the Shipment relation, then modify Sale B's
+shipping metadata.
+
+**Fix:** `ShipmentController` now has two small internal query scopes:
+- `visibleSalesQuery($user)` — same `record_view` ownership + warehouse rules as
+  the Sales list;
+- `visibleShipmentsQuery($user)` — Shipments whose parent Sale is inside that
+  Sale scope, implemented as a SQL subquery (no large id array in PHP).
+
+These scopes are used by Shipment list, status counters, show, store, update,
+and delete. `show()` now checks Shipment view permission. Store validates the
+requested Sale through the visible Sale scope and refuses to reuse an existing
+Shipment Ref for a different Sale. Update no longer writes `sale_id` at all and
+explicitly rejects a payload whose Sale id differs from the stored Shipment
+Sale. Related Shipment/Sale rows are locked during writes to avoid a concurrent
+reassignment race.
+
+**Normal workflow compatibility:** Sales/PosSales already submit the Shipment's
+own Sale id, and the Shipments edit modal submits its stored Sale id, so normal
+authorized requests keep the same API shape and behavior. Only out-of-scope or
+cross-Sale crafted requests are rejected/filtered.
+
+**File:** `app/Http/Controllers/ShipmentController.php`
+
+### 19.3 Build B explicitly does NOT include other audit findings
+
+Still deferred to isolated later batches:
+- POS Recent Invoices `record_view` / `is_pos` behavior;
+- Product Insights N+1 optimization, warehouse scoping, soft-deleted parents,
+  date-window semantics, or Unit/Multi-Pack normalization;
+- POS Sales 5.8 Seller/Currency parity;
+- credit-limit/minimum-price/tax-discount backend guardrails;
+- Zone/Courier manage permission redesign;
+- large controller/service refactors.
+
+### 19.4 Build B regression contract
+
+Fast no-dependency gate:
+
+```bash
+php tests/Regression/build_b_authorization.php
+```
+
+Regular PHPUnit contract coverage is also added in
+`tests/Unit/BuildBAuthorizationContractTest.php`. In a fully bootstrapped test
+environment, database-backed authorization feature tests should additionally
+exercise User A / Warehouse A against User B / Warehouse B; the source-contract
+gate exists so a future vendor merge cannot silently remove the critical scope
+wiring before those heavier tests run.
+
+## 20. Safe-overlay delivery correction — preserve the exact merged frontend
+
+**Status:** ACTIVE DELIVERY RULE. This section supersedes the *delivery method*
+described in Section 18.2 for the current stabilization rollout; it does not
+erase the historical A.1 attempt.
+
+The first cumulative BuildAB package rebuilt the complete `public/js` Vite asset
+tree in order to make the one-line `defaultHidden` Currency-column preference
+take effect. That was too broad for this project's current "preserve the merged
+build exactly and apply narrow fixes" requirement. It could replace a known-good
+compiled frontend as a side effect of a tiny UI preference change.
+
+**Correction:** the safe stabilization delivery is now an **overlay patch**. It
+contains only the approved backend/template/test/documentation files and does
+**not** ship `public/js`, `public/sw.js`, `resources/src/pages/sales/Sales.vue`,
+or any unrelated frontend/menu/module file. Copy it over the existing merged
+application; do not delete the existing application tree first.
+
+The server-side A.1 currency fallback remains active, so base/legacy Sales rows
+resolve the configured document currency code through
+`helpers::Get_Document_Currency()`. The Currency column's "hidden by default"
+preference is **deferred** until it can be rebuilt and verified against the
+user's exact active frontend tree without replacing unrelated compiled assets.
+
+### 20.1 Full-replacement warning
+
+The user's active installation can contain runtime/vendor/module directories that
+were not present in the uploaded `stocky-vendor58-merged.zip` snapshot. Therefore
+future deliveries must not be described as safe "delete everything and extract"
+replacements unless the exact active application tree has first been captured.
+Use overlay patches for narrow remediation batches, or build a full replacement
+from a fresh archive of the actual active application.
+
+### 20.2 Regression contract
+
+Run after applying the overlay:
+
+```bash
+php tests/Regression/build_a_stability.php
+php tests/Regression/build_a1_currency_backend.php
+php tests/Regression/build_b_authorization.php
+```
+
+The safe overlay deliberately leaves the existing compiled frontend byte-for-byte
+untouched outside the explicitly supplied files (none are supplied under
+`public/js`).
+
+## 21. Build C — Product Insights set-based query optimization
+
+**Status:** ACTIVE. **Base required:** the confirmed working Build A + safe A.1/B
+overlay described in Sections 16–20. Build C is deliberately a performance-only
+customization patch. It does not change Product Insight business formulas,
+warehouse visibility semantics, Sale/Purchase soft-delete semantics, Unit/
+Multi-Pack math, UI columns, database schema, Sales/POS/Shipment behavior, or
+compiled frontend assets.
+
+### 21.1 Why this patch exists
+
+The custom Product-list insight fields were originally calculated inside the
+`foreach ($products as $product)` loop. Each Product row independently queried:
+
+- latest received Purchase;
+- Sold (30d);
+- previous 30-day sold quantity;
+- Last Sold date;
+- lifetime sold quantity;
+- lifetime returned quantity;
+- Warehouse Count.
+
+That produced roughly **7 additional insight queries per Product row**. A normal
+100-row result could therefore add ~700 round trips, and the existing export path
+(`limit = -1`) amplified the problem for large catalogs.
+
+### 21.2 Set-based implementation
+
+A dedicated upgrade-friendly custom service now owns only these insight reads:
+
+`app/Services/Custom/ProductInsightService.php`
+
+`ProductsController::index()` sends the current result Product ids to the service
+once, before the Product rendering loop. The service executes four set-based
+metric queries for that result population:
+
+1. one grouped completed-Sales query for Sold (30d), previous 30 days, Last Sold,
+   and lifetime sold;
+2. one grouped Sale Return query for lifetime returned;
+3. one grouped `product_warehouse` query for Warehouse Count;
+4. one latest-received-Purchase query using nested grouped subqueries.
+
+The latest-Purchase query intentionally avoids a window-function dependency. It
+first selects `MAX(purchase.date)` per Product and then `MAX(purchase_detail.id)`
+on that date, preserving the previous ordering contract:
+
+`purchase date DESC, purchase_detail id DESC`.
+
+This keeps the patch compatible with the existing Stocky/MySQL/MariaDB style
+without introducing a new database-version requirement for this optimization.
+
+### 21.3 Business semantics are intentionally unchanged
+
+Build C is **not** the analytics-correctness batch. To make performance changes
+safe and independently reviewable, it preserves the exact pre-Build-C rules:
+
+- Sales still require `sales.statut = completed`;
+- Sold (30d) still starts at `now()->subDays(30)->format('Y-m-d')`;
+- previous period still uses day 60 through day 31 ago;
+- Sale/Purchase insight metrics are still global rather than restricted to the
+  current user's warehouses (the existing Warehouse Count remains scoped);
+- completed Sales soft-delete semantics are not changed here;
+- received Purchase soft-delete semantics are not changed here;
+- returns still exclude only soft-deleted parent `sale_returns` as before;
+- raw transaction quantities remain raw (no Unit/Multi-Pack normalization);
+- `return_rate` formula and price/date formatting remain unchanged.
+
+Those known correctness items remain explicitly deferred to a separate later
+batch so a changed number can never be confused with a query optimization
+regression.
+
+### 21.4 Regression and equivalence checks
+
+Fast source-contract gate:
+
+```bash
+php tests/Regression/build_c_product_insights.php
+```
+
+Regular PHPUnit contract:
+
+`tests/Unit/BuildCProductInsightContractTest.php`
+
+The Build C gate ensures the Product render loop no longer performs per-row
+insight queries, the service keeps four executed set-based metric statements,
+and the legacy status/date/tie-break contracts remain present.
+
+During Build C preparation, a representative database fixture was also evaluated
+with both the old per-Product formulas and the grouped formulas, including:
+
+- Products with and without Sales;
+- current and previous date windows;
+- pending vs completed Sales;
+- deleted vs active Sale Returns;
+- multiple received Purchases on the same latest date (detail-id tie-break);
+- selected, restricted, and all-warehouse Warehouse Count scopes.
+
+The optimized result matched the legacy result for every tested metric. The
+structural custom-insight query pattern changes from `7 × Product count` to four
+executed metric queries for the result set. Existing non-insight Product queries
+(e.g. vendor Product type/variant/quantity behavior) are intentionally outside
+this patch and are not claimed as optimized here.
+
+### 21.5 Files and upgrade contract
+
+**Runtime files:**
+
+- `app/Http/Controllers/ProductsController.php`
+- `app/Services/Custom/ProductInsightService.php` (new)
+
+**Tests/documentation only:**
+
+- `tests/Regression/build_c_product_insights.php`
+- `tests/Unit/BuildCProductInsightContractTest.php`
+- `CUSTOMIZATIONS.md`
+- `README_VENDOR_UPDATE_BN.md`
+- `BUILD_C_SAFE_OVERLAY_README.md`
+
+**Not changed:** Sales/Shipment controllers, Vue source, `public/js`, service
+worker, routes, migrations, database schema, stock movement, Sale totals,
+invoice/shipping templates, POS pages, or any menu/module file.
+
+**Future vendor-update warning:** if a later Stocky version introduces native
+Product insight aggregates, compare the vendor implementation first. Prefer the
+vendor implementation when it provides equivalent business fields; retain only
+custom business deltas and keep this regression contract or adapt it to the new
+canonical query path.
+
+## 22. Build D1 — Product Insights warehouse visibility + soft-delete correctness
+
+**Status:** ACTIVE. **Base required:** Build C SAFE overlay (Section 21) on top of the
+confirmed Build A + safe A.1/B baseline. Build D1 is deliberately a small
+analytics-correctness patch. It does **not** change Product Insight formulas,
+Unit/Multi-Pack math, date-window boundaries, UI columns, database schema,
+Sales/POS/Shipment workflows, or compiled frontend assets.
+
+### 22.1 Business correction: Product Insights now respect warehouse visibility
+
+Before D1, Product stock/Warehouse Count followed the logged-in user's warehouse
+visibility, but several custom transaction metrics were aggregated globally.
+That meant a warehouse-restricted user could see Sold/Return/Latest Purchase
+activity originating from another warehouse.
+
+Build D1 applies one consistent transaction-population rule inside
+`ProductInsightService`:
+
+1. if an allowed `warehouse_id` filter is selected, insight transactions use
+   only that warehouse;
+2. otherwise, users without `is_all_warehouses` are limited to their assigned
+   warehouse ids;
+3. all-warehouse users keep the existing all-warehouse view when no explicit
+   warehouse filter is selected;
+4. a restricted user with no assigned warehouse receives zero transaction
+   insight rows rather than falling back to global data.
+
+The scope is applied to:
+
+- completed Sale metrics: Sold (30d), previous period, Last Sold, lifetime sold;
+- Sale Return quantity used by Return Rate;
+- Latest received Purchase date/cost.
+
+**Intentional visible change:** values can decrease for restricted users because
+other warehouses are no longer included. This is a correctness/data-isolation
+fix, not a regression. An all-warehouse user with no selected warehouse retains
+the previous global view.
+
+### 22.2 Soft-deleted parent transactions are excluded
+
+Build C intentionally preserved the old behavior while it optimized query count.
+D1 now excludes soft-deleted parent rows from the custom analytics:
+
+- `sales.deleted_at IS NULL` for completed-Sale metrics and insight sorting;
+- `purchases.deleted_at IS NULL` at both stages of the Latest Purchase lookup and
+  on the final selected Purchase row;
+- the pre-existing `sale_returns.deleted_at IS NULL` rule remains active.
+
+The Product-detail rows themselves are not given any new status/unit semantics in
+this patch; D1 only corrects parent transaction eligibility.
+
+### 22.3 Product Insight sorting stays aligned with displayed values
+
+`ProductsController` already performs server-side sorting for `Sold (30d)` and
+`Last Sold`. Once D1 narrowed the displayed insight population, leaving the sort
+subqueries global would produce a subtle mismatch: rows could be ordered by
+hidden/deleted warehouse activity while displaying a smaller scoped number.
+
+Therefore those two sort subqueries now use the same rules as the displayed
+metrics:
+
+- completed Sale only;
+- non-deleted parent Sale;
+- selected warehouse, or assigned warehouses for restricted users;
+- no transaction rows for a restricted user with no warehouse assignment.
+
+No other Product sorting behavior is changed.
+
+### 22.4 Deferred Product analytics rules remain deferred
+
+Build D1 intentionally does **not** change:
+
+- the current `now()->subDays(30)` date-window definition;
+- the previous-period day 60 through day 31 definition;
+- raw Sale/Return quantities or Unit/Multi-Pack normalization;
+- Return Rate formula;
+- historical-vs-estimated revenue semantics;
+- Last Purchase cost unit normalization;
+- FIFO/COGS/inventory valuation.
+
+Those items must remain separate patches because they can materially change
+business numbers for all users, not just remove unauthorized/deleted data.
+
+### 22.5 Runtime files and upgrade contract
+
+**Runtime files changed:**
+
+- `app/Http/Controllers/ProductsController.php`
+- `app/Services/Custom/ProductInsightService.php`
+
+**Tests/documentation:**
+
+- `tests/Regression/build_c_product_insights.php` (Build C gate updated so later
+  correctness narrowing does not falsely fail the performance contract);
+- `tests/Regression/build_d1_product_insight_scope.php`;
+- `tests/Unit/BuildD1ProductInsightScopeContractTest.php`;
+- `CUSTOMIZATIONS.md`;
+- `README_VENDOR_UPDATE_BN.md`;
+- `BUILD_D1_SAFE_OVERLAY_README.md`.
+
+**Not changed:** Vue source, `public/js`, routes, migrations/schema, Sales or
+Shipment controllers, POS pages, invoice/shipping templates, stock movement, or
+Sale total calculations.
+
+Fast regression sequence after applying the overlay:
+
+```bash
+php tests/Regression/build_a_stability.php
+php tests/Regression/build_a1_currency_backend.php
+php tests/Regression/build_b_authorization.php
+php tests/Regression/build_c_product_insights.php
+php tests/Regression/build_d1_product_insight_scope.php
+```
+
+**Future vendor-update warning:** if Stocky later introduces native Product
+insights, preserve the business contract that a restricted user's analytics may
+not infer transactions from warehouses outside their Sale/Purchase visibility.
+Review vendor soft-delete scopes when converting raw joins/subqueries because
+Eloquent global scopes are not automatically applied to every query-builder
+join.
+
+## 23. Build D2 — Exact 30-day windows + finalized Return Rate population
+
+**Status:** ACTIVE. **Base required:** Build D1 SAFE overlay (Section 22). Build D2
+is intentionally limited to two Product Analytics business-rule corrections. It
+does **not** introduce Unit/Multi-Pack normalization, change the Return Rate
+formula, modify Sales/POS/Shipment workflows, alter database schema, or rebuild
+frontend assets.
+
+### 23.1 Sold (30d) is now exactly 30 calendar dates
+
+The earlier custom Product metric used:
+
+`sd.date >= now()->subDays(30)`
+
+Because `sale_details.date` is a SQL `DATE`, including today made that population
+span 31 calendar dates. The previous comparison also used a different inclusive
+boundary shape, so the two trend periods were not exact equal-length windows.
+
+Build D2 defines one shared `ProductInsightService::rolling30DayWindows()`
+business boundary in the application timezone:
+
+- **current:** today minus 29 dates, inclusive, through tomorrow, exclusive;
+- **previous:** today minus 59 dates, inclusive, through current-start,
+  exclusive.
+
+Example for 11 Sep 2026:
+
+- current = `[2026-08-13, 2026-09-12)` → Aug 13 through Sep 11 = 30 dates;
+- previous = `[2026-07-14, 2026-08-13)` → Jul 14 through Aug 12 = 30 dates.
+
+This is a rolling 30-day metric; month length (28/29/30/31 days) does not change
+the rule. Half-open `[start, end)` intervals also avoid end-of-day precision
+issues and exclude accidentally future-dated SaleDetail rows from `Sold (30d)`.
+
+`ProductsController` now uses this same helper for `Sold (30d)` server-side
+sorting. Displayed values and sort order therefore cannot drift because of a
+separately duplicated date boundary.
+
+### 23.2 Return Rate counts only finalized Sale Returns
+
+The Product Return Rate formula remains:
+
+`lifetime received return quantity / lifetime completed-sale quantity × 100`
+
+Build D2 changes only the eligible Return population. `sale_returns.statut` must
+now be `received` in addition to the D1 rules (`deleted_at IS NULL` + authorized
+warehouse scope).
+
+This status is not a new custom interpretation. Stocky's existing
+`SalesReturnController` only adds returned stock, applies returned batch/serial
+credits, and reverses those stock movements when a Sale Return is `received`.
+`pending` returns therefore represent unfinished/non-stock-affecting documents
+and must not inflate the Product Return Rate.
+
+The denominator remains completed, non-deleted Sales in the same D1 warehouse
+scope. Lifetime behavior is preserved: D2 does not restrict Return Rate to the
+30-day window.
+
+### 23.3 Explicitly deferred rules
+
+Build D2 still does **not** change:
+
+- Unit operator / Multi-Pack quantity normalization;
+- raw `sale_details.quantity` / `sale_return_details.quantity` semantics;
+- actual historical Revenue/COGS/FIFO calculations;
+- Last Purchase Cost unit normalization;
+- Sales-list Qty or Packing List quantity semantics;
+- Product columns/UI/Vue/public JS;
+- Sales, POS, Shipment, Invoice or Shipping Label logic;
+- routes, migrations or database schema.
+
+Unit/Multi-Pack normalization remains a separate behavioral patch because it can
+materially change displayed quantities and Return Rate percentages.
+
+### 23.4 Automated regression contract
+
+Fast no-dependency gate:
+
+```bash
+php tests/Regression/build_d2_product_analytics.php
+```
+
+Regular PHPUnit contract:
+
+`tests/Unit/BuildD2ProductAnalyticsContractTest.php`
+
+The D2 gate protects:
+
+- exactly 30 current calendar dates and 30 immediately preceding dates;
+- non-overlapping half-open date windows;
+- one shared date-window helper for displayed metric + server-side sorting;
+- `received` Sale Return status as the Return Rate numerator population;
+- D1 warehouse/soft-delete constraints;
+- Build C's four set-based executed insight queries;
+- continued deferral of Unit/Multi-Pack normalization.
+
+The Build C and D1 contract tests are also updated only where their historical
+"date semantics unchanged" assertions were intentionally superseded by this D2
+business correction; their performance and warehouse-isolation contracts remain
+active.
+
+### 23.5 Runtime files and future vendor-update contract
+
+**Runtime files changed:**
+
+- `app/Http/Controllers/ProductsController.php`
+- `app/Services/Custom/ProductInsightService.php`
+
+**Tests/documentation:**
+
+- `tests/Regression/build_c_product_insights.php` (forward-compatible contract)
+- `tests/Regression/build_d1_product_insight_scope.php` (forward-compatible contract)
+- `tests/Regression/build_d2_product_analytics.php`
+- `tests/Unit/BuildCProductInsightContractTest.php` (forward-compatible contract)
+- `tests/Unit/BuildD1ProductInsightScopeContractTest.php` (forward-compatible contract)
+- `tests/Unit/BuildD2ProductAnalyticsContractTest.php`
+- `CUSTOMIZATIONS.md`
+- `README_VENDOR_UPDATE_BN.md`
+- `BUILD_D2_SAFE_OVERLAY_README.md`
+
+**Not changed:** Vue source, `public/js`, routes, migrations/schema, Sales or
+Shipment controllers, POS pages, invoice/shipping templates, stock movement, or
+Sale total calculations.
+
+**Future vendor-update warning:** if Stocky later changes Sale Return status
+semantics, do not keep `received` by assumption. Re-check the vendor stock
+movement workflow first and make Return Rate follow whichever status actually
+finalizes/restocks a return. If Stocky adds a native rolling-sales metric, retain
+the exact equal-length/non-overlapping period contract unless the business
+explicitly approves a different definition.
+
+## 24. Build E1 — POS Recent Invoices visibility + historical currency
+
+**Status:** ACTIVE. **Base required:** Build D2 SAFE overlay (Section 23). Build E1
+is intentionally limited to the POS **Recent Invoices** lookup. It does not alter
+POS sale creation, payment/stock movement, Sales-list calculations, Product
+Insights, Shipment logic, routes, migrations, or database schema.
+
+### 24.1 Recent Invoices now follows POS + record visibility
+
+The custom `SalesController::posRecentSales()` endpoint previously applied
+warehouse restrictions but did not apply the Sales `record_view`/ownership rule,
+and it did not explicitly restrict the result to POS-origin invoices. That meant
+a user could see another user's Sale inside an allowed warehouse even when the
+normal Sales list would hide that record, and a non-POS Sale could appear in a
+modal labelled "Recent Invoices" inside POS.
+
+Build E1 now applies the following contract in this order:
+
+- requires the existing `Sales_pos` permission (the same permission used by
+  Stocky's POS controller actions);
+- excludes soft-deleted Sales;
+- `is_pos = 1` (POS-origin only);
+- `statut = completed` (invoice/completed Sale only);
+- when `User::hasRecordView()` is false, only `sales.user_id = current user`;
+- when the user is warehouse-restricted, only assigned `UserWarehouse` IDs;
+- all-warehouse users retain the all-warehouse behavior, subject to record
+  ownership when `record_view` is disabled.
+
+This is a visibility/security correction only. The endpoint still returns a
+small newest-first list and does not become the full Sales index.
+
+### 24.2 Historical amount no longer follows the currency currently selected in POS
+
+Sale monetary fields are stored in base currency. Before E1, the Recent Invoices
+modal rendered `Sale.GrandTotal` through `formatPriceWithCurrentCurrency()`, so
+an old invoice could be displayed using whichever currency/rate the cashier had
+selected **now**, rather than the document currency/rate stored on that Sale.
+
+Build E1 keeps the existing base fields for API/backward compatibility and adds
+an immutable display snapshot per row:
+
+- `document_grand_total`;
+- `document_paid_amount`;
+- `currency_symbol`;
+- `currency_code`;
+- `exchange_rate`.
+
+The backend uses the existing Stocky 5.8 `helpers::Get_Document_Currency()` and
+`helpers::to_document_amount()` helpers, so legacy/base Sales fall back to the
+configured base currency and foreign-currency Sales use their stored exchange
+rate. The Recent Invoices amount cell renders the document amount/symbol with
+`formatPriceWithSymbol()` and no longer multiplies the historical Sale by the
+current POS rate.
+
+Example: a Sale stores base `100` with document rate `1.25`; Recent Invoices
+shows `125` in that Sale's document currency even if the register has since
+switched to another currency.
+
+### 24.3 Frontend deployment is surgical; no broad admin rebuild
+
+Because this project is being maintained as SAFE overlays and the live project
+may contain additional module/runtime files outside the uploaded baseline, E1
+**does not replace the full `public/js` tree**. Source-of-truth Vue is updated in
+`resources/src/pages/pos/PosPage.vue`, and the exact existing POS lazy chunk is
+synchronized with the same one-expression change:
+
+- `public/js/chunks/PosPage.LolIxUV8.js`
+
+The PWA cache version is bumped from `stocky-pwa-v9` to `stocky-pwa-v10` in
+`public/sw.js` so clients purge the cached old POS chunk and fetch the updated
+artifact. No other compiled chunk, entry bundle, manifest, menu asset, or module
+asset is replaced.
+
+This preserves the working frontend baseline while keeping Vue source aligned
+for the next normal Vite rebuild. A future full `npm run build` will regenerate
+content-hashed assets from the updated source and can retire this surgical
+compiled-artifact synchronization.
+
+### 24.4 Runtime files, tests, and upgrade contract
+
+**Runtime/source files changed:**
+
+- `app/Http/Controllers/SalesController.php`
+- `resources/src/pages/pos/PosPage.vue`
+- `public/js/chunks/PosPage.LolIxUV8.js`
+- `public/sw.js` (cache-version bump only)
+
+**Tests/documentation:**
+
+- `tests/Regression/build_e1_pos_recent.php`
+- `tests/Unit/BuildE1PosRecentContractTest.php`
+- `CUSTOMIZATIONS.md`
+- `README_VENDOR_UPDATE_BN.md`
+- `BUILD_E1_SAFE_OVERLAY_README.md`
+- `BUILD_E1_FILE_MANIFEST.txt`
+
+**Not changed:** Product Insight service/controller, Shipment controller,
+Sales/PosSales list pages, POS create/update/payment logic, invoice/packing/
+shipping templates, routes, migrations/schema, stock calculations, Unit/
+Multi-Pack logic, or other `public/js` chunks.
+
+Fast regression sequence after applying E1:
+
+```bash
+php tests/Regression/build_a_stability.php
+php tests/Regression/build_a1_currency_backend.php
+php tests/Regression/build_b_authorization.php
+php tests/Regression/build_c_product_insights.php
+php tests/Regression/build_d1_product_insight_scope.php
+php tests/Regression/build_d2_product_analytics.php
+php tests/Regression/build_e1_pos_recent.php
+```
+
+**Future vendor-update warning:** if Stocky changes POS ownership (`user_id`),
+`record_view`, document-currency snapshot semantics, or introduces a native
+Recent Invoices endpoint, compare those vendor rules before replaying E1. Prefer
+the vendor implementation when it provides equivalent visibility and historical
+currency guarantees, retaining only any business-specific delta.

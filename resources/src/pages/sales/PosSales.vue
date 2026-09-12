@@ -95,6 +95,9 @@
             {{ statusKey(SALE_STATUSES, record.statut) ? $t(statusKey(SALE_STATUSES, record.statut)) : record.statut }}
           </a-tag>
         </template>
+        <template v-else-if="column.key === 'currency_code'">
+          <a-tag v-if="record.currency_code" color="blue">{{ record.currency_code }}</a-tag>
+        </template>
         <template v-else-if="column.key === 'GrandTotal'">{{ money(record.GrandTotal) }}</template>
         <template v-else-if="column.key === 'paid_amount'">{{ money(record.paid_amount) }}</template>
         <template v-else-if="column.key === 'due'">
@@ -538,9 +541,15 @@ const columns = computed(() => [
   { title: t('Reference'), dataIndex: 'Ref', key: 'Ref', sorter: true },
   { title: 'Tracking Ref', dataIndex: 'tracking_ref', key: 'tracking_ref', exportValue: r => r.tracking_ref || '' },
   { title: 'Zone', dataIndex: 'zone_name', key: 'zone_name', exportValue: r => r.zone_name || '' },
+  { title: t('Seller'), dataIndex: 'seller_name', key: 'seller_name' },
   { title: t('Customer'), dataIndex: 'client_name', key: 'client_name', sorter: true },
   { title: t('warehouse'), dataIndex: 'warehouse_name', key: 'warehouse_name', sorter: true },
   { title: t('Status'), dataIndex: 'statut', key: 'statut', sorter: true, exportValue: r => r.statut },
+  // Keep Stocky 5.8 Sales/POS Sales parity without adding visual noise:
+  // document currency is available from the column picker but hidden initially.
+  ...(auth.multiCurrencyEnabled
+    ? [{ title: t('Currency'), dataIndex: 'currency_code', key: 'currency_code', width: 90, align: 'center', defaultHidden: true, exportValue: r => r.currency_code || '' }]
+    : []),
   { title: 'Qty', dataIndex: 'total_qty', key: 'total_qty', align: 'right', exportValue: r => r.total_qty ?? 0 },
   { title: t('Total'), dataIndex: 'GrandTotal', key: 'GrandTotal', sorter: true, align: 'right', exportValue: r => money(r.GrandTotal) },
   { title: t('Paid'), dataIndex: 'paid_amount', key: 'paid_amount', sorter: true, align: 'right', exportValue: r => money(r.paid_amount) },

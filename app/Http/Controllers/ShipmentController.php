@@ -6,13 +6,50 @@ use App\Models\Sale;
 use App\Models\SaleCourier;
 use App\Models\SaleZone;
 use App\Models\Shipment;
+use App\Models\UserWarehouse;
+use App\Support\SaleMetadataRules;
 use App\utils\helpers;
 use DB;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 
 class ShipmentController extends BaseController
 {
+    /**
+     * Canonical Sale visibility used by Shipment endpoints. Shipment records
+     * inherit their access boundary from the Sale they belong to: the same
+     * record_view ownership rule and warehouse assignments as SalesController.
+     */
+    private function visibleSalesQuery($user)
+    {
+        $query = Sale::query()->whereNull('deleted_at');
+
+        if (! $user->hasRecordView()) {
+            $query->where('user_id', $user->id);
+        }
+
+        if (! $user->is_all_warehouses) {
+            $allowedWarehouseIds = UserWarehouse::where('user_id', $user->id)
+                ->pluck('warehouse_id')
+                ->toArray();
+            $query->whereIn('warehouse_id', $allowedWarehouseIds);
+        }
+
+        return $query;
+    }
+
+    /**
+     * Scope Shipments through their visible Sale instead of trusting a
+     * client-supplied shipment/sale id. The subquery stays in SQL and avoids
+     * materializing a potentially large Sale id list in PHP.
+     */
+    private function visibleShipmentsQuery($user)
+    {
+        return Shipment::query()->whereIn(
+            'sale_id',
+            $this->visibleSalesQuery($user)->select('id')
+        );
+    }
+
     // ----------- Get ALL Shipments-------\\
 
     public function index(request $request)
@@ -24,12 +61,22 @@ class ShipmentController extends BaseController
         $pageStart = \Request::get('page', 1);
         // Start displaying items from this number;
         $offSet = ($pageStart * $perPage) - $perPage;
-        $order = $request->SortField;
-        $dir = $request->SortType;
+        // Map UI aliases explicitly instead of passing arbitrary SortField
+        // values to SQL. Relation-backed keys are handled by safe subqueries
+        // below, preserving true server-side sorting across all pages.
+        $sortableFields = [
+            'id', 'date', 'shipment_ref', 'sale_ref', 'customer_name',
+            'warehouse_name', 'status', 'delivered_to',
+        ];
+        $requestedOrder = (string) ($request->SortField ?: 'id');
+        $order = in_array($requestedOrder, $sortableFields, true) ? $requestedOrder : 'id';
+        $dir = strtolower((string) $request->SortType) === 'asc' ? 'asc' : 'desc';
         $helpers = new helpers;
         $data = [];
 
-        $shipments = Shipment::with('sale', 'sale.client', 'sale.warehouse', 'sale.courier')
+        $user = $request->user('api');
+        $shipments = $this->visibleShipmentsQuery($user)
+            ->with('sale', 'sale.client', 'sale.warehouse', 'sale.courier')
 
         // Search With Multiple Param
             ->where(function ($query) use ($request) {
@@ -59,10 +106,35 @@ class ShipmentController extends BaseController
         if ($perPage == '-1') {
             $perPage = $totalRows;
         }
-        $shipments_data = $shipments->offset($offSet)
-            ->limit($perPage)
-            ->orderBy($order, $dir)
-            ->get();
+        $shipments->offset($offSet)->limit($perPage);
+
+        if ($order === 'shipment_ref') {
+            $shipments->orderBy('Ref', $dir);
+        } elseif ($order === 'sale_ref') {
+            $saleRefSub = DB::table('sales')
+                ->select('Ref')
+                ->whereColumn('sales.id', 'shipments.sale_id')
+                ->limit(1);
+            $shipments->orderBy($saleRefSub, $dir);
+        } elseif ($order === 'customer_name') {
+            $customerSub = DB::table('sales')
+                ->join('clients', 'clients.id', '=', 'sales.client_id')
+                ->select('clients.name')
+                ->whereColumn('sales.id', 'shipments.sale_id')
+                ->limit(1);
+            $shipments->orderBy($customerSub, $dir);
+        } elseif ($order === 'warehouse_name') {
+            $warehouseSub = DB::table('sales')
+                ->join('warehouses', 'warehouses.id', '=', 'sales.warehouse_id')
+                ->select('warehouses.name')
+                ->whereColumn('sales.id', 'shipments.sale_id')
+                ->limit(1);
+            $shipments->orderBy($warehouseSub, $dir);
+        } else {
+            $shipments->orderBy($order, $dir);
+        }
+
+        $shipments_data = $shipments->get();
 
         foreach ($shipments_data as $shipment) {
 
@@ -86,7 +158,8 @@ class ShipmentController extends BaseController
 
         // Global per-status counts for the summary cards (independent of
         // pagination/search so the tiles always show the full picture).
-        $status_counts = Shipment::select('status', DB::raw('count(*) as total'))
+        $status_counts = $this->visibleShipmentsQuery($user)
+            ->select('status', DB::raw('count(*) as total'))
             ->groupBy('status')
             ->pluck('total', 'status');
 
@@ -103,22 +176,39 @@ class ShipmentController extends BaseController
     {
         $this->authorizeForUser($request->user('api'), 'create', Shipment::class);
 
-        request()->validate([
-            'status' => 'required',
-        ]);
+        request()->validate(array_merge([
+            'Ref' => 'required',
+            'sale_id' => 'required|integer',
+        ], SaleMetadataRules::shipmentFields()));
 
-        \DB::transaction(function () use ($request) {
-            $shipment = Shipment::firstOrNew(['Ref' => $request['Ref']]);
+        $user = $request->user('api');
 
-            $shipment->user_id = Auth::user()->id;
-            $shipment->sale_id = $request['sale_id'];
+        \DB::transaction(function () use ($request, $user) {
+            $sale = $this->visibleSalesQuery($user)
+                ->lockForUpdate()
+                ->findOrFail($request['sale_id']);
+
+            // Preserve the existing Ref-based upsert used by Sales/PosSales,
+            // but never allow a known shipment Ref to be rebound to another
+            // Sale by changing a client-supplied sale_id.
+            $shipment = Shipment::where('Ref', $request['Ref'])->lockForUpdate()->first();
+            if ($shipment && (int) $shipment->sale_id !== (int) $sale->id) {
+                abort(422, 'Shipment reference already belongs to another sale.');
+            }
+            if (! $shipment) {
+                $shipment = new Shipment;
+                $shipment->Ref = $request['Ref'];
+            }
+
+            $shipment->user_id = $user->id;
+            $shipment->sale_id = $sale->id;
             $shipment->delivered_to = $request['delivered_to'];
+            $shipment->phone_number = $request['phone_number'] ?? null;
             $shipment->shipping_address = $request['shipping_address'];
             $shipment->shipping_details = $request['shipping_details'];
             $shipment->status = $request['status'];
             $shipment->save();
 
-            $sale = Sale::findOrFail($request['sale_id']);
             $sale->update([
                 'shipping_status' => $request['status'],
             ]);
@@ -129,11 +219,15 @@ class ShipmentController extends BaseController
 
     }
 
-    public function show($id)
+    public function show(Request $request, $id)
     {
+        $this->authorizeForUser($request->user('api'), 'view', Shipment::class);
 
-        $get_shipment = Shipment::where('sale_id', $id)->first();
-        $sale = Sale::with('client')->find($id);
+        $user = $request->user('api');
+        $sale = $this->visibleSalesQuery($user)->with('client')->findOrFail($id);
+        $get_shipment = $this->visibleShipmentsQuery($user)
+            ->where('sale_id', $sale->id)
+            ->first();
 
         if ($get_shipment) {
 
@@ -178,17 +272,31 @@ class ShipmentController extends BaseController
     {
         $this->authorizeForUser($request->user('api'), 'update', Shipment::class);
 
-        request()->validate([
-            'status' => 'required',
-        ]);
+        request()->validate(array_merge([
+            'sale_id' => 'required|integer',
+        ], SaleMetadataRules::shipmentFields()));
 
-        \DB::transaction(function () use ($request, $id) {
+        $user = $request->user('api');
 
-            Shipment::whereId($id)->update($request->only([
-                'sale_id', 'delivered_to', 'phone_number', 'shipping_address', 'status', 'shipping_details',
+        \DB::transaction(function () use ($request, $id, $user) {
+            $shipment = $this->visibleShipmentsQuery($user)
+                ->lockForUpdate()
+                ->findOrFail($id);
+
+            // A shipment edit is not a Sale-reassignment workflow. Keeping
+            // this invariant prevents Shipment A from being used to modify
+            // Sale B through a crafted sale_id.
+            if ((int) $request['sale_id'] !== (int) $shipment->sale_id) {
+                abort(422, 'Shipment cannot be reassigned to another sale.');
+            }
+
+            $shipment->update($request->only([
+                'delivered_to', 'phone_number', 'shipping_address', 'status', 'shipping_details',
             ]));
 
-            $sale = Sale::findOrFail($request['sale_id']);
+            $sale = $this->visibleSalesQuery($user)
+                ->lockForUpdate()
+                ->findOrFail($shipment->sale_id);
             $salePayload = ['shipping_status' => $request['status']];
             if ($request->has('courier_id')) {
                 $salePayload['courier_id'] = $request['courier_id'] ?: null;
@@ -210,12 +318,19 @@ class ShipmentController extends BaseController
     {
         $this->authorizeForUser($request->user('api'), 'delete', Shipment::class);
 
-        \DB::transaction(function () use ($request, $id) {
+        $user = $request->user('api');
 
-            $shipment = Shipment::find($id);
+        \DB::transaction(function () use ($request, $id, $user) {
+
+            $shipment = $this->visibleShipmentsQuery($user)
+                ->lockForUpdate()
+                ->findOrFail($id);
+
+            $sale = $this->visibleSalesQuery($user)
+                ->lockForUpdate()
+                ->findOrFail($shipment->sale_id);
+
             $shipment->delete();
-
-            $sale = Sale::findOrFail($shipment->sale_id);
             $sale->update([
                 'shipping_status' => $request['status'],
             ]);

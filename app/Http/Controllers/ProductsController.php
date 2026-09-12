@@ -25,10 +25,9 @@ use App\Models\UserWarehouse;
 use App\Models\Warehouse;
 use App\Models\WarehouseLocation;
 use App\Models\ProductWarehouseLocation;
-use App\Models\PurchaseDetail;
 use App\Models\SaleDetail;
-use App\Models\SaleReturnDetails;
 use App\Services\ProductGalleryService;
+use App\Services\Custom\ProductInsightService;
 use App\Services\WholesalePricingService;
 use App\utils\helpers;
 use Carbon\Carbon;
@@ -56,8 +55,17 @@ class ProductsController extends BaseController
         $perPage = $request->integer('limit', 10);
         $pageStart = (int) ($request->get('page', 1));
         $offSet = ($pageStart * max($perPage, 1)) - max($perPage, 1);
-        $order = $request->get('SortField', 'id');
-        $dir = $request->get('SortType', 'desc');
+        // Whitelist every accepted sort key. Two Product Insight fields are
+        // computed values rather than products-table columns; they are handled
+        // with correlated aggregate subqueries below so the existing Vue table
+        // can keep true server-side sorting across pagination without SQL errors.
+        $sortableFields = [
+            'id', 'name', 'code', 'cost', 'price', 'wholesale_price', 'min_price',
+            'quantity', 'total_sold_30d', 'last_sold_date',
+        ];
+        $requestedOrder = (string) $request->get('SortField', 'id');
+        $order = in_array($requestedOrder, $sortableFields, true) ? $requestedOrder : 'id';
+        $dir = strtolower((string) $request->get('SortType', 'desc')) === 'asc' ? 'asc' : 'desc';
 
         $helpers = new helpers;
         $warehouseId = $request->integer('warehouse_id');
@@ -162,6 +170,11 @@ class ProductsController extends BaseController
             $perPage = $totalRows;
         }
 
+        // One shared Product Insight service owns both displayed metrics and
+        // their server-side sort date window, preventing future drift between
+        // the visible Sold (30d) value and its ordering behavior.
+        $productInsightService = app(ProductInsightService::class);
+
         // 'quantity' is not a products column — it is the sum of product_warehouse
         // stock, so sorting by it needs a subquery scoped exactly like the
         // displayed quantity (selected warehouse, else the user's allowed ones).
@@ -174,7 +187,58 @@ class ProductsController extends BaseController
             } elseif (! $user_auth->is_all_warehouses) {
                 $qtySub->whereIn('warehouse_id', $allowedWarehouseIds);
             }
-            $filtered->orderBy($qtySub, $dir === 'asc' ? 'asc' : 'desc');
+            $filtered->orderBy($qtySub, $dir);
+        } elseif ($order === 'total_sold_30d') {
+            // Keep sorting aligned with the displayed Build D1/G1 metric: only
+            // visible warehouses and non-deleted completed Sales participate,
+            // and quantity is converted to base units the same way the
+            // displayed value is (UnitQuantityResolver).
+            $salesWindows = $productInsightService->rolling30DayWindows();
+            $sold30BaseQty = \App\Support\UnitQuantityResolver::baseQuantityExpression(
+                'sale_details.quantity',
+                'sale_details.pack_multiplier',
+                'sort_su'
+            );
+            $sold30Sub = SaleDetail::selectRaw("COALESCE(SUM({$sold30BaseQty}), 0)")
+                ->join('sales', 'sales.id', '=', 'sale_details.sale_id')
+                ->leftJoin('units as sort_su', 'sort_su.id', '=', 'sale_details.sale_unit_id')
+                ->whereColumn('sale_details.product_id', 'products.id')
+                ->where('sales.statut', 'completed')
+                ->whereNull('sales.deleted_at')
+                ->where('sale_details.date', '>=', $salesWindows['current_start'])
+                ->where('sale_details.date', '<', $salesWindows['current_end_exclusive']);
+
+            if ($warehouseId) {
+                $sold30Sub->where('sales.warehouse_id', $warehouseId);
+            } elseif (! $user_auth->is_all_warehouses) {
+                if ($allowedWarehouseIds === []) {
+                    $sold30Sub->whereRaw('1 = 0');
+                } else {
+                    $sold30Sub->whereIntegerInRaw('sales.warehouse_id', $allowedWarehouseIds);
+                }
+            }
+
+            $filtered->orderBy($sold30Sub, $dir);
+        } elseif ($order === 'last_sold_date') {
+            // Same authorized/non-deleted completed-Sale population used by
+            // the displayed Last Sold metric.
+            $lastSoldSub = SaleDetail::selectRaw('MAX(sale_details.date)')
+                ->join('sales', 'sales.id', '=', 'sale_details.sale_id')
+                ->whereColumn('sale_details.product_id', 'products.id')
+                ->where('sales.statut', 'completed')
+                ->whereNull('sales.deleted_at');
+
+            if ($warehouseId) {
+                $lastSoldSub->where('sales.warehouse_id', $warehouseId);
+            } elseif (! $user_auth->is_all_warehouses) {
+                if ($allowedWarehouseIds === []) {
+                    $lastSoldSub->whereRaw('1 = 0');
+                } else {
+                    $lastSoldSub->whereIntegerInRaw('sales.warehouse_id', $allowedWarehouseIds);
+                }
+            }
+
+            $filtered->orderBy($lastSoldSub, $dir);
         } else {
             $filtered->orderBy($order, $dir);
         }
@@ -182,6 +246,18 @@ class ProductsController extends BaseController
         $products = $filtered->offset($offSet)
             ->limit($perPage)
             ->get();
+
+        // Build the custom insight columns once for the whole result set instead
+        // of issuing multiple sale/purchase/return/warehouse queries per Product.
+        // Build C made these reads set-based; D1 added authorized warehouse/soft-delete
+        // eligibility, and D2 makes the 30-day comparison exact while excluding
+        // pending Sale Returns from the lifetime return-rate numerator.
+        $productInsights = $productInsightService->forProducts(
+            $products->pluck('id')->all(),
+            $warehouseId ?: null,
+            $allowedWarehouseIds,
+            (bool) $user_auth->is_all_warehouses
+        );
 
         $hasVariantWholesale = Schema::hasColumn('product_variants', 'wholesale');
         $hasVariantMinPrice = Schema::hasColumn('product_variants', 'min_price');
@@ -315,71 +391,34 @@ class ProductsController extends BaseController
             }
 
             // ----- Extra business-insight fields (same for every product type) -----
-            // Last Purchase Date & Cost: the most recent RECEIVED purchase line for
-            // this product, across all its variants if it has any (purchase_details
-            // always carries product_id even for a variant line).
-            $lastPurchase = PurchaseDetail::join('purchases', 'purchases.id', '=', 'purchase_details.purchase_id')
-                ->where('purchase_details.product_id', $product->id)
-                ->where('purchases.statut', 'received')
-                ->orderByDesc('purchases.date')
-                ->orderByDesc('purchase_details.id')
-                ->first(['purchase_details.cost', 'purchases.date']);
-            $item['last_purchase_date'] = optional($lastPurchase)->date;
-            $item['last_purchase_cost'] = $lastPurchase
-                ? number_format((float) $lastPurchase->cost, helpers::price_decimals(), '.', '')
+            // Build C/D1 prepares scoped set-based aggregates; Build D2 keeps
+            // the same formulas while using exact 30-day windows and finalized
+            // (received) Sale Returns for the Return Rate numerator.
+            $insight = $productInsights[$product->id] ?? [
+                'last_purchase_date' => null,
+                'last_purchase_cost' => null,
+                'total_sold_30d' => 0.0,
+                'total_sold_prev30d' => 0.0,
+                'last_sold_date' => null,
+                'lifetime_sold' => 0.0,
+                'lifetime_returned' => 0.0,
+                'warehouse_count' => 0,
+            ];
+
+            $item['last_purchase_date'] = $insight['last_purchase_date'];
+            $item['last_purchase_cost'] = $insight['last_purchase_cost'] !== null
+                ? number_format((float) $insight['last_purchase_cost'], helpers::price_decimals(), '.', '')
                 : null;
+            $item['total_sold_30d'] = (float) $insight['total_sold_30d'];
+            $item['total_sold_prev30d'] = (float) $insight['total_sold_prev30d'];
+            $item['last_sold_date'] = $insight['last_sold_date'];
 
-            // Total Sold (last 30 days) and Last Sold Date: completed sales only,
-            // matching the same "statut = completed" convention used everywhere
-            // else profit/COGS is calculated in this app.
-            $item['total_sold_30d'] = (float) SaleDetail::join('sales', 'sales.id', '=', 'sale_details.sale_id')
-                ->where('sale_details.product_id', $product->id)
-                ->where('sales.statut', 'completed')
-                ->where('sale_details.date', '>=', now()->subDays(30)->format('Y-m-d'))
-                ->sum('sale_details.quantity');
-            // Previous 30-day window (day 31-60 ago) — purely so the frontend can
-            // show a trend arrow against the current 30-day figure above.
-            $item['total_sold_prev30d'] = (float) SaleDetail::join('sales', 'sales.id', '=', 'sale_details.sale_id')
-                ->where('sale_details.product_id', $product->id)
-                ->where('sales.statut', 'completed')
-                ->whereBetween('sale_details.date', [
-                    now()->subDays(60)->format('Y-m-d'),
-                    now()->subDays(31)->format('Y-m-d'),
-                ])
-                ->sum('sale_details.quantity');
-            $item['last_sold_date'] = SaleDetail::join('sales', 'sales.id', '=', 'sale_details.sale_id')
-                ->where('sale_details.product_id', $product->id)
-                ->where('sales.statut', 'completed')
-                ->max('sale_details.date');
-
-            // Return Rate: lifetime returned quantity vs lifetime sold quantity —
-            // a 30-day window is too small a sample for most products to make this
-            // percentage meaningful, so this deliberately uses all-time totals
-            // rather than the 30-day figures above.
-            $lifetimeSold = (float) SaleDetail::join('sales', 'sales.id', '=', 'sale_details.sale_id')
-                ->where('sale_details.product_id', $product->id)
-                ->where('sales.statut', 'completed')
-                ->sum('sale_details.quantity');
-            $lifetimeReturned = (float) SaleReturnDetails::join('sale_returns', 'sale_returns.id', '=', 'sale_return_details.sale_return_id')
-                ->where('sale_return_details.product_id', $product->id)
-                ->whereNull('sale_returns.deleted_at')
-                ->sum('sale_return_details.quantity');
+            $lifetimeSold = (float) $insight['lifetime_sold'];
+            $lifetimeReturned = (float) $insight['lifetime_returned'];
             $item['return_rate'] = $lifetimeSold > 0
                 ? round(($lifetimeReturned / $lifetimeSold) * 100, 1)
                 : null;
-
-            // Warehouse Count: how many of the warehouses this user can see actually
-            // carry stock (qty > 0) of this product right now — same warehouse
-            // scoping (selected warehouse, else the user's allowed set) as Quantity.
-            $warehouseCountQuery = product_warehouse::where('product_id', $product->id)
-                ->whereNull('deleted_at')
-                ->where('qte', '>', 0);
-            if ($warehouseId) {
-                $warehouseCountQuery->where('warehouse_id', $warehouseId);
-            } elseif (! $user_auth->is_all_warehouses) {
-                $warehouseCountQuery->whereIn('warehouse_id', $allowedWarehouseIds);
-            }
-            $item['warehouse_count'] = $warehouseCountQuery->distinct('warehouse_id')->count('warehouse_id');
+            $item['warehouse_count'] = (int) $insight['warehouse_count'];
 
             $data[] = $item;
         }
@@ -2265,29 +2304,52 @@ class ProductsController extends BaseController
             return response()->json(['results' => []]);
         }
 
-        $products = Product::whereNull('deleted_at')
+        $products = Product::with(['variants' => function ($query) {
+            $query->whereNull('deleted_at')->orderBy('id');
+        }])
+            ->whereNull('deleted_at')
             ->where('is_active', 1)
             ->where(function ($q) use ($search) {
                 $q->where('code', 'like', "%{$search}%")
                     ->orWhere('gtin', 'like', "%{$search}%")
                     ->orWhere('name', 'like', "%{$search}%")
                     ->orWhereHas('variants', function ($vq) use ($search) {
-                        $vq->where('code', 'like', "%{$search}%")
-                            ->orWhere('gtin', 'like', "%{$search}%");
+                        $vq->whereNull('deleted_at')
+                            ->where(function ($variantSearch) use ($search) {
+                                $variantSearch->where('code', 'like', "%{$search}%")
+                                    ->orWhere('gtin', 'like', "%{$search}%");
+                            });
                     });
             })
             ->orderByRaw('code = ? desc, gtin = ? desc', [$search, $search])
             ->limit(15)
-            ->get(['id', 'name', 'code', 'gtin', 'price', 'image']);
+            ->get(['id', 'name', 'code', 'gtin', 'price', 'image', 'is_variant']);
 
         $results = $products->map(function ($p) {
+            $variantPrices = $p->variants
+                ->pluck('price')
+                ->filter(function ($price) {
+                    return $price !== null;
+                })
+                ->map(function ($price) {
+                    return (float) $price;
+                });
+            $isVariant = ! empty($p->is_variant);
+
             return [
                 'id' => $p->id,
                 'name' => $p->name,
                 'code' => $p->code,
                 'gtin' => $p->gtin,
                 'price' => number_format($p->price, helpers::price_decimals(), '.', ''),
+                'price_min' => $isVariant && $variantPrices->isNotEmpty()
+                    ? number_format($variantPrices->min(), helpers::price_decimals(), '.', '')
+                    : null,
+                'price_max' => $isVariant && $variantPrices->isNotEmpty()
+                    ? number_format($variantPrices->max(), helpers::price_decimals(), '.', '')
+                    : null,
                 'image' => $p->primaryProductImageFilename(),
+                'is_variant' => $isVariant,
             ];
         });
 
@@ -2320,8 +2382,14 @@ class ProductsController extends BaseController
     {
         $this->authorizeForUser($request->user('api'), 'view', Product::class);
 
-        $product = Product::with('variants')->whereNull('deleted_at')->findOrFail($id);
-        $isVariant = ! empty($product->is_variant) && $product->variants->count() > 0;
+        $product = Product::with([
+            'unit:id,name,ShortName',
+            'variants' => function ($query) {
+                $query->whereNull('deleted_at')->orderBy('id');
+            },
+        ])->whereNull('deleted_at')->findOrFail($id);
+        $isVariant = ! empty($product->is_variant);
+        $unitLabel = trim((string) (optional($product->unit)->ShortName ?: optional($product->unit)->name));
 
         $user_auth = auth()->user();
         if ($user_auth->is_all_warehouses) {
@@ -2359,6 +2427,7 @@ class ProductsController extends BaseController
                     'price' => number_format($product->price, helpers::price_decimals(), '.', ''),
                     'image' => $product->primaryProductImageFilename(),
                     'is_variant' => false,
+                    'unit_label' => $unitLabel,
                 ],
                 'warehouses' => $byWarehouse,
                 'total_qty' => (float) $byWarehouse->sum('qty'),
@@ -2367,10 +2436,21 @@ class ProductsController extends BaseController
         }
 
         // Variant product: one qty per (warehouse, variant) pair.
+        $activeVariantIds = $product->variants->pluck('id');
+        $variantPrices = $product->variants
+            ->pluck('price')
+            ->filter(function ($price) {
+                return $price !== null;
+            })
+            ->map(function ($price) {
+                return (float) $price;
+            });
+
         $rows = DB::table('product_warehouse')
             ->where('product_id', $id)
             ->whereNull('deleted_at')
             ->whereNotNull('product_variant_id')
+            ->whereIn('product_variant_id', $activeVariantIds)
             ->whereIn('warehouse_id', $warehouses->pluck('id'))
             ->selectRaw('warehouse_id, product_variant_id, COALESCE(SUM(qte), 0) as qty')
             ->groupBy('warehouse_id', 'product_variant_id')
@@ -2406,8 +2486,15 @@ class ProductsController extends BaseController
                 'code' => $product->code,
                 'gtin' => $product->gtin,
                 'price' => number_format($product->price, helpers::price_decimals(), '.', ''),
+                'price_min' => $variantPrices->isNotEmpty()
+                    ? number_format($variantPrices->min(), helpers::price_decimals(), '.', '')
+                    : null,
+                'price_max' => $variantPrices->isNotEmpty()
+                    ? number_format($variantPrices->max(), helpers::price_decimals(), '.', '')
+                    : null,
                 'image' => $product->primaryProductImageFilename(),
                 'is_variant' => true,
+                'unit_label' => $unitLabel,
             ],
             'warehouses' => $byWarehouse,
             'total_qty' => (float) $byWarehouse->sum('qty'),

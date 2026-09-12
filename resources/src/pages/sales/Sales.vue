@@ -551,7 +551,7 @@ const columns = computed(() => [
   // Multi-Currency: badge with the document's currency code (amounts in the
   // list stay base-currency). Hidden when the module is off.
   ...(auth.multiCurrencyEnabled
-    ? [{ title: t('Currency'), dataIndex: 'currency_code', key: 'currency_code', width: 90, align: 'center', exportValue: r => r.currency_code || '' }]
+    ? [{ title: t('Currency'), dataIndex: 'currency_code', key: 'currency_code', width: 90, align: 'center', defaultHidden: true, exportValue: r => r.currency_code || '' }]
     : []),
   { title: 'Qty', dataIndex: 'total_qty', key: 'total_qty', align: 'right', exportValue: r => r.total_qty ?? 0 },
   { title: t('Total'), dataIndex: 'GrandTotal', key: 'GrandTotal', sorter: true, align: 'right', exportValue: r => money(r.GrandTotal) },

@@ -1211,7 +1211,7 @@
             <td class="ri-date">{{ s.date }}</td>
             <td class="ri-ref">{{ s.Ref }}</td>
             <td class="ri-customer">{{ s.client_name || '—' }}</td>
-            <td class="ri-right ri-amount">{{ formatPriceWithCurrentCurrency(s.GrandTotal, 2) }}</td>
+            <td class="ri-right ri-amount">{{ formatPriceWithSymbol(s.currency_symbol, s.document_grand_total, 2) }}</td>
             <td class="ri-right">
               <div class="ri-actions">
                 <button

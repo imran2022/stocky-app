@@ -33,6 +33,8 @@ use App\Models\Unit;
 use App\Models\User;
 use App\Models\UserWarehouse;
 use App\Models\Warehouse;
+use App\Support\SaleDocumentMath;
+use App\Support\SaleMetadataRules;
 use App\Support\ZatcaQr;
 use App\utils\helpers;
 use ArPHP\I18N\Arabic;
@@ -58,35 +60,61 @@ class SalesController extends BaseController
     // ------------- GET ALL SALES -----------\\
 
     /**
-     * POS "Recent Invoices" — a lightweight, POS-scoped recent-sales list
-     * (not the full Sales-list index() below, which needs Sales_view and
-     * carries far more columns/filters than a quick in-POS lookup needs).
-     * Warehouse-scoped the same way the rest of the app restricts stock/
-     * sales visibility for non is_all_warehouses users.
+     * POS "Recent Invoices" — a lightweight list for quick reprint/relabel
+     * without leaving the register. It deliberately follows the same record
+     * ownership and warehouse visibility rules as the Sales list, while only
+     * returning completed POS-origin sales.
+     *
+     * Monetary values stored on Sale are base-currency amounts. Return a
+     * document-currency snapshot as separate fields so the POS can render an
+     * old invoice in the currency/rate it was actually recorded with instead
+     * of the currency currently selected on the register.
      */
     public function posRecentSales(Request $request)
     {
-        $limit = min((int) $request->get('limit', 15), 50);
+        $this->authorizeForUser($request->user('api'), 'Sales_pos', Sale::class);
 
-        $user_auth = auth()->user();
-        $query = Sale::with('client')->whereNull('deleted_at');
+        $limit = max(1, min((int) $request->get('limit', 15), 50));
+        $user = $request->user('api');
+        $viewRecords = $user->hasRecordView();
 
-        if (! $user_auth->is_all_warehouses) {
-            $allowedWarehouseIds = UserWarehouse::where('user_id', $user_auth->id)->pluck('warehouse_id')->toArray();
+        $query = Sale::with('client')
+            ->whereNull('deleted_at')
+            ->where('is_pos', 1)
+            ->where('statut', 'completed')
+            ->when(! $viewRecords, function ($query) use ($user) {
+                $query->where('user_id', $user->id);
+            });
+
+        if (! $user->is_all_warehouses) {
+            $allowedWarehouseIds = UserWarehouse::where('user_id', $user->id)
+                ->pluck('warehouse_id')
+                ->toArray();
             $query->whereIn('warehouse_id', $allowedWarehouseIds);
         }
 
         $sales = $query->orderByDesc('id')->limit($limit)->get();
 
         $data = $sales->map(function ($sale) {
+            $documentCurrency = helpers::Get_Document_Currency($sale);
+            $documentGrandTotal = helpers::to_document_amount($sale->GrandTotal, $documentCurrency['rate']);
+            $documentPaidAmount = helpers::to_document_amount($sale->paid_amount, $documentCurrency['rate']);
+
             return [
                 'id' => $sale->id,
                 'Ref' => $sale->Ref,
                 'date' => $sale->date.' '.$sale->time,
                 'client_name' => optional($sale->client)->name,
+                // Keep base amounts for backward/API compatibility.
                 'GrandTotal' => number_format($sale->GrandTotal, helpers::price_decimals(), '.', ''),
                 'paid_amount' => number_format($sale->paid_amount, helpers::price_decimals(), '.', ''),
                 'payment_status' => $sale->payment_statut,
+                // Immutable display snapshot for this historical document.
+                'document_grand_total' => number_format($documentGrandTotal, helpers::price_decimals(), '.', ''),
+                'document_paid_amount' => number_format($documentPaidAmount, helpers::price_decimals(), '.', ''),
+                'currency_symbol' => $documentCurrency['symbol'],
+                'currency_code' => strtoupper((string) ($documentCurrency['code'] ?? '')),
+                'exchange_rate' => (float) $documentCurrency['rate'],
             ];
         });
 
@@ -244,9 +272,11 @@ class SalesController extends BaseController
             $item['paid_amount'] = number_format($Sale['paid_amount'], helpers::price_decimals(), '.', '');
             $item['due'] = number_format($item['GrandTotal'] - $item['paid_amount'], helpers::price_decimals(), '.', '');
             $item['payment_status'] = $Sale['payment_statut'];
-            // Multi-Currency badge: the document's currency code, null for
-            // base-currency documents (amounts in this list are always base).
-            $item['currency_code'] = optional($Sale['currency'])->code ? strtoupper($Sale['currency']->code) : null;
+            // Multi-Currency badge: resolve through Stocky's document-currency
+            // helper so legacy/base-currency sales show the configured base code
+            // instead of a blank cell. List monetary columns remain base-currency.
+            $documentCurrency = helpers::Get_Document_Currency($Sale);
+            $item['currency_code'] = strtoupper((string) ($documentCurrency['code'] ?? ''));
             $item['payment_methods'] = $Sale['facture']
                 ->map(function ($payment) {
                     return optional($payment->payment_method)->name;
@@ -354,10 +384,10 @@ class SalesController extends BaseController
     {
         $this->authorizeForUser($request->user('api'), 'create', Sale::class);
 
-        request()->validate([
+        request()->validate(array_merge([
             'client_id' => 'required',
             'warehouse_id' => 'required',
-        ]);
+        ], SaleMetadataRules::saleFields()));
 
         // Multi-Pack Selling: a completed sale deducts quantity × pack_multiplier
         // base units per pack — reject if that would oversell.
@@ -734,10 +764,10 @@ class SalesController extends BaseController
     {
         $this->authorizeForUser($request->user('api'), 'update', Sale::class);
 
-        request()->validate([
+        request()->validate(array_merge([
             'warehouse_id' => 'required',
             'client_id' => 'required',
-        ]);
+        ], SaleMetadataRules::saleFields()));
 
         $sale = \DB::transaction(function () use ($request, $id) {
 
@@ -1122,10 +1152,20 @@ class SalesController extends BaseController
                     'used_points' => $new_used,
                     'earned_points' => $new_earned,
                     'discount_from_points' => $request['discount_from_points'],
-                    'tracking_ref' => $request->filled('tracking_ref') ? $request->tracking_ref : null,
-                    'consignment_id' => $request->filled('consignment_id') ? $request->consignment_id : null,
-                    'zone_id' => $request->filled('zone_id') ? $request->zone_id : null,
-                    'courier_id' => $request->filled('courier_id') ? $request->courier_id : null,
+                    // PATCH/older clients may omit custom shipping metadata.
+                    // Omitted means preserve; a present empty/null value means clear.
+                    'tracking_ref' => $request->has('tracking_ref')
+                        ? ($request->tracking_ref !== '' ? $request->tracking_ref : null)
+                        : $current_Sale->tracking_ref,
+                    'consignment_id' => $request->has('consignment_id')
+                        ? ($request->consignment_id !== '' ? $request->consignment_id : null)
+                        : $current_Sale->consignment_id,
+                    'zone_id' => $request->has('zone_id')
+                        ? ($request->zone_id ?: null)
+                        : $current_Sale->zone_id,
+                    'courier_id' => $request->has('courier_id')
+                        ? ($request->courier_id ?: null)
+                        : $current_Sale->courier_id,
                 ] + helpers::resolve_request_currency($request, $current_Sale->currency_id, $current_Sale->exchange_rate));
             }
 
@@ -2719,29 +2759,35 @@ class SalesController extends BaseController
     private function renderSaleInvoiceHtml($id): string
     {
         $details = [];
-        $helpers = new helpers;
         $sale_data = Sale::with('details.product.unitSale')
             ->where('deleted_at', '=', null)
             ->findOrFail($id);
+
+        // Stocky 5.8 stores sale amounts in base currency and snapshots the
+        // document currency/rate on the sale. Keep this custom bulk renderer
+        // in exact monetary parity with the vendor Sale_PDF() path without
+        // changing that proven single-invoice method in this stabilization build.
+        $docCurrency = helpers::Get_Document_Currency($sale_data);
+        $rate = (float) $docCurrency['rate'];
 
         $sale['client_name'] = $sale_data['client']->name;
         $sale['client_phone'] = $sale_data['client']->phone;
         $sale['client_adr'] = $sale_data['client']->adresse;
         $sale['client_email'] = $sale_data['client']->email;
         $sale['client_tax'] = $sale_data['client']->tax_number;
-        $sale['TaxNet'] = number_format($sale_data->TaxNet, helpers::price_decimals(), '.', '');
-        $sale['discount'] = number_format($sale_data->discount, helpers::price_decimals(), '.', '');
+        $sale['TaxNet'] = number_format(SaleDocumentMath::convert($sale_data->TaxNet, $rate), helpers::price_decimals(), '.', '');
         $sale['discount_Method'] = $sale_data->discount_Method ?? '2';
-        $sale['discount_from_points'] = number_format($sale_data->discount_from_points ?? 0, helpers::price_decimals(), '.', '');
-        $sale['shipping'] = number_format($sale_data->shipping, helpers::price_decimals(), '.', '');
+        $sale['discount'] = number_format(SaleDocumentMath::discount($sale_data->discount, $sale['discount_Method'], $rate), helpers::price_decimals(), '.', '');
+        $sale['discount_from_points'] = number_format(SaleDocumentMath::convert($sale_data->discount_from_points ?? 0, $rate), helpers::price_decimals(), '.', '');
+        $sale['shipping'] = number_format(SaleDocumentMath::convert($sale_data->shipping, $rate), helpers::price_decimals(), '.', '');
         $sale['statut'] = $sale_data->statut;
         $sale['Ref'] = $sale_data->Ref;
         $sale['date'] = $sale_data->date.' '.$sale_data->time;
-        $sale['GrandTotal'] = number_format($sale_data->GrandTotal, helpers::price_decimals(), '.', '');
-        $sale['paid_amount'] = number_format($sale_data->paid_amount, helpers::price_decimals(), '.', '');
-        $sale['due'] = number_format($sale['GrandTotal'] - $sale['paid_amount'], helpers::price_decimals(), '.', '');
+        $sale['GrandTotal'] = number_format(SaleDocumentMath::convert($sale_data->GrandTotal, $rate), helpers::price_decimals(), '.', '');
+        $sale['paid_amount'] = number_format(SaleDocumentMath::convert($sale_data->paid_amount, $rate), helpers::price_decimals(), '.', '');
+        $sale['due'] = number_format((float) $sale['GrandTotal'] - (float) $sale['paid_amount'], helpers::price_decimals(), '.', '');
         $sale['payment_status'] = $sale_data->payment_statut;
-        $sale['previous_dues'] = number_format($this->clientPreviousDues($sale_data->client_id, $id), helpers::price_decimals(), '.', '');
+        $sale['previous_dues'] = number_format(SaleDocumentMath::convert($this->clientPreviousDues($sale_data->client_id, $id), $rate), helpers::price_decimals(), '.', '');
         $sale['notes'] = $sale_data->notes ?? '';
 
         $payments = PaymentSale::where('sale_id', $id)->whereNotNull('notes')->get();
@@ -2755,6 +2801,12 @@ class SalesController extends BaseController
 
         $detail_id = 0;
         foreach ($sale_data['details'] as $detail) {
+            $detail->price = SaleDocumentMath::convert($detail->price, $rate);
+            $detail->total = SaleDocumentMath::convert($detail->total, $rate);
+            if ($detail->discount_method == '2') {
+                $detail->discount = SaleDocumentMath::convert($detail->discount, $rate);
+            }
+
             if ($detail->sale_unit_id !== null) {
                 $unit = Unit::where('id', $detail->sale_unit_id)->first();
             } else {
@@ -2805,7 +2857,7 @@ class SalesController extends BaseController
         }
 
         $settings = Setting::where('deleted_at', '=', null)->first();
-        $symbol = $helpers->Get_Currency_Code();
+        $symbol = $docCurrency['code'];
         $pos_setting_pdf = PosSetting::where('deleted_at', '=', null)->first();
         $show_items_tax = $pos_setting_pdf ? (int) ($pos_setting_pdf->show_items_tax ?? 0) : 0;
 
@@ -2870,6 +2922,9 @@ class SalesController extends BaseController
                 'client_phone' => $sale_data->client->phone,
                 'client_adr' => $sale_data->client->adresse,
                 'GrandTotal' => number_format($sale_data->GrandTotal, helpers::price_decimals(), '.', ''),
+                // Keep the label's existing base-currency presentation in Build A;
+                // only correct the COD business rule from full total to outstanding.
+                'cod_amount' => number_format(SaleDocumentMath::outstanding($sale_data->GrandTotal, $sale_data->paid_amount), helpers::price_decimals(), '.', ''),
                 'payment_status' => $sale_data->payment_statut,
             ];
             $htmlDocs[] = view('pdf.shipping_label', [
@@ -2892,6 +2947,12 @@ class SalesController extends BaseController
     public function bulkUpdate(Request $request)
     {
         $this->authorizeForUser($request->user('api'), 'update', Sale::class);
+
+        // Validate metadata at the API boundary as well as in the UI. This
+        // keeps invalid/soft-deleted lookups and oversized bulk payloads from
+        // reaching the update query while preserving the existing partial-
+        // update semantics (omitted fields remain untouched).
+        $request->validate(SaleMetadataRules::bulkFields());
 
         $ids = (array) $request->input('selectedIds', []);
         if (empty($ids)) {
@@ -2919,7 +2980,25 @@ class SalesController extends BaseController
             return response()->json(['success' => false, 'message' => 'Nothing to update.'], 422);
         }
 
-        $updated = Sale::whereIn('id', $ids)->whereNull('deleted_at')->update($payload);
+        // Security boundary: selected IDs come from the browser and are not
+        // authorization. Re-apply the same ownership + warehouse visibility
+        // rules used by the Sales list before touching any row. Authorized
+        // selections behave exactly as before; out-of-scope IDs are ignored.
+        $user = $request->user('api');
+        $salesToUpdate = Sale::whereIn('id', $ids)->whereNull('deleted_at');
+
+        if (! $user->hasRecordView()) {
+            $salesToUpdate->where('user_id', $user->id);
+        }
+
+        if (! $user->is_all_warehouses) {
+            $allowedWarehouseIds = UserWarehouse::where('user_id', $user->id)
+                ->pluck('warehouse_id')
+                ->toArray();
+            $salesToUpdate->whereIn('warehouse_id', $allowedWarehouseIds);
+        }
+
+        $updated = $salesToUpdate->update($payload);
 
         return response()->json(['success' => true, 'updated' => $updated]);
     }
@@ -2994,6 +3073,7 @@ class SalesController extends BaseController
             'client_phone' => $sale_data->client->phone,
             'client_adr' => $sale_data->client->adresse,
             'GrandTotal' => number_format($sale_data->GrandTotal, helpers::price_decimals(), '.', ''),
+            'cod_amount' => number_format(SaleDocumentMath::outstanding($sale_data->GrandTotal, $sale_data->paid_amount), helpers::price_decimals(), '.', ''),
             'payment_status' => $sale_data->payment_statut,
         ];
 

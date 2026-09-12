@@ -47,9 +47,9 @@
         @if(!empty($sale['client_phone']))<div class="party-line">{{ __('pdf.phone') }}: {{ $sale['client_phone'] }}</div>@endif
         @if(!empty($sale['client_adr']))<div class="party-line">{{ $sale['client_adr'] }}</div>@endif
 
-        @if($sale['payment_status'] !== 'paid')
+        @if((float) ($sale['cod_amount'] ?? 0) > 0)
         <div class="cod">
-            Cash on Delivery: {{ $symbol }}{{ $sale['GrandTotal'] }}
+            Cash on Delivery: {{ $symbol }}{{ $sale['cod_amount'] }}
         </div>
         @endif
     </div>
