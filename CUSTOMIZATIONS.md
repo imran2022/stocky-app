@@ -1706,3 +1706,207 @@ php tests/Regression/build_e1_pos_recent.php
 Recent Invoices endpoint, compare those vendor rules before replaying E1. Prefer
 the vendor implementation when it provides equivalent visibility and historical
 currency guarantees, retaining only any business-specific delta.
+
+## 25. Build E2 — Sale metadata validation + Zone/Courier creation authorization
+
+**Status:** ACTIVE. **Base required:** Build E1.
+
+- New `app/Support/SaleMetadataRules.php` centralizes validation for
+  `zone_id`/`courier_id` (must reference an active, non-deleted row),
+  `tracking_ref`/`consignment_id` (max 255), `box_qty` (0–99999999.99), and
+  `shipping_status` (whitelist of 5 known values). Applied to Sale create/
+  update, `sales_bulk_update`, and Shipment update — previously these fields
+  had no server-side validation at all, so a bad `zone_id` (e.g. a deleted
+  or non-existent zone) surfaced as a raw 500 DB-integrity error instead of a
+  clean 422.
+- `SaleMetaController::storeZone()`/`storeCourier()` previously had no
+  authorization check beyond the global `auth:api` middleware — any
+  authenticated user could create zone/courier lookup rows regardless of
+  role. Now requires a permission tied to Sale/POS/Shipment access ("Option
+  B" model — chosen over a brand-new dedicated permission so staff who
+  already manage sales/shipments aren't newly locked out). Includes
+  race-condition-safe duplicate-name handling and soft-deleted-row restore.
+
+## 26. Build E3 — PosSales.vue Seller/Currency column parity
+
+**Status:** ACTIVE. **Base required:** Build E2.
+
+`Sales.vue` (the main Sales list) already had `Seller` and `Currency` columns
+from the vendor 5.8 Multi-Currency/Seller-tracking features. `PosSales.vue`
+(our own separate "POS Sales" view, built by duplicating Sales.vue's
+structure before those vendor columns existed) never received them. Added
+both columns to `PosSales.vue`, matching Sales.vue's exact convention
+(Currency column `defaultHidden: true`, only shown when multi-currency is
+enabled). No backend change — the data was already being returned.
+
+## 27. Build F — Stock Lookup soft-delete/unit-label/variant-price cleanup
+
+**Status:** ACTIVE. **Base required:** Build E3.
+
+Three related, previously-unverified audit findings, all inside
+`ProductsController` methods backing the Stock Lookup tool and
+`StockLookup.vue`:
+
+- Soft-deleted product variants were not excluded from variant search,
+  detail rows, or the per-warehouse stock aggregation — a deleted variant
+  could still appear in Stock Lookup results and contribute phantom stock
+  quantity. Fixed with `whereNull('deleted_at')` on the variant relation/
+  subqueries.
+- The frontend hardcoded the unit label as `"Pcs"` regardless of the
+  product's actual unit. Backend now returns `unit_label` (from the
+  product's real `Unit` relation); frontend renders that instead.
+- Variant price display now correctly shows a single price, a min–max
+  range, or "Varies" (when no active-priced variant exists) — previously it
+  could include soft-deleted variants' prices in the range calculation.
+
+## 28. Build G1 — Unit/Multi-Pack quantity normalization for Product Insights
+
+**Status:** ACTIVE. **Base required:** Build F.
+
+Sold (30d)/Previous 30d/Lifetime Sold/Lifetime Returned/Return Rate on the
+Products list previously summed `sale_details.quantity`/
+`sale_return_details.quantity` as stored — one row per sale line, regardless
+of whether that line was sold as a single unit, a Multi-Pack Selling bundle,
+or a non-base sale unit (e.g. a "Carton" of 24). A product sold as "3
+Cartons + 2 pcs" showed Sold (30d) = 5 (the raw line count) instead of the
+actual 74 units moved, and Return Rate could exceed 100% the same way.
+
+New, isolated `app/Support/UnitQuantityResolver.php` converts each line's
+quantity into base units — `quantity × pack_multiplier × unit_conversion`,
+using the exact same `operator`/`operator_value` convention already used
+for stock deduction elsewhere in this codebase (see `PosController`) —
+before it's summed in `ProductInsightService`. The Products list's Sold
+(30d) column sort was updated to use the identical expression, so sorting
+and the displayed number can't disagree. A business that never uses a
+non-base unit or Multi-Pack Selling sees no change (multiplier resolves to
+1 for every line). Verified against live data: 2 pcs + 3 Cartons (24 each)
+correctly produced Sold (30d) = 74, not 5.
+
+## 29. Phase 0 — Purchase form quick wins
+
+**Status:** ACTIVE. **Base required:** Build G1.
+
+Three small, independent additions to the Purchase (GRN) creation form:
+
+- **Last Purchase hint** — shows the most recent received-purchase cost,
+  date, and supplier under the product name/code when adding an item,
+  using a single most-recent-row lookup added to the existing per-item
+  `show_product_data` endpoint (already called once per item added — no
+  new per-keystroke or per-list-row query).
+- **Net Unit Cost inline-editable** — the cost cell in the line table can
+  now be edited directly (matching how Quantity already worked), instead of
+  requiring the pencil-icon modal for a plain cost change. Writes to the
+  same underlying `Unit_cost` field and goes through the same
+  `recomputeCostLine()` the modal's Save already used, so a line with its
+  own discount/tax still computes correctly.
+- **Sell Price + Profit Margin % columns** — Sell Price reuses `Unit_price`
+  (already computed by `show_product_data`, no new query); Profit Margin %
+  is a pure client-side calculation from the row's own Sell Price and Net
+  Cost.
+
+Deliberately excluded from POS/thermal receipt printing — this is a
+business-specific need (shown only on the A4 invoice PDF, which already had
+it via the `enable_box_qty` setting toggle), not a universal requirement.
+
+## 30. Purchase Order (PO) + GRN linkage
+
+**Status:** ACTIVE. **Base required:** Phase 0. **Real schema change** — 6
+new migrations (see below), unlike the SAFE-overlay builds above.
+
+A Purchase Order precedes a GRN (`Purchase`) and does not itself affect
+stock. New tables: `purchase_orders`, `purchase_order_details`,
+`purchase_order_documents`; nullable `purchase_order_id`/
+`purchase_order_detail_id` link columns added to the existing `purchases`/
+`purchase_details` tables (NULL for the original, unchanged direct-purchase
+flow); a new coarse-grained `purchase_orders` permission (matching the
+existing single-permission `shipment` convention, not Purchases' four-way
+split), auto-granted to whichever role(s) already had `Purchases_view`.
+
+**Status lifecycle:** `draft`/`ordered`/`cancelled` are user-set;
+`partially_received`/`received` are computed exclusively by the new,
+isolated `app/Services/Custom/PurchaseOrderReceiptService.php` the moment a
+GRN is received against a PO — never set by hand, and deliberately excluded
+from the frontend's status dropdown so a user can't set one only to have
+the next receipt silently overwrite it.
+
+**Architecture:** `PurchaseOrderController` is its own controller (not
+folded into `PurchasesController`) — a PO shares GRN's vocabulary but none
+of its stock/batch/serial/payment behavior. `PurchasesController::store()`
+gained exactly one new field (`purchase_order_id`) and calls
+`PurchaseOrderReceiptService` in two places (a pre-transaction validation
+call, then `applyReceipt()` after its own existing logic) — not inlined PO
+logic, keeping this large, vendor-adjacent controller's merge-conflict
+surface minimal. Deleting a PO-linked GRN (both the single-record and
+bulk-delete paths) calls `revertReceipt()` before the GRN's detail rows are
+hard-deleted, reversing the PO's received_quantity/status correctly.
+
+**Frontend:** new Purchase Orders list + form pages; the existing Create
+Purchase (GRN) form gained a PO selector next to Warehouse (visible once a
+supplier is chosen) with a one-click "Load All Items" that pre-fills
+remaining PO lines at the PO's agreed cost. PDF (dedicated template — no
+payment/due fields, since a PO has none yet) and email-to-supplier (same
+link-in-body pattern as the existing Purchase email feature) included.
+
+**Known, documented limitation:** editing an existing GRN's *quantities* in
+place (via `PurchasesController::update()`) does not adjust its linked PO's
+received_quantity — creating and deleting are both fully handled; only the
+narrower "edit quantities on an already-received GRN" case is deferred, as
+`update()`'s existing batch/serial re-alignment path is already large and
+this was judged rare enough not to add more risk to it in the same pass.
+
+### 30.1 Security review addendum (done before deployment, not assumed)
+
+A dedicated adversarial re-read (separate from the original build/test
+pass) found and fixed two real gaps:
+
+- `PurchasesController::store()` accepted any `purchase_order_id` with no
+  validation — a crafted request could reference a PO outside the user's
+  warehouse scope, already cancelled/fully-received, or for a different
+  warehouse than the GRN itself claimed. Fixed with
+  `PurchaseOrderReceiptService::validateReceivablePo()`, called before the
+  GRN's DB transaction opens.
+- `applyReceipt()` didn't verify a `purchase_order_detail_id` actually
+  belonged to the GRN's own `purchase_order_id` — a crafted request could
+  pair a legitimate PO with a detail-line ID borrowed from a different PO,
+  crediting that unrelated PO's `received_quantity`. Fixed by validating
+  the requesting PO's actual detail-ID set once per receipt.
+
+Both were live-tested against real PO records (not just source-level
+assertions) and confirmed rejected/ignored correctly with no data
+corruption. `PurchaseOrderController`'s own warehouse-scoping
+(`abortIfWarehouseDenied` on every single-record action) and the
+delete-time `revertReceipt()` wiring were already correct from the
+original build and needed no changes.
+
+## 31. Line-ending normalization (housekeeping, no logic change)
+
+**Status:** ACTIVE.
+
+A full audit found that `SalesController.php`, `Sales.vue`, and
+`PosSales.vue` had their entire line-ending convention silently converted
+from this codebase's own CRLF (confirmed against the vendor-merge baseline)
+to plain LF at some point during earlier editing — most likely a script
+that read a file in default text mode (which normalizes CRLF to LF) and
+wrote it back without preserving the original ending.
+
+This had zero functional effect, but it defeated the minimal-merge-
+footprint discipline this project otherwise follows: `git diff` against the
+vendor baseline showed `SalesController.php` as ~4975 of its ~4979 lines
+"changed" from line endings alone, when the real logic changes are ~118
+lines. Restored to CRLF; `PurchaseForm.vue` (21 stray LF lines, not a full
+conversion) was normalized the same way. Verified with `php -l`, the full
+regression + PHPUnit suite, and a clean frontend rebuild — no logic changed.
+A full sweep of every other file touched by this project found no further
+instances.
+
+## Regression test suite index
+
+Every build from A onward has a corresponding `tests/Regression/build_*.php`
+script (source/static assertions, no DB required) and, for most, a mirrored
+`tests/Unit/Build*ContractTest.php` (PHPUnit). Run the regression scripts in
+build order after any deploy; run the full PHPUnit suite (`php artisan
+test`) for everything else. As of Build 31 (this entry), 15 regression
+scripts exist; all pass except the two known, pre-existing, unrelated items
+noted throughout this document (a vendor-scaffold `ExampleTest` asserting
+the homepage returns 200 outside auth, which this app correctly redirects
+instead of returning).
