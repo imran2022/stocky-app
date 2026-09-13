@@ -23,6 +23,7 @@ use App\Models\User;
 use App\Models\UserWarehouse;
 use App\Models\Warehouse;
 use App\Services\BatchService;
+use App\Services\Custom\GrnDeletionSafetyService;
 use App\Services\Custom\PurchaseOrderReceiptService;
 use App\Services\SerialNumberService;
 use App\utils\helpers;
@@ -674,6 +675,26 @@ class PurchasesController extends BaseController
     {
         $this->authorizeForUser($request->user('api'), 'delete', Purchase::class);
 
+        // Stock-safety pre-flight — deliberately BEFORE the transaction
+        // opens (and outside its closure entirely). A response returned
+        // from inside a DB::transaction(function(){...}) closure is
+        // silently discarded by this method's own unconditional success
+        // response after the transaction block (see the pre-existing
+        // PurchaseReturn check just below, which has this exact same
+        // latent issue — real but out of scope to fix here since it
+        // predates this change and isn't a data-safety bug, just a
+        // misleading success message). This check must not repeat that
+        // mistake, since its entire purpose is to actually reach the user.
+        $preflightPurchase = Purchase::findOrFail($id);
+        $preflightDetails = PurchaseDetail::where('purchase_id', $id)->get();
+        $stockProblems = app(GrnDeletionSafetyService::class)->checkSafeToDelete($preflightPurchase, $preflightDetails);
+        if (! empty($stockProblems)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'This GRN cannot be deleted — it would make stock negative for: '.implode(' | ', $stockProblems),
+            ], 422);
+        }
+
         \DB::transaction(function () use ($id, $request) {
             $user = Auth::user();
             // New way: Check user's record_view field (user-level boolean)
@@ -822,6 +843,31 @@ class PurchasesController extends BaseController
     {
 
         $this->authorizeForUser($request->user('api'), 'delete', Purchase::class);
+
+        // Stock-safety pre-flight for the whole batch, before the
+        // transaction opens — same reasoning as destroy() above. Checking
+        // every selected GRN up front (rather than stopping at the first
+        // problem) means one clear message listing every affected product
+        // across the whole selection, instead of the user fixing one and
+        // re-discovering the next on a second attempt.
+        $allStockProblems = [];
+        foreach ((array) $request->selectedIds as $purchaseId) {
+            $preflightPurchase = Purchase::find($purchaseId);
+            if (! $preflightPurchase) {
+                continue;
+            }
+            $preflightDetails = PurchaseDetail::where('purchase_id', $purchaseId)->get();
+            $problems = app(GrnDeletionSafetyService::class)->checkSafeToDelete($preflightPurchase, $preflightDetails);
+            foreach ($problems as $problem) {
+                $allStockProblems[] = "GRN {$preflightPurchase->Ref}: {$problem}";
+            }
+        }
+        if (! empty($allStockProblems)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'These GRNs cannot be deleted — stock would go negative: '.implode(' | ', $allStockProblems),
+            ], 422);
+        }
 
         \DB::transaction(function () use ($request) {
             $user = Auth::user();
