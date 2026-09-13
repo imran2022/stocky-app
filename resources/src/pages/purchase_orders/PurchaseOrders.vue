@@ -72,6 +72,22 @@
           />
           <span v-else class="muted">—</span>
         </template>
+        <template v-else-if="column.key === 'last_grn_date'">
+          {{ record.last_grn_date ? date(record.last_grn_date) : '—' }}
+        </template>
+        <template v-else-if="column.key === 'age'">
+          <span v-if="['received', 'cancelled'].includes(record.status)" class="muted">
+            {{ $t('Closed') || 'Closed' }}
+          </span>
+          <span v-else :style="{ color: ageDays(record) > 14 ? '#cf1322' : undefined }">
+            {{ ageDays(record) }}{{ $t('d') || 'd' }}
+          </span>
+        </template>
+        <template v-else-if="column.key === 'has_documents'">
+          <a-tooltip v-if="record.has_documents" :title="$t('Attach_Documents') || 'Has attachments'">
+            <PaperClipOutlined style="color: #1677ff" />
+          </a-tooltip>
+        </template>
         <template v-else-if="column.key === 'actions'">
           <a-dropdown :trigger="['click']">
             <a-button type="text" size="small">
@@ -88,6 +104,7 @@
                 </a-menu-item>
                 <a-menu-item key="pdf"><FilePdfOutlined /> {{ $t('DownloadPdf') || 'Download PDF' }}</a-menu-item>
                 <a-menu-item v-if="auth.can('purchase_orders')" key="email"><MailOutlined /> {{ $t('EmailToSupplier') || 'Email to Supplier' }}</a-menu-item>
+                <a-menu-item key="documents"><PaperClipOutlined /> {{ $t('Attach_Documents') || 'Attachments' }}</a-menu-item>
                 <a-menu-divider v-if="auth.can('purchase_orders')" />
                 <a-menu-item v-if="auth.can('purchase_orders')" key="delete" danger>
                   <DeleteOutlined /> {{ $t('Delete') || 'Delete' }}
@@ -98,6 +115,48 @@
         </template>
       </template>
     </DataTable>
+
+    <!-- ============ Documents modal — mirrors Purchases.vue's exact
+         pattern (same modal shape, same field names) so this feature
+         doesn't introduce a second, divergent attachment UX. ============ -->
+    <a-modal v-model:open="documentsOpen" :title="`${$t('Attach_Documents') || 'Attachments'} — ${activePo?.Ref || ''}`" :footer="null" width="640px">
+      <a-upload
+        :file-list="docFiles"
+        :before-upload="f => { docFiles = [...docFiles, f]; return false; }"
+        multiple
+        @remove="f => { docFiles = docFiles.filter(x => x !== f); }"
+      >
+        <a-button><UploadOutlined /> {{ $t('Attach_Documents') || 'Attach Documents' }}</a-button>
+      </a-upload>
+      <a-button
+        type="primary"
+        style="margin-top: 8px"
+        :loading="docUploading"
+        :disabled="!docFiles.length"
+        @click="uploadPoDocuments"
+      >
+        {{ $t('submit') || 'Submit' }}
+      </a-button>
+      <a-divider style="margin: 16px 0" />
+      <a-list :data-source="documents" size="small">
+        <template #renderItem="{ item }">
+          <a-list-item>
+            <span>{{ item.name || item.file_name || item.original_name }}</span>
+            <template #actions>
+              <a-button type="text" size="small" @click="downloadPoDocument(item)">
+                <template #icon><DownloadOutlined /></template>
+              </a-button>
+              <a-button type="text" size="small" danger @click="removePoDocument(item)">
+                <template #icon><DeleteOutlined /></template>
+              </a-button>
+            </template>
+          </a-list-item>
+        </template>
+        <template #emptyText>
+          <a-empty :description="$t('NodataAvailable') || 'No documents yet'" style="padding: 16px 0" />
+        </template>
+      </a-list>
+    </a-modal>
   </div>
 </template>
 
@@ -106,9 +165,11 @@ import { ref, computed, createVNode } from 'vue';
 import { useRouter } from 'vue-router';
 import { message, Modal } from 'ant-design-vue';
 import { useI18n } from 'vue-i18n';
+import dayjs from 'dayjs';
 import {
   PlusOutlined, MoreOutlined, EyeOutlined, EditOutlined, DeleteOutlined,
   InboxOutlined, ExclamationCircleOutlined, FilePdfOutlined, MailOutlined,
+  PaperClipOutlined, UploadOutlined, DownloadOutlined,
 } from '@ant-design/icons-vue';
 import PageHeader from '../../components/PageHeader.vue';
 import DataTable from '../../components/DataTable.vue';
@@ -162,6 +223,72 @@ function statusLabel(value) {
   return PO_STATUSES.find(s => s.value === value)?.label || value;
 }
 
+// ---- Attachments (mirrors Purchases.vue's document modal exactly —
+// see that file for the pattern this was copied from) ----
+const activePo = ref(null);
+const documentsOpen = ref(false);
+const documents = ref([]);
+const docFiles = ref([]);
+const docUploading = ref(false);
+
+async function loadPoDocuments(poId) {
+  const data = await http.get(`purchase_orders/${poId}/documents`);
+  documents.value = data.documents || [];
+}
+
+async function openPoDocuments(record) {
+  activePo.value = record;
+  docFiles.value = [];
+  try {
+    await loadPoDocuments(record.id);
+    documentsOpen.value = true;
+  } catch (e) {
+    message.error(t('InvalidData'));
+  }
+}
+
+async function uploadPoDocuments() {
+  if (!docFiles.value.length) {
+    message.warning(t('Please_select_files') || 'Please select files');
+    return;
+  }
+  docUploading.value = true;
+  const fd = new FormData();
+  docFiles.value.forEach(f => fd.append('documents[]', f.originFileObj || f));
+  try {
+    await http.postForm(`purchase_orders/${activePo.value.id}/documents`, fd);
+    message.success(t('Documents_uploaded_successfully') || 'Documents uploaded successfully');
+    docFiles.value = [];
+    await loadPoDocuments(activePo.value.id);
+  } catch (e) {
+    message.error(t('Failed_to_upload_documents') || 'Failed to upload documents');
+  } finally {
+    docUploading.value = false;
+  }
+}
+
+function downloadPoDocument(doc) {
+  http.download(`purchase_orders/documents/${doc.id}/download`, doc.name || doc.file_name || 'document')
+    .catch(() => message.error(t('Failed_to_download_document') || 'Failed to download document'));
+}
+
+function removePoDocument(doc) {
+  Modal.confirm({
+    title: t('Delete_Title') || 'Delete this document?',
+    icon: createVNode(ExclamationCircleOutlined),
+    okType: 'danger',
+    async onOk() {
+      try {
+        await http.delete(`purchase_orders/documents/${doc.id}`);
+        message.success(t('Deleted_in_successfully') || 'Deleted successfully');
+        await loadPoDocuments(activePo.value.id);
+      } catch (e) {
+        message.error(t('SomethingWentWrong') || 'Something went wrong');
+      }
+    },
+  });
+}
+
 const columns = computed(() => [
   { title: t('Action'), key: 'actions', width: 70, align: 'center', fixed: 'left' },
   { title: t('Reference'), dataIndex: 'Ref', key: 'Ref', sorter: true },
@@ -175,7 +302,19 @@ const columns = computed(() => [
     : []),
   { title: t('Total'), dataIndex: 'GrandTotal', key: 'GrandTotal', sorter: true, align: 'right', exportValue: r => money(r.GrandTotal) },
   { title: t('Received') || 'Received', dataIndex: 'received_percent', key: 'received_percent', width: 160 },
+  { title: t('CreatedBy') || 'Created By', dataIndex: 'created_by_name', key: 'created_by_name', defaultHidden: true },
+  { title: t('LastGrnDate') || 'Last GRN Date', dataIndex: 'last_grn_date', key: 'last_grn_date', defaultHidden: true, exportValue: r => r.last_grn_date || '' },
+  { title: t('Age') || 'Age', key: 'age', width: 90, align: 'center' },
+  { title: '', key: 'has_documents', width: 40, align: 'center' },
 ]);
+
+// Age = days since the PO was placed — a pure display calculation from the
+// already-loaded `date` field, no backend change needed for this one.
+function ageDays(record) {
+  const placed = dayjs(record.date);
+  if (!placed.isValid()) return null;
+  return dayjs().diff(placed, 'day');
+}
 
 function onAction(key, record) {
   if (key === 'detail' || key === 'edit') {
@@ -207,6 +346,10 @@ function onAction(key, record) {
         }
       },
     });
+    return;
+  }
+  if (key === 'documents') {
+    openPoDocuments(record);
     return;
   }
   if (key === 'delete') {

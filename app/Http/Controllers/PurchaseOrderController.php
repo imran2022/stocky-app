@@ -68,7 +68,7 @@ class PurchaseOrderController extends Controller
         $order = in_array($request->SortField, $allowedSortColumns, true) ? $request->SortField : 'id';
         $dir = strtolower($request->SortType) === 'asc' ? 'asc' : 'desc';
 
-        $query = PurchaseOrder::with(['provider', 'warehouse', 'currency'])
+        $query = PurchaseOrder::with(['provider', 'warehouse', 'currency', 'user'])
             ->whereNull('deleted_at')
             ->when(! $viewRecords, fn ($q) => $q->where('user_id', Auth::user()->id))
             ->when($allowedWarehouseIds !== null, fn ($q) => $q->whereIn('warehouse_id', $allowedWarehouseIds));
@@ -103,15 +103,34 @@ class PurchaseOrderController extends Controller
         // Products list; not repeating it here).
         $poIds = $orders->pluck('id')->all();
         $lineTotals = [];
+        $lastReceiptDates = [];
+        $hasDocumentsMap = [];
         if (! empty($poIds)) {
             $lineTotals = PurchaseOrderDetail::whereIn('purchase_order_id', $poIds)
                 ->selectRaw('purchase_order_id, SUM(quantity) as ordered_qty, SUM(received_quantity) as received_qty')
                 ->groupBy('purchase_order_id')
                 ->get()
                 ->keyBy('purchase_order_id');
+
+            // Last GRN Date — most recent receipt date per PO, one grouped
+            // query for the page (not per row).
+            $lastReceiptDates = DB::table('purchases')
+                ->whereIn('purchase_order_id', $poIds)
+                ->whereNull('deleted_at')
+                ->selectRaw('purchase_order_id, MAX(date) as last_date')
+                ->groupBy('purchase_order_id')
+                ->pluck('last_date', 'purchase_order_id');
+
+            // Attachment indicator — same grouped-not-per-row shape.
+            $hasDocumentsMap = DB::table('purchase_order_documents')
+                ->whereIn('purchase_order_id', $poIds)
+                ->whereNull('deleted_at')
+                ->selectRaw('purchase_order_id, COUNT(*) as doc_count')
+                ->groupBy('purchase_order_id')
+                ->pluck('doc_count', 'purchase_order_id');
         }
 
-        $data = $orders->map(function (PurchaseOrder $po) use ($lineTotals) {
+        $data = $orders->map(function (PurchaseOrder $po) use ($lineTotals, $lastReceiptDates, $hasDocumentsMap) {
             $totals = $lineTotals->get($po->id);
             $orderedQty = $totals ? (float) $totals->ordered_qty : 0.0;
             $receivedQty = $totals ? (float) $totals->received_qty : 0.0;
@@ -125,10 +144,13 @@ class PurchaseOrderController extends Controller
                 'provider_name' => optional($po->provider)->name,
                 'warehouse_id' => $po->warehouse_id,
                 'warehouse_name' => optional($po->warehouse)->name,
+                'created_by_name' => optional($po->user)->username ?? optional($po->user)->firstname,
                 'status' => $po->status,
                 'GrandTotal' => number_format($po->GrandTotal, helpers::price_decimals(), '.', ''),
                 'currency_code' => optional($po->currency)->code,
                 'received_percent' => $orderedQty > 0 ? round(($receivedQty / $orderedQty) * 100, 1) : null,
+                'last_grn_date' => $lastReceiptDates[$po->id] ?? null,
+                'has_documents' => ($hasDocumentsMap[$po->id] ?? 0) > 0,
             ];
         });
 
