@@ -1142,7 +1142,7 @@ class ReportController extends BaseController
             $allowedWarehouseIds = UserWarehouse::where('user_id', $user->id)->pluck('warehouse_id')->toArray();
         }
 
-        $base = Sale::whereNull('deleted_at')
+        $base = Sale::whereNull('sales.deleted_at')
             ->when(! $is_all_warehouses, function ($q) use ($allowedWarehouseIds) {
                 $q->whereIn('warehouse_id', $allowedWarehouseIds);
             })
