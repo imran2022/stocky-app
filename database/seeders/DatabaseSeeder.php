@@ -24,6 +24,12 @@ class DatabaseSeeder extends Seeder
             UserSeeder::class,
             UserRoleSeeder::class,
             PermissionRoleSeeder::class,
+            // Fresh-install fix: grants 'purchase_orders' (added by a later
+            // migration) to whichever role(s) hold 'Purchases_view' — must
+            // run after PermissionRoleSeeder has populated those links, not
+            // before. See PurchaseOrdersPermissionSeeder's own docblock for
+            // why this can't just live in the migration alone.
+            PurchaseOrdersPermissionSeeder::class,
             Warehouse::class,
             StoreSettingSeeder::class,
         ]);
