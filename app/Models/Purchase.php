@@ -14,6 +14,9 @@ class Purchase extends Model
         'payment_statut', 'created_at', 'updated_at', 'deleted_at',
         // Multi-Currency snapshot; NULL = base currency, rate 1
         'currency_id', 'exchange_rate',
+        // PO linkage — NULL for a GRN created without selecting a PO (the
+        // app's original, unchanged direct-purchase flow)
+        'purchase_order_id',
     ];
 
     protected $casts = [
@@ -28,6 +31,7 @@ class Purchase extends Model
         'paid_amount' => 'double',
         'currency_id' => 'integer',
         'exchange_rate' => 'float',
+        'purchase_order_id' => 'integer',
     ];
 
     public function currency()
@@ -63,5 +67,12 @@ class Purchase extends Model
     public function documents()
     {
         return $this->hasMany('App\Models\PurchaseDocument', 'purchase_id');
+    }
+
+    /** The PO this GRN was received against, if any (NULL for a direct
+     * purchase created without selecting a PO). */
+    public function purchaseOrder()
+    {
+        return $this->belongsTo(PurchaseOrder::class);
     }
 }

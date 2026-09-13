@@ -6,7 +6,9 @@
 /** Document status: completed/received, pending, ordered, cancelled. */
 export function docStatusColor(status) {
     const s = String(status || '').toLowerCase();
+    if (s.includes('partially_received') || s.includes('partial')) return 'warning';
     if (s.includes('complet') || s.includes('received')) return 'success';
+    if (s.includes('draft')) return 'default';
     if (s.includes('pending')) return 'warning';
     if (s.includes('ordered') || s.includes('sent')) return 'processing';
     if (s.includes('cancel')) return 'error';

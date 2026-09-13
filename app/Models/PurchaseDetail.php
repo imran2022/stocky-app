@@ -9,6 +9,9 @@ class PurchaseDetail extends Model
     protected $fillable = [
         'id', 'purchase_id', 'purchase_unit_id', 'quantity', 'product_id', 'total', 'product_variant_id',
         'cost', 'TaxNet', 'discount', 'discount_method', 'tax_method',
+        // Which PO line this GRN line fulfils, if any — see the migration's
+        // docblock for why this is line-level, not just header-level.
+        'purchase_order_detail_id',
     ];
 
     protected $casts = [
@@ -21,6 +24,7 @@ class PurchaseDetail extends Model
         'purchase_unit_id' => 'integer',
         'product_id' => 'integer',
         'product_variant_id' => 'integer',
+        'purchase_order_detail_id' => 'integer',
     ];
 
     public function purchase()
@@ -41,5 +45,11 @@ class PurchaseDetail extends Model
     public function serials()
     {
         return $this->hasMany(ProductSerial::class, 'purchase_detail_id');
+    }
+
+    /** The PO line this GRN line fulfils, if any. */
+    public function purchaseOrderDetail()
+    {
+        return $this->belongsTo(PurchaseOrderDetail::class);
     }
 }

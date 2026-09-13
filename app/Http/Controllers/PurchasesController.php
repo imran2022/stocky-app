@@ -23,6 +23,7 @@ use App\Models\User;
 use App\Models\UserWarehouse;
 use App\Models\Warehouse;
 use App\Services\BatchService;
+use App\Services\Custom\PurchaseOrderReceiptService;
 use App\Services\SerialNumberService;
 use App\utils\helpers;
 use ArPHP\I18N\Arabic;
@@ -237,6 +238,10 @@ class PurchasesController extends BaseController
             $order->payment_statut = 'unpaid';
             $order->notes = $request->notes;
             $order->user_id = Auth::user()->id;
+            // PO linkage: NULL for a GRN created without selecting a PO
+            // (the original, unchanged direct-purchase flow). See
+            // PurchaseOrderReceiptService for what happens when this is set.
+            $order->purchase_order_id = $request->purchase_order_id ?: null;
             // Multi-Currency snapshot (NULL/NULL = base currency); amounts on
             // the purchase are always stored in the base currency.
             $docCurrency = helpers::resolve_request_currency($request);
@@ -322,6 +327,19 @@ class PurchasesController extends BaseController
                     }
                     $serialService->receiveOnPurchase($order, $detail, $row['serial_numbers'] ?? null);
                 }
+            }
+
+            // Purchase Order linkage: only does anything when this GRN was
+            // created against a PO (purchase_order_id set) and was saved as
+            // 'received' — see PurchaseOrderReceiptService for the exact
+            // rule. Fetched independently of the batch/serial blocks above
+            // since either (or both) may be skipped depending on feature
+            // flags, but PO receipt tracking must not depend on them.
+            if ($order->purchase_order_id) {
+                $persistedForPo = PurchaseDetail::where('purchase_id', $order->id)
+                    ->orderBy('id', 'asc')
+                    ->get();
+                app(PurchaseOrderReceiptService::class)->applyReceipt($order, $data, $persistedForPo);
             }
         }, 10);
 
@@ -752,6 +770,17 @@ class PurchasesController extends BaseController
                     $serialService->reverseForPurchaseDetails($old_purchase_details);
                 }
 
+                // Purchase Order linkage: deleting a GRN that was received
+                // against a PO must not leave that PO permanently stuck
+                // showing more received than actually happened — reverse
+                // its received_quantity/status before the details are
+                // deleted. See PurchaseOrderReceiptService::revertReceipt()
+                // for why this reads the GRN's own persisted detail rows
+                // rather than needing anything from this request.
+                if ($current_Purchase->purchase_order_id) {
+                    app(PurchaseOrderReceiptService::class)->revertReceipt($current_Purchase);
+                }
+
                 $current_Purchase->details()->delete();
                 $current_Purchase->update([
                     'deleted_at' => Carbon::now(),
@@ -886,6 +915,17 @@ class PurchasesController extends BaseController
                                 }
                             }
                         }
+                    }
+
+                    // Purchase Order linkage: must run BEFORE the details
+                    // are deleted below — PurchaseDetail is hard-deleted
+                    // (no SoftDeletes), so revertReceipt() would find
+                    // nothing to revert if this ran after. Reverses this
+                    // GRN's contribution to its PO's received_quantity/
+                    // status so a bulk-deleted GRN doesn't leave that PO
+                    // stuck showing more received than actually happened.
+                    if ($current_Purchase->purchase_order_id) {
+                        app(PurchaseOrderReceiptService::class)->revertReceipt($current_Purchase);
                     }
 
                     $current_Purchase->details()->delete();

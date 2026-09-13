@@ -42,8 +42,28 @@
                 show-search option-filter-prop="label"
                 :placeholder="$t('Choose_Warehouse')"
                 :options="warehouseOptions"
-                :disabled="isEdit"
+                :disabled="isEdit || !!selectedPoId"
                 @change="onWarehouseChange"
+              />
+            </a-form-item>
+          </a-col>
+          <!-- Purchase Order linkage: appears once a supplier is chosen,
+               listing that supplier's open (ordered/partially_received) POs.
+               Selecting one locks the warehouse to the PO's own warehouse
+               (a GRN against a PO must receive into the warehouse that PO
+               was raised for) and offers a one-click "load remaining items"
+               action below the product search bar. Entirely optional — the
+               original direct-purchase flow (no PO selected) is unchanged. -->
+          <a-col v-if="!isEdit" :xs="24" :md="8">
+            <a-form-item :label="$t('PurchaseOrder') || 'Purchase Order (optional)'">
+              <a-select
+                v-model:value="selectedPoId"
+                allow-clear show-search option-filter-prop="label"
+                :placeholder="$t('SelectPoOptional') || 'Receive against a PO...'"
+                :options="poOptions"
+                :disabled="!purchase.supplier_id"
+                :loading="loadingPoOptions"
+                @change="onPoSelected"
               />
             </a-form-item>
           </a-col>
@@ -62,6 +82,17 @@
       </a-card>
 
       <a-card size="small" style="margin-bottom: 16px">
+        <a-alert
+          v-if="selectedPoId && poLines.length"
+          type="info" show-icon closable style="margin-bottom: 12px"
+          :message="$t('PoItemsAvailable') || `${poLines.length} item(s) remaining to receive on this PO.`"
+        >
+          <template #action>
+            <a-button size="small" type="primary" @click="loadAllPoItems">
+              {{ $t('LoadAllItems') || 'Load All Items' }}
+            </a-button>
+          </template>
+        </a-alert>
         <div style="display: flex; gap: 8px; margin-bottom: 16px">
           <a-select
             v-model:value="searchValue"
@@ -89,7 +120,7 @@
               <div style="font-weight: 500">{{ record.name }}</div>
               <div class="muted">{{ record.code }}</div>
               <a-tag v-if="record.is_batch_tracked" color="warning" style="margin-top: 2px">Batch</a-tag>
-              <div v-if="record.last_purchase" class="muted" style="font-size: 12px">
+              <div v-if="record.last_purchase" style="font-size: 12px; color: #1677ff; font-weight: 500">
                 Last Purchase: {{ docMoney(record.last_purchase.cost) }} ({{ record.last_purchase.date }}<template v-if="record.last_purchase.supplier_name">, {{ record.last_purchase.supplier_name }}</template>)
               </div>
             </template>
@@ -108,7 +139,6 @@
                 style="width: 110px"
                 @update:value="v => setUnitCost(record, v)"
               />
-              <div class="muted" style="margin-top: 2px">{{ docMoney(record.Net_cost) }} net</div>
             </template>
             <template v-else-if="column.key === 'sell_price'">{{ docMoney(record.Unit_price) }}</template>
             <template v-else-if="column.key === 'profit_pct'">
@@ -341,7 +371,7 @@
  * - POST purchases / PUT purchases/{id}; no payment section (payments are
  *   added from the list like legacy)
  */
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { message } from 'ant-design-vue';
 import { useI18n } from 'vue-i18n';
@@ -387,6 +417,98 @@ const submitting = ref(false);
 
 const suppliers = ref([]);
 const warehouses = ref([]);
+
+// ---- Purchase Order linkage (optional) ----
+// See the a-alert/a-select markup above and the Purchase Order feature's
+// backend (PurchaseOrderController, PurchaseOrderReceiptService) for the
+// other half of this. Entirely inert when no PO is selected — the original
+// direct-purchase flow is unchanged in that case.
+const selectedPoId = ref(route.query.po_id ? Number(route.query.po_id) : null);
+const poOptions = ref([]);
+const loadingPoOptions = ref(false);
+const poLines = ref([]); // remaining (not-yet-fully-received) lines on the selected PO
+
+async function loadPoOptionsForSupplier(supplierId) {
+  poOptions.value = [];
+  if (!supplierId || isEdit.value) return;
+  loadingPoOptions.value = true;
+  try {
+    const orders = await http.get(`purchase_orders/by_provider/${supplierId}`) || [];
+    poOptions.value = orders.map(o => ({ value: o.id, label: `${o.Ref} (${o.date})`, warehouse_id: o.warehouse_id }));
+  } catch (e) {
+    // Non-fatal — PO selection is optional, so a lookup failure shouldn't
+    // block the direct-purchase flow the rest of this form already supports.
+    poOptions.value = [];
+  } finally {
+    loadingPoOptions.value = false;
+  }
+}
+
+async function onPoSelected(poId) {
+  poLines.value = [];
+  if (!poId) return;
+  try {
+    const data = await http.get(`purchase_orders/${poId}/lines_for_grn`);
+    // A GRN against a PO must receive into that PO's own warehouse — lock
+    // it here rather than leaving a mismatch for the user to notice later.
+    purchase.value.warehouse_id = data.warehouse_id;
+    await loadProducts();
+    poLines.value = data.lines || [];
+  } catch (e) {
+    message.error(t('InvalidData'));
+    selectedPoId.value = null;
+  }
+}
+
+async function loadAllPoItems() {
+  for (const poLine of poLines.value) {
+    const variantId = poLine.product_variant_id ?? 0;
+    const already = lines.value.find(
+      l => l.product_id === poLine.product_id && (l.product_variant_id ?? 0) === (variantId || 0)
+    );
+    if (already) continue; // already added (e.g. user clicked twice, or added it manually first)
+
+    try {
+      const d = await http.get(`show_product_data/${poLine.product_id}/${variantId}/${purchase.value.warehouse_id}`);
+      const line = {
+        detail_id: nextDetailId++,
+        product_id: d.id,
+        product_variant_id: poLine.product_variant_id ?? null,
+        purchase_order_detail_id: poLine.purchase_order_detail_id,
+        code: d.code || poLine.code,
+        name: d.name || poLine.name,
+        stock: d.qte,
+        quantity: poLine.remaining_quantity,
+        // The PO's agreed cost takes precedence over the product's default
+        // cost — receiving should reflect what was actually ordered at.
+        Unit_cost: poLine.po_cost,
+        Net_cost: poLine.po_cost,
+        Unit_price: d.Unit_price,
+        last_purchase: d.last_purchase || null,
+        discount: 0,
+        discount_Method: d.discount_method,
+        DiscountNet: 0,
+        taxe: 0,
+        tax_percent: 0,
+        tax_method: d.tax_method,
+        unitPurchase: d.unitPurchase,
+        purchase_unit_id: d.purchase_unit_id,
+        is_imei: d.is_imei,
+        imei_number: '',
+        serial_numbers: [],
+        is_batch_tracked: !!d.is_batch_tracked,
+        batches: [],
+        subtotal: 0,
+      };
+      recomputeCostLine(line);
+      lines.value.push(line);
+    } catch (e) {
+      message.error(`${t('InvalidData')}: ${poLine.name}`);
+    }
+  }
+  message.success(t('ItemsLoaded') || 'Items loaded from Purchase Order');
+}
+
 const products = ref([]);
 const lines = ref([]);
 // `null`, never `undefined`: antd's Select falls back to its own internal
@@ -466,7 +588,7 @@ const lineColumns = computed(() => [
   { title: t('ProductName'), key: 'product' },
   { title: t('Net_Unit_Cost'), key: 'net_cost', align: 'right' },
   { title: 'Sell Price', key: 'sell_price', align: 'right' },
-  { title: 'Profit %', key: 'profit_pct', align: 'right' },
+  { title: 'Profit Margin %', key: 'profit_pct', align: 'right' },
   { title: t('Stock'), key: 'stock', align: 'right' },
   { title: t('Quantity'), key: 'quantity', align: 'center' },
   { title: t('Discount'), key: 'discount', align: 'right' },
@@ -694,6 +816,9 @@ function detailsPayload() {
     serial_numbers: l.is_imei && Array.isArray(l.serial_numbers) ? l.serial_numbers : [],
     // New batches created on receive — rows as entered.
     batches: l.is_batch_tracked && Array.isArray(l.batches) ? l.batches : [],
+    // Which PO line this receives against, if any — read by
+    // PurchaseOrderReceiptService after the GRN is saved.
+    purchase_order_detail_id: l.purchase_order_detail_id ?? null,
   }));
 }
 
@@ -712,6 +837,9 @@ async function submit() {
     shipping: Number(purchase.value.shipping) || 0,
     GrandTotal: totals.value.GrandTotal,
     details: detailsPayload(),
+    // Purchase Order linkage — null when this GRN wasn't created against a
+    // PO (the original, unchanged direct-purchase flow).
+    purchase_order_id: !isEdit.value ? (selectedPoId.value || null) : undefined,
     // Multi-Currency snapshot ({} when the module is off)
     ...currencyPayload(),
   };
@@ -776,6 +904,23 @@ onMounted(async () => {
       const data = await http.get('purchases/create');
       suppliers.value = data.suppliers || [];
       warehouses.value = data.warehouses || [];
+
+      // Arrived via PurchaseOrders.vue's "Receive (Create GRN)" action
+      // (?po_id=...) — resolve that PO's own supplier so the PO-select
+      // dropdown (scoped to a chosen supplier) has something to show, then
+      // select it automatically. A direct /purchases/create visit (no
+      // po_id) skips all of this, exactly as before this feature existed.
+      if (selectedPoId.value) {
+        try {
+          const poData = await http.get(`purchase_orders/${selectedPoId.value}`);
+          purchase.value.supplier_id = poData.purchase_order.provider_id;
+          await loadPoOptionsForSupplier(purchase.value.supplier_id);
+          await onPoSelected(selectedPoId.value);
+        } catch (e) {
+          message.error(t('InvalidData'));
+          selectedPoId.value = null;
+        }
+      }
     }
   } catch (e) {
     message.error(t('InvalidData'));
@@ -784,6 +929,17 @@ onMounted(async () => {
   } finally {
     loadingRecord.value = false;
   }
+});
+
+// Changing supplier invalidates any PO selection scoped to the previous
+// one — refresh the dropdown's options and drop the stale selection rather
+// than silently submitting a receipt against a PO from a different
+// supplier than the one now shown.
+watch(() => purchase.value.supplier_id, (newSupplierId, oldSupplierId) => {
+  if (newSupplierId === oldSupplierId) return;
+  selectedPoId.value = null;
+  poLines.value = [];
+  loadPoOptionsForSupplier(newSupplierId);
 });
 </script>
 

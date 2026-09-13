@@ -1213,6 +1213,17 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     Route::get('purchases/documents/{id}/download', 'PurchasesController@downloadDocument');
     Route::delete('purchases/documents/{id}', 'PurchasesController@deleteDocument');
 
+    // ------------------------------- Purchase Orders (PO) --------------------------\\
+    Route::resource('purchase_orders', 'PurchaseOrderController');
+    Route::get('purchase_orders/by_provider/{providerId}', 'PurchaseOrderController@openForProvider');
+    Route::get('purchase_orders/{id}/lines_for_grn', 'PurchaseOrderController@linesForGrn');
+    Route::get('purchase_orders/{id}/documents', 'PurchaseOrderController@getDocuments');
+    Route::post('purchase_orders/{id}/documents', 'PurchaseOrderController@uploadDocuments');
+    Route::get('purchase_orders/documents/{id}/download', 'PurchaseOrderController@downloadDocument');
+    Route::delete('purchase_orders/documents/{id}', 'PurchaseOrderController@deleteDocument');
+    Route::get('purchase_orders/{id}/pdf', 'PurchaseOrderController@pdf');
+    Route::post('purchase_orders/{id}/send_email', 'PurchaseOrderController@sendEmail');
+
     // ------------------------------- Payments  Purchases --------------------------\\
     // ------------------------------------------------------------------------------\\
 
