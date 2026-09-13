@@ -6,7 +6,9 @@ use App\Models\Purchase;
 use App\Models\PurchaseOrder;
 use App\Models\PurchaseOrderDetail;
 use App\Models\Unit;
+use App\Models\UserWarehouse;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Auth;
 
 /**
  * Keeps a Purchase Order's `received_quantity` (per line) and overall
@@ -15,13 +17,60 @@ use Illuminate\Support\Collection;
  * Deliberately isolated from PurchasesController::store()/update() — those
  * methods are large, heavily customized, and vendor-adjacent (see
  * docs/ARCHITECTURE_AND_CHANGE_CONTROL.md's caution level for Sales/
- * Products/Purchases controllers). This class is called from exactly one
- * place in each of those two methods (a single `applyReceipt(...)` line),
- * so a future vendor update touching those methods has the smallest
- * possible chance of colliding with PO-related logic.
+ * Products/Purchases controllers). This class is called from exactly two
+ * places in store() (a validation call, then applyReceipt(...)), so a
+ * future vendor update touching that method has the smallest possible
+ * chance of colliding with PO-related logic.
  */
 class PurchaseOrderReceiptService
 {
+    /**
+     * Validates a submitted purchase_order_id is safe to receive against
+     * BEFORE the GRN is created — called from PurchasesController::store()
+     * ahead of its DB transaction, so an invalid reference is rejected
+     * fast rather than silently ignored after the fact. Checks, in order:
+     * exists (and not soft-deleted), warehouse-accessible to the current
+     * user (same UserWarehouse scoping used everywhere else in this app),
+     * in a receivable status, and — critically — that the GRN's own
+     * warehouse_id matches the PO's, so stock can't be received into a
+     * different warehouse than the one the PO was raised for while still
+     * crediting that PO's received_quantity.
+     *
+     * Returns null when no PO was referenced at all (the ordinary direct-
+     * purchase case this feature doesn't touch). Aborts the request with
+     * a 422/403 if a PO *was* referenced but fails any check — this method
+     * never silently drops a bad reference.
+     */
+    public function validateReceivablePo($purchaseOrderId, int $grnWarehouseId): ?PurchaseOrder
+    {
+        if (! $purchaseOrderId) {
+            return null;
+        }
+
+        $po = PurchaseOrder::whereNull('deleted_at')->find($purchaseOrderId);
+        if (! $po) {
+            abort(422, 'The selected Purchase Order could not be found.');
+        }
+
+        $user = Auth::user();
+        if (! $user->is_all_warehouses) {
+            $allowed = UserWarehouse::where('user_id', $user->id)->pluck('warehouse_id')->toArray();
+            if (! in_array($po->warehouse_id, $allowed, true)) {
+                abort(403, 'This Purchase Order is outside your assigned warehouses.');
+            }
+        }
+
+        if (! in_array($po->status, ['ordered', 'partially_received'], true)) {
+            abort(422, 'This Purchase Order is not in a receivable state ('.$po->status.').');
+        }
+
+        if ((int) $po->warehouse_id !== $grnWarehouseId) {
+            abort(422, "This GRN's warehouse must match the Purchase Order's warehouse.");
+        }
+
+        return $po;
+    }
+
     /**
      * Call after a GRN and its PurchaseDetail rows have already been
      * persisted (i.e. after the existing store()/update() transaction has
@@ -56,9 +105,23 @@ class PurchaseOrderReceiptService
 
         $touchedAnyLine = false;
 
+        // Every referenced detail line must actually belong to THIS PO —
+        // without this check, a crafted request could pair this GRN's
+        // purchase_order_id with a purchase_order_detail_id from a
+        // completely different PO, incrementing that unrelated PO's
+        // received_quantity instead. Loading the valid ID set once (not
+        // per-line) keeps this a single extra query regardless of line count.
+        $validDetailIds = PurchaseOrderDetail::where('purchase_order_id', $po->id)->pluck('id')->all();
+
         foreach (array_values($requestDetails) as $i => $row) {
             $poDetailId = $row['purchase_order_detail_id'] ?? null;
             if (! $poDetailId) {
+                continue;
+            }
+            if (! in_array((int) $poDetailId, $validDetailIds, true)) {
+                // Silently skip rather than abort the whole GRN — the rest
+                // of the receipt (already saved) is legitimate; only this
+                // one line's PO-linkage claim is bogus/stale.
                 continue;
             }
 

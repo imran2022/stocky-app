@@ -221,6 +221,16 @@ class PurchasesController extends BaseController
             'warehouse_id' => 'required',
         ]);
 
+        // Validated BEFORE the transaction opens, so an invalid PO
+        // reference is rejected fast rather than after partially creating
+        // the GRN. See PurchaseOrderReceiptService::validateReceivablePo()
+        // for the exact checks (existence, warehouse scope, receivable
+        // status, warehouse match).
+        app(PurchaseOrderReceiptService::class)->validateReceivablePo(
+            $request->purchase_order_id,
+            (int) $request->warehouse_id
+        );
+
         \DB::transaction(function () use ($request) {
             $order = new Purchase;
 
