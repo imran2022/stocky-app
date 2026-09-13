@@ -55,6 +55,7 @@ const BatchRegisterReport = lazy('BatchRegisterReport', () => import('../pages/r
 const PaymentsReport = lazy('PaymentsReport', () => import('../pages/reports/PaymentsReport.vue'));
 const CustomersReport = lazy('CustomersReport', () => import('../pages/reports/CustomersReport.vue'));
 const SuppliersReport = lazy('SuppliersReport', () => import('../pages/reports/SuppliersReport.vue'));
+const PriceVarianceReport = lazy('PriceVarianceReport', () => import('../pages/reports/PriceVarianceReport.vue'));
 const CashRegisterReport = lazy('CashRegisterReport', () => import('../pages/reports/CashRegisterReport.vue'));
 const AttendanceReport = lazy('AttendanceReport', () => import('../pages/reports/AttendanceReport.vue'));
 const ServiceJobsReport = lazy('ServiceJobsReport', () => import('../pages/reports/ServiceJobsReport.vue'));
@@ -432,6 +433,7 @@ const routes = [
             { path: 'reports/payments-purchases-returns', name: 'payments-purchases-returns-report', component: PaymentsReport, meta: { title: 'Payments — Purchases Returns', permission: 'Reports_payments_purchase_Return', kind: 'returns_purchase' } },
             { path: 'reports/customers', name: 'customers-report', component: CustomersReport, meta: { title: 'Customers Report', permission: 'Reports_customers' } },
             { path: 'reports/suppliers', name: 'suppliers-report', component: SuppliersReport, meta: { title: 'Suppliers Report', permission: 'Reports_suppliers' } },
+            { path: 'reports/price-variance', name: 'price-variance-report', component: PriceVarianceReport, meta: { title: 'Price Variance Report', permission: 'purchase_orders' } },
             { path: 'reports/cash-registers', name: 'cash-register-report', component: CashRegisterReport, meta: { title: 'Cash Register Report', permission: 'cash_register_report' } },
             { path: 'reports/attendance', name: 'attendance-report', component: AttendanceReport, meta: { title: 'Attendance Summary', permission: 'report_attendance_summary' } },
             { path: 'reports/service-jobs', name: 'service-jobs-report', component: ServiceJobsReport, meta: { title: 'Service Jobs Report', permission: 'service_jobs_report' } },

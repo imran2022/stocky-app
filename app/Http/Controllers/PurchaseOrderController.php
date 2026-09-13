@@ -89,8 +89,33 @@ class PurchaseOrderController extends Controller
                     ->orWhereHas('provider', fn ($p) => $p->where('name', 'like', "%{$search}%"));
             });
         }
+        if ($request->boolean('overdue_only')) {
+            $query->whereIn('status', ['ordered', 'partially_received'])
+                ->whereNotNull('expected_delivery_date')
+                ->where('expected_delivery_date', '<', now()->format('Y-m-d'));
+        }
 
         $totalRows = (clone $query)->count();
+
+        // Fulfillment summary stats — computed over the same filtered
+        // (but not yet paginated) query, matching the exact convention
+        // PurchasesController::index() already uses for its own 'stats'
+        // block. "Open" = ordered/partially_received (still expecting
+        // delivery); "Overdue" = open AND past its expected_delivery_date.
+        // Today's date is compared as a plain string (YYYY-MM-DD) against
+        // the stored date column, avoiding a timezone-sensitive Carbon
+        // comparison for a same-day-granularity field.
+        $today = now()->format('Y-m-d');
+        $openStatuses = ['ordered', 'partially_received'];
+        $openQuery = (clone $query)->whereIn('status', $openStatuses);
+        $overdueQuery = (clone $openQuery)->whereNotNull('expected_delivery_date')->where('expected_delivery_date', '<', $today);
+
+        $stats = [
+            'open_count' => (clone $openQuery)->count(),
+            'open_value' => (float) ((clone $openQuery)->sum('GrandTotal')),
+            'overdue_count' => (clone $overdueQuery)->count(),
+            'overdue_value' => (float) ((clone $overdueQuery)->sum('GrandTotal')),
+        ];
 
         $orders = $query->orderBy($order, $dir)
             ->offset($offset)
@@ -157,6 +182,7 @@ class PurchaseOrderController extends Controller
         return response()->json([
             'purchase_orders' => $data,
             'totalRows' => $totalRows,
+            'stats' => $stats,
             'suppliers' => Provider::whereNull('deleted_at')->get(['id', 'name']),
             'warehouses' => $allowedWarehouseIds !== null
                 ? Warehouse::whereNull('deleted_at')->whereIn('id', $allowedWarehouseIds)->get(['id', 'name'])
@@ -707,6 +733,98 @@ class PurchaseOrderController extends Controller
         $po->save();
 
         return response()->json(['success' => true, 'message' => 'Purchase Order emailed to supplier.']);
+    }
+
+    // ----------- Reports -------------
+
+    /**
+     * Price Variance Report — compares each GRN line's actual cost against
+     * the cost that was agreed on its originating PO line, for every GRN
+     * line that has a purchase_order_detail_id (i.e. was received against
+     * a PO — direct/no-PO purchases have nothing to compare against and
+     * are correctly absent from this report, not an oversight).
+     *
+     * A single join across purchase_details -> purchase_order_details ->
+     * purchase_orders -> purchases -> providers -> products; no per-row
+     * queries regardless of how many lines match.
+     */
+    public function priceVarianceReport(Request $request)
+    {
+        $this->authorizeForUser($request->user('api'), 'view', PurchaseOrder::class);
+
+        $allowedWarehouseIds = $this->allowedWarehouseIds();
+
+        $query = DB::table('purchase_details as pd')
+            ->join('purchase_order_details as pod', 'pod.id', '=', 'pd.purchase_order_detail_id')
+            ->join('purchase_orders as po', 'po.id', '=', 'pod.purchase_order_id')
+            ->join('purchases as p', 'p.id', '=', 'pd.purchase_id')
+            ->join('providers as prov', 'prov.id', '=', 'p.provider_id')
+            ->join('products as prod', 'prod.id', '=', 'pd.product_id')
+            ->whereNull('p.deleted_at')
+            ->when($allowedWarehouseIds !== null, fn ($q) => $q->whereIn('p.warehouse_id', $allowedWarehouseIds));
+
+        if ($request->filled('provider_id')) {
+            $query->where('p.provider_id', $request->provider_id);
+        }
+        if ($request->filled('warehouse_id')) {
+            $query->where('p.warehouse_id', $request->warehouse_id);
+        }
+        if ($request->filled('date_from')) {
+            $query->where('p.date', '>=', $request->date_from);
+        }
+        if ($request->filled('date_to')) {
+            $query->where('p.date', '<=', $request->date_to);
+        }
+
+        $rows = $query->select([
+            'pd.id as line_id',
+            'po.Ref as po_ref',
+            'p.Ref as grn_ref',
+            'p.date as grn_date',
+            'prov.name as supplier_name',
+            'prod.name as product_name',
+            'pod.cost as po_cost',
+            'pd.cost as grn_cost',
+        ])->orderByDesc('p.date')->get();
+
+        $data = $rows->map(function ($row) {
+            $poCost = (float) $row->po_cost;
+            $grnCost = (float) $row->grn_cost;
+            $variance = $grnCost - $poCost;
+            // A PO line agreed at cost 0 (data-entry edge case, not expected
+            // in normal use) would make percentage undefined — reported as
+            // null rather than a divide-by-zero/Inf value reaching the
+            // frontend.
+            $variancePercent = $poCost != 0.0 ? round(($variance / $poCost) * 100, 2) : null;
+
+            return [
+                'line_id' => $row->line_id,
+                'po_ref' => $row->po_ref,
+                'grn_ref' => $row->grn_ref,
+                'grn_date' => $row->grn_date,
+                'supplier_name' => $row->supplier_name,
+                'product_name' => $row->product_name,
+                'po_cost' => round($poCost, 2),
+                'grn_cost' => round($grnCost, 2),
+                'variance' => round($variance, 2),
+                'variance_percent' => $variancePercent,
+            ];
+        });
+
+        if ($request->filled('min_variance_percent')) {
+            $threshold = (float) $request->min_variance_percent;
+            $data = $data->filter(fn ($row) => $row['variance_percent'] !== null && abs($row['variance_percent']) >= $threshold)->values();
+        }
+
+        return response()->json([
+            'rows' => $data,
+            'totalRows' => $data->count(),
+            'summary' => [
+                'total_lines' => $data->count(),
+                'total_variance' => round($data->sum('variance'), 2),
+                'overcharged_count' => $data->filter(fn ($r) => $r['variance'] > 0)->count(),
+            ],
+        ]);
     }
 
     // ----------- Shared helpers -------------

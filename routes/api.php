@@ -1223,6 +1223,7 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     Route::delete('purchase_orders/documents/{id}', 'PurchaseOrderController@deleteDocument');
     Route::get('purchase_orders/{id}/pdf', 'PurchaseOrderController@pdf');
     Route::post('purchase_orders/{id}/send_email', 'PurchaseOrderController@sendEmail');
+    Route::get('purchase_orders_reports/price_variance', 'PurchaseOrderController@priceVarianceReport');
 
     // ------------------------------- Payments  Purchases --------------------------\\
     // ------------------------------------------------------------------------------\\

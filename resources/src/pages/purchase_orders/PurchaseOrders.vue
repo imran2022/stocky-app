@@ -11,6 +11,32 @@
       </template>
     </PageHeader>
 
+    <!-- Fulfillment summary — computed server-side over the filtered (not
+         just current-page) result set; "Overdue" clicks straight into a
+         pre-filtered view rather than just being a static number. -->
+    <a-row :gutter="16" style="margin-bottom: 16px">
+      <a-col :xs="12" :md="6">
+        <a-card size="small">
+          <a-statistic :title="$t('OpenPOs') || 'Open POs'" :value="stats.open_count" />
+        </a-card>
+      </a-col>
+      <a-col :xs="12" :md="6">
+        <a-card size="small">
+          <a-statistic :title="$t('OpenValue') || 'Open Value'" :value="stats.open_value" :precision="2" :prefix="currencySymbol" />
+        </a-card>
+      </a-col>
+      <a-col :xs="12" :md="6">
+        <a-card size="small" :class="{ 'overdue-card': stats.overdue_count > 0 }" style="cursor: pointer" @click="filterOverdue">
+          <a-statistic :title="$t('Overdue') || 'Overdue'" :value="stats.overdue_count" :value-style="stats.overdue_count > 0 ? { color: '#cf1322' } : {}" />
+        </a-card>
+      </a-col>
+      <a-col :xs="12" :md="6">
+        <a-card size="small">
+          <a-statistic :title="$t('OverdueValue') || 'Overdue Value'" :value="stats.overdue_value" :precision="2" :prefix="currencySymbol" :value-style="stats.overdue_value > 0 ? { color: '#cf1322' } : {}" />
+        </a-card>
+      </a-col>
+    </a-row>
+
     <a-card size="small" style="margin-bottom: 16px">
       <a-row :gutter="[16, 8]">
         <a-col :xs="12" :md="8" :xl="6">
@@ -55,6 +81,13 @@
         <template v-else-if="column.key === 'date'">{{ date(record.date) }}</template>
         <template v-else-if="column.key === 'expected_delivery_date'">
           {{ record.expected_delivery_date ? date(record.expected_delivery_date) : '—' }}
+          <a-tag
+            v-if="isOverdue(record)"
+            color="error"
+            style="margin-left: 4px"
+          >
+            {{ overdueDays(record) }}{{ $t('d') || 'd' }} {{ $t('Overdue') || 'overdue' }}
+          </a-tag>
         </template>
         <template v-else-if="column.key === 'status'">
           <a-tag :color="docStatusColor(record.status)">{{ statusLabel(record.status) }}</a-tag>
@@ -182,10 +215,17 @@ import http from '../../lib/http';
 const { t } = useI18n();
 const router = useRouter();
 const auth = useAuthStore();
-const { money, date } = useFormat();
+const { money, date, currency } = useFormat();
+const currencySymbol = computed(() => currency.value);
+const stats = computed(() => crud.payload.value?.stats || { open_count: 0, open_value: 0, overdue_count: 0, overdue_value: 0 });
 
-const filters = ref({ provider_id: undefined, warehouse_id: undefined, status: undefined, search: '' });
+const filters = ref({ provider_id: undefined, warehouse_id: undefined, status: undefined, search: '', overdue_only: false });
 const filterParams = computed(() => ({ ...filters.value }));
+
+function filterOverdue() {
+  filters.value.overdue_only = !filters.value.overdue_only;
+  crud.reload();
+}
 
 let searchDebounce = null;
 function onSearchChange() {
@@ -316,6 +356,17 @@ function ageDays(record) {
   return dayjs().diff(placed, 'day');
 }
 
+// Mirrors the exact same rule the backend's overdue_only filter and stats
+// use: open (ordered/partially_received) AND past expected_delivery_date.
+function isOverdue(record) {
+  if (!['ordered', 'partially_received'].includes(record.status)) return false;
+  if (!record.expected_delivery_date) return false;
+  return dayjs(record.expected_delivery_date).isBefore(dayjs(), 'day');
+}
+function overdueDays(record) {
+  return dayjs().diff(dayjs(record.expected_delivery_date), 'day');
+}
+
 function onAction(key, record) {
   if (key === 'detail' || key === 'edit') {
     router.push(`/purchase-orders/${record.id}`);
@@ -379,5 +430,8 @@ function onAction(key, record) {
 }
 .muted {
   color: var(--text-secondary, #8c8c8c);
+}
+.overdue-card {
+  border-color: #ffccc7;
 }
 </style>
