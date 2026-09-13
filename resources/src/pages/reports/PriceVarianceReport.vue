@@ -78,7 +78,7 @@ const { t } = useI18n();
 const { money } = useFormat();
 
 const filters = ref({ provider_id: undefined, date_from: undefined, date_to: undefined, min_variance_percent: undefined });
-const filterParams = computed(() => ({ ...filters.value }));
+const filterParams = () => ({ ...filters.value });
 
 // Payload: { rows, totalRows, summary }
 const crud = useCrudTable('purchase_orders_reports/price_variance', {

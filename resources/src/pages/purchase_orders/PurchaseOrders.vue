@@ -220,7 +220,7 @@ const currencySymbol = computed(() => currency.value);
 const stats = computed(() => crud.payload.value?.stats || { open_count: 0, open_value: 0, overdue_count: 0, overdue_value: 0 });
 
 const filters = ref({ provider_id: undefined, warehouse_id: undefined, status: undefined, search: '', overdue_only: false });
-const filterParams = computed(() => ({ ...filters.value }));
+const filterParams = () => ({ ...filters.value });
 
 function filterOverdue() {
   filters.value.overdue_only = !filters.value.overdue_only;

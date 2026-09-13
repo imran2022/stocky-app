@@ -32,6 +32,12 @@ $contains = function (string $haystack, string $needle, string $message) use (&$
     }
 };
 
+$notContains = function (string $haystack, string $needle, string $message) use (&$errors) {
+    if (str_contains($haystack, $needle)) {
+        $errors[] = $message;
+    }
+};
+
 $controller = $source('app/Http/Controllers/PurchaseOrderController.php');
 
 // ----- Fulfillment stats -----
@@ -63,10 +69,20 @@ $contains($routes, "Route::get('purchase_orders_reports/price_variance', 'Purcha
 $poList = $source('resources/src/pages/purchase_orders/PurchaseOrders.vue');
 $contains($poList, 'function filterOverdue()', 'PO list must implement the clickable overdue stat card.');
 $contains($poList, 'function isOverdue(record)', 'PO list must implement the per-row overdue check.');
+$contains($poList, 'const filterParams = () => (', 'filterParams must be a plain function, not computed() — see the matching note on PriceVarianceReport.vue below.');
+$notContains($poList, 'const filterParams = computed(', 'filterParams must not be a computed() ref — useCrudTable calls params() directly as a function, which throws "params is not a function" for a computed ref (a real bug found via a user report: this crashed before any network request was built, so it appeared in DevTools as zero requests, not a visible failed one).');
 
 $variancePage = $source('resources/src/pages/reports/PriceVarianceReport.vue');
 $contains($variancePage, "row-key=\"line_id\"", 'Price Variance Report table must use the unique line_id as its row key, not grn_ref.');
 $contains($variancePage, "rowsKey: 'rows'", 'Price Variance Report must consume the rows payload key.');
+// Real bug found via a user report: useCrudTable's `params` option must be a
+// plain function ("() => ({...})") — it's called directly as params() inside
+// fetchRows(). Passing a computed() ref there throws "params is not a
+// function" synchronously, before any network request is built, which is
+// exactly why the bug produced zero requests in the browser's Network tab
+// rather than a visible failed request.
+$contains($variancePage, 'const filterParams = () => (', 'filterParams must be a plain function, not computed() — see build note.');
+$notContains($variancePage, 'const filterParams = computed(', 'filterParams must not be a computed() ref — useCrudTable calls params() directly as a function.');
 
 $router = $source('resources/src/router/index.js');
 $contains($router, "path: 'reports/price-variance'", 'Router must register the Price Variance Report route.');
