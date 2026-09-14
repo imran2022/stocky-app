@@ -1899,14 +1899,138 @@ regression + PHPUnit suite, and a clean frontend rebuild — no logic changed.
 A full sweep of every other file touched by this project found no further
 instances.
 
+## 32. PO Document Attachments UI + List Columns
+
+**Status:** ACTIVE. **Base required:** PO+GRN linkage.
+
+The PO document upload/download/delete backend endpoints existed from the
+original PO+GRN delivery but had no frontend to use them — added an
+attachments modal to the PO list, mirroring `Purchases.vue`'s existing
+attachment pattern exactly. Also added 4 list columns: Created By, Last GRN
+Date, Age (days since placed), and an attachment indicator icon. Last GRN
+Date and the attachment indicator are each a single grouped query for the
+whole page (same N+1-safe shape as the existing `received_percent`
+calculation), not one query per row.
+
+## 33. PO Fulfillment Stats + Price Variance Report
+
+**Status:** ACTIVE. **Base required:** Build 32.
+
+Summary stat cards on the PO list (Open POs count/value, Overdue
+count/value — click Overdue to filter), a "Days Overdue" tag, and an
+`overdue_only` quick-filter — stats computed server-side over the filtered-
+but-not-paginated query, same convention as `PurchasesController::index()`'s
+own `stats` block.
+
+New Price Variance Report compares each GRN line's actual cost against its
+originating PO line's agreed cost (joined via `purchase_order_detail_id` —
+only lines actually received against a PO have anything to compare, by
+design). KPI tiles, filters (supplier, date range, minimum variance %
+threshold), color-coded variance tags.
+
+## 34. Fix — GRN deletion could push stock negative
+
+**Status:** ACTIVE. **Base required:** Build 33.
+
+A reported concern: deleting a received GRN naively reverses the stock it
+added; if some of that stock had since been sold, the reversal could push a
+product's warehouse quantity negative with no warning. New, isolated
+`App\Services\Custom\GrnDeletionSafetyService` performs a read-only
+pre-flight check per line before either delete path
+(`PurchasesController::destroy()`/`delete_by_selection()`) runs — using the
+exact same base-unit conversion the existing stock-reversal logic already
+uses, so the "would this go negative" arithmetic can never disagree with
+the "how much do we actually subtract" arithmetic. When blocked, the
+response lists every affected product with exact numbers.
+
+**Important ordering detail, found while building this:** the check runs
+BEFORE `DB::transaction()` opens in both delete methods, not inside the
+closure — a response returned from inside
+`DB::transaction(function () {...})` is silently discarded by these two
+methods' own unconditional success response afterward (a real, pre-existing,
+separate defect in the neighboring PurchaseReturn-exists check, which
+blocks the underlying deletion correctly but never actually reaches the
+user with an error message — left as-is, out of scope, but this new check
+deliberately does not repeat that mistake). See
+`docs/ARCHITECTURE_AND_CHANGE_CONTROL.md`'s "Hard lessons" section.
+
+## 35. Fix — Purchase Order permission migration broke fresh installs
+
+**Status:** ACTIVE. **Base required:** Build 34.
+
+Found via a real user report: `php artisan migrate:fresh --seed` failed
+with a duplicate-key error during `PermissionsSeeder`. The PO permission
+migration's grant-to-existing-roles logic used `insertGetId()` with no
+explicit ID; on an already-seeded site this safely landed past the
+seeder's own ID range, but on a fresh install (migrations run before
+seeders) the empty `permissions` table handed it ID 1 — directly colliding
+with the seeder's own hardcoded `id=1`. Fixed by reserving an explicit,
+high ID (900001) instead. A second bug found while fixing the first: an
+initial fix used a top-level `const`, which threw "already defined" when
+Laravel's migrator loaded the file twice in the same `migrate:fresh`
+process — moved to a class-scoped `private const`.
+
+## 36. Fix — Purchase Orders menu invisible on fresh install
+
+**Status:** ACTIVE. **Base required:** Build 35.
+
+Separate bug surfaced by the same fresh-install testing: after a
+successful `migrate:fresh --seed`, the Purchase Orders menu item didn't
+appear for any role, including Owner. The permission-granting migration's
+own grant-to-roles-with-Purchases_view logic runs during the migration
+phase, which happens BEFORE any seeder on a fresh install — at that point
+`permission_role` is completely empty, so the loop correctly found zero
+roles to grant to. Added `PurchaseOrdersPermissionSeeder`, hooked into
+`DatabaseSeeder` immediately after `PermissionRoleSeeder` (which is what
+actually creates the `Purchases_view` role links this depends on) —
+idempotent, safe to re-run.
+
+## 37. Fix — Zone-Wise Report crashed with an ambiguous-column SQL error
+
+**Status:** ACTIVE. **Base required:** Build 36.
+
+Found via a real user log (not initially connected to PO work, but
+investigated as part of the same "Something went wrong" report):
+`ReportController::zoneWiseReport()` built its base query with an
+unqualified `whereNull('deleted_at')` on the `Sale` model, then later
+left-joined `sale_zones`/`sale_couriers` — both of which also have their
+own `deleted_at` column. Once the join was added, MySQL could no longer
+tell which table's `deleted_at` the earlier WHERE clause meant, and
+rejected the entire query (error 1052) — a 500 on every call to this
+report. Fixed by qualifying the column (`sales.deleted_at`) at the point
+the base query is built; both the zone and courier breakdowns clone this
+same base query, so the one fix covers both.
+
+## 38. Fix — PO list and Price Variance Report never loaded any data
+
+**Status:** ACTIVE. **Base required:** Build 37.
+
+The real, root-cause fix for the "Something went wrong" reports on the PO
+list and Price Variance Report pages (Builds 34–37 above were genuine bugs
+found and fixed along the way, but were not this one).
+`useCrudTable`'s `fetchRows()` calls its `params` option directly as a
+function — `params()`. Both `PurchaseOrders.vue` and
+`PriceVarianceReport.vue` passed `filterParams` as a `computed()` ref
+instead of a plain function, so `params()` threw `TypeError: params is not
+a function` **before** any HTTP request was built — which is why the
+browser's Network tab showed zero requests for these pages rather than one
+visible failed request. Fixed by changing `filterParams` to a plain
+`() => ({...})` function in both files, matching the working pattern
+already used elsewhere (`Bookings.vue`) and documented in
+`useCrudTable.js`'s own inline comment for the `params` option. Confirmed
+with a standalone Node.js reproduction of the exact call pattern (Node
+shares the V8 engine with Chrome) — see
+`docs/ARCHITECTURE_AND_CHANGE_CONTROL.md`'s "Hard lessons" section for the
+full incident writeup and the process change this motivated.
+
 ## Regression test suite index
 
 Every build from A onward has a corresponding `tests/Regression/build_*.php`
 script (source/static assertions, no DB required) and, for most, a mirrored
 `tests/Unit/Build*ContractTest.php` (PHPUnit). Run the regression scripts in
 build order after any deploy; run the full PHPUnit suite (`php artisan
-test`) for everything else. As of Build 31 (this entry), 15 regression
-scripts exist; all pass except the two known, pre-existing, unrelated items
+test`) for everything else. As of Build 38 (this entry), 17 regression
+scripts exist; all pass except the one known, pre-existing, unrelated item
 noted throughout this document (a vendor-scaffold `ExampleTest` asserting
 the homepage returns 200 outside auth, which this app correctly redirects
 instead of returning).
