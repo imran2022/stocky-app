@@ -101,6 +101,7 @@ const PurchaseDetails = lazy('PurchaseDetails', () => import('../pages/purchases
 const PurchaseForm = lazy('PurchaseForm', () => import('../pages/purchases/PurchaseForm.vue'));
 const PurchaseOrders = lazy('PurchaseOrders', () => import('../pages/purchase_orders/PurchaseOrders.vue'));
 const PurchaseOrderForm = lazy('PurchaseOrderForm', () => import('../pages/purchase_orders/PurchaseOrderForm.vue'));
+const PurchaseOrderDetails = lazy('PurchaseOrderDetails', () => import('../pages/purchase_orders/PurchaseOrderDetails.vue'));
 const Quotations = lazy('Quotations', () => import('../pages/quotations/Quotations.vue'));
 const QuotationDetails = lazy('QuotationDetails', () => import('../pages/quotations/QuotationDetails.vue'));
 const QuotationForm = lazy('QuotationForm', () => import('../pages/quotations/QuotationForm.vue'));
@@ -731,6 +732,7 @@ const routes = [
             { path: 'purchases/:id(\\d+)', name: 'purchase-details', component: PurchaseDetails, meta: { title: 'Purchase Detail', permission: 'Purchases_view' } },
             { path: 'purchase-orders', name: 'purchase-orders', component: PurchaseOrders, meta: { title: 'Purchase Orders', permission: 'purchase_orders' } },
             { path: 'purchase-orders/create', name: 'purchase-order-create', component: PurchaseOrderForm, meta: { title: 'Add Purchase Order', permission: 'purchase_orders' } },
+            { path: 'purchase-orders/:id(\\d+)/view', name: 'purchase-order-view', component: PurchaseOrderDetails, meta: { title: 'Purchase Order', permission: 'purchase_orders' } },
             { path: 'purchase-orders/:id(\\d+)', name: 'purchase-order-edit', component: PurchaseOrderForm, meta: { title: 'Purchase Order', permission: 'purchase_orders' } },
             { path: 'quotations', name: 'quotations', component: Quotations, meta: { title: 'Quotations', permission: 'Quotations_view' } },
             { path: 'quotations/create', name: 'quotation-create', component: QuotationForm, meta: { title: 'Add Quotation', permission: 'Quotations_add' } },

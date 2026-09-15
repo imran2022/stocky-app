@@ -1,7 +1,7 @@
 <template>
   <ReportPage
-    :title="$t('PriceVarianceReport') || 'Price Variance Report'"
-    :breadcrumb="[$t('Reports'), $t('PriceVarianceReport') || 'Price Variance Report']"
+    :title="'Price Variance Report'"
+    :breadcrumb="[$t('Reports'), 'Price Variance Report']"
     :crud="crud"
     :columns="columns"
     row-key="line_id"
@@ -16,15 +16,15 @@
           />
         </a-col>
         <a-col :xs="12" :md="6">
-          <div class="filter-label">{{ $t('DateFrom') || 'Date From' }}</div>
+          <div class="filter-label">{{ 'Date From' }}</div>
           <a-date-picker v-model:value="filters.date_from" value-format="YYYY-MM-DD" style="width: 100%" @change="crud.reload()" />
         </a-col>
         <a-col :xs="12" :md="6">
-          <div class="filter-label">{{ $t('DateTo') || 'Date To' }}</div>
+          <div class="filter-label">{{ 'Date To' }}</div>
           <a-date-picker v-model:value="filters.date_to" value-format="YYYY-MM-DD" style="width: 100%" @change="crud.reload()" />
         </a-col>
         <a-col :xs="12" :md="6">
-          <div class="filter-label">{{ $t('MinVariancePercent') || 'Min Variance %' }}</div>
+          <div class="filter-label">{{ 'Min Variance %' }}</div>
           <a-input-number v-model:value="filters.min_variance_percent" style="width: 100%" :min="0" placeholder="e.g. 5" @change="crud.reload()" />
         </a-col>
       </a-row>
@@ -100,26 +100,26 @@ onMounted(async () => {
 const summary = computed(() => crud.payload.value?.summary || { total_lines: 0, total_variance: 0, overcharged_count: 0 });
 
 const kpiTiles = computed(() => [
-  { label: t('TotalLines') || 'Lines Compared', value: summary.value.total_lines, icon: DollarOutlined, color: '#1677ff', tint: 'rgba(22, 119, 255, 0.12)' },
+  { label: 'Lines Compared', value: summary.value.total_lines, icon: DollarOutlined, color: '#1677ff', tint: 'rgba(22, 119, 255, 0.12)' },
   {
-    label: t('NetVariance') || 'Net Variance', value: money(summary.value.total_variance), icon: RiseOutlined,
+    label: 'Net Variance', value: money(summary.value.total_variance), icon: RiseOutlined,
     color: summary.value.total_variance > 0 ? '#cf1322' : '#10b981',
     tint: summary.value.total_variance > 0 ? 'rgba(207, 18, 34, 0.12)' : 'rgba(16, 185, 129, 0.12)',
     style: { color: summary.value.total_variance > 0 ? '#cf1322' : '#10b981' },
   },
-  { label: t('OverchargedLines') || 'Overcharged Lines', value: summary.value.overcharged_count, icon: WarningOutlined, color: '#f43f5e', tint: 'rgba(244, 63, 94, 0.12)' },
+  { label: 'Overcharged Lines', value: summary.value.overcharged_count, icon: WarningOutlined, color: '#f43f5e', tint: 'rgba(244, 63, 94, 0.12)' },
 ]);
 
 const columns = computed(() => [
-  { title: t('PurchaseOrder') || 'PO Ref', dataIndex: 'po_ref', key: 'po_ref' },
-  { title: t('GRN') || 'GRN Ref', dataIndex: 'grn_ref', key: 'grn_ref' },
+  { title: 'PO Ref', dataIndex: 'po_ref', key: 'po_ref' },
+  { title: 'GRN Ref', dataIndex: 'grn_ref', key: 'grn_ref' },
   { title: t('date'), dataIndex: 'grn_date', key: 'grn_date', sorter: true },
   { title: t('Supplier'), dataIndex: 'supplier_name', key: 'supplier_name' },
   { title: t('ProductName'), dataIndex: 'product_name', key: 'product_name' },
-  { title: t('PoAgreedCost') || 'PO Cost', dataIndex: 'po_cost', key: 'po_cost', align: 'right', exportValue: r => money(r.po_cost) },
-  { title: t('GrnActualCost') || 'GRN Cost', dataIndex: 'grn_cost', key: 'grn_cost', align: 'right', exportValue: r => money(r.grn_cost) },
+  { title: 'PO Cost', dataIndex: 'po_cost', key: 'po_cost', align: 'right', exportValue: r => money(r.po_cost) },
+  { title: 'GRN Cost', dataIndex: 'grn_cost', key: 'grn_cost', align: 'right', exportValue: r => money(r.grn_cost) },
   { title: t('Variance') || 'Variance', dataIndex: 'variance', key: 'variance', align: 'right', sorter: true, exportValue: r => money(r.variance) },
-  { title: t('VariancePercent') || 'Variance %', dataIndex: 'variance_percent', key: 'variance_percent', align: 'right', sorter: true },
+  { title: 'Variance %', dataIndex: 'variance_percent', key: 'variance_percent', align: 'right', sorter: true },
 ]);
 </script>
 

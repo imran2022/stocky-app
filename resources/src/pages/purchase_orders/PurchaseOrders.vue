@@ -1,11 +1,11 @@
 <template>
   <div class="page">
-    <PageHeader :title="$t('PurchaseOrders') || 'Purchase Orders'" :breadcrumb="[$t('Purchases'), $t('PurchaseOrders') || 'Purchase Orders']">
+    <PageHeader :title="'Purchase Orders'" :breadcrumb="[$t('Purchases'), 'Purchase Orders']">
       <template #actions>
         <a-space wrap>
           <a-button v-if="auth.can('purchase_orders')" type="primary" @click="$router.push('/purchase-orders/create')">
             <template #icon><PlusOutlined /></template>
-            {{ $t('AddPurchaseOrder') || 'Add Purchase Order' }}
+            {{ 'Add Purchase Order' }}
           </a-button>
         </a-space>
       </template>
@@ -17,12 +17,12 @@
     <a-row :gutter="16" style="margin-bottom: 16px">
       <a-col :xs="12" :md="6">
         <a-card size="small">
-          <a-statistic :title="$t('OpenPOs') || 'Open POs'" :value="stats.open_count" />
+          <a-statistic :title="'Open POs'" :value="stats.open_count" />
         </a-card>
       </a-col>
       <a-col :xs="12" :md="6">
         <a-card size="small">
-          <a-statistic :title="$t('OpenValue') || 'Open Value'" :value="stats.open_value" :precision="2" :prefix="currencySymbol" />
+          <a-statistic :title="'Open Value'" :value="stats.open_value" :precision="2" :prefix="currencySymbol" />
         </a-card>
       </a-col>
       <a-col :xs="12" :md="6">
@@ -32,7 +32,7 @@
       </a-col>
       <a-col :xs="12" :md="6">
         <a-card size="small">
-          <a-statistic :title="$t('OverdueValue') || 'Overdue Value'" :value="stats.overdue_value" :precision="2" :prefix="currencySymbol" :value-style="stats.overdue_value > 0 ? { color: '#cf1322' } : {}" />
+          <a-statistic :title="'Overdue Value'" :value="stats.overdue_value" :precision="2" :prefix="currencySymbol" :value-style="stats.overdue_value > 0 ? { color: '#cf1322' } : {}" />
         </a-card>
       </a-col>
     </a-row>
@@ -66,7 +66,7 @@
           <div class="filter-label">{{ $t('Search') || 'Search' }}</div>
           <a-input
             v-model:value="filters.search" allow-clear
-            :placeholder="$t('SearchByReferenceSupplier') || 'PO number or supplier'"
+            :placeholder="'PO number or supplier'"
             @press-enter="crud.reload()" @change="onSearchChange"
           />
         </a-col>
@@ -76,7 +76,7 @@
     <DataTable :crud="crud" :columns="columns">
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'Ref'">
-          <a @click="$router.push(`/purchase-orders/${record.id}`)">{{ record.Ref }}</a>
+          <a @click="$router.push(`/purchase-orders/${record.id}/view`)">{{ record.Ref }}</a>
         </template>
         <template v-else-if="column.key === 'date'">{{ date(record.date) }}</template>
         <template v-else-if="column.key === 'expected_delivery_date'">
@@ -86,7 +86,7 @@
             color="error"
             style="margin-left: 4px"
           >
-            {{ overdueDays(record) }}{{ $t('d') || 'd' }} {{ $t('Overdue') || 'overdue' }}
+            {{ overdueDays(record) }}{{ 'd' }} {{ $t('Overdue') || 'overdue' }}
           </a-tag>
         </template>
         <template v-else-if="column.key === 'status'">
@@ -113,7 +113,7 @@
             {{ $t('Closed') || 'Closed' }}
           </span>
           <span v-else :style="{ color: ageDays(record) > 14 ? '#cf1322' : undefined }">
-            {{ ageDays(record) }}{{ $t('d') || 'd' }}
+            {{ ageDays(record) }}{{ 'd' }}
           </span>
         </template>
         <template v-else-if="column.key === 'has_documents'">
@@ -133,10 +133,10 @@
                   <EditOutlined /> {{ $t('Edit') || 'Edit' }}
                 </a-menu-item>
                 <a-menu-item v-if="auth.can('purchase_orders') && ['ordered', 'partially_received'].includes(record.status)" key="receive">
-                  <InboxOutlined /> {{ $t('ReceiveGRN') || 'Receive (Create GRN)' }}
+                  <InboxOutlined /> Receive (Create GRN)
                 </a-menu-item>
                 <a-menu-item key="pdf"><FilePdfOutlined /> {{ $t('DownloadPdf') || 'Download PDF' }}</a-menu-item>
-                <a-menu-item v-if="auth.can('purchase_orders')" key="email"><MailOutlined /> {{ $t('EmailToSupplier') || 'Email to Supplier' }}</a-menu-item>
+                <a-menu-item v-if="auth.can('purchase_orders')" key="email"><MailOutlined /> Email to Supplier</a-menu-item>
                 <a-menu-item key="documents"><PaperClipOutlined /> {{ $t('Attach_Documents') || 'Attachments' }}</a-menu-item>
                 <a-menu-divider v-if="auth.can('purchase_orders')" />
                 <a-menu-item v-if="auth.can('purchase_orders')" key="delete" danger>
@@ -323,7 +323,7 @@ function removePoDocument(doc) {
         message.success(t('Deleted_in_successfully') || 'Deleted successfully');
         await loadPoDocuments(activePo.value.id);
       } catch (e) {
-        message.error(t('SomethingWentWrong') || 'Something went wrong');
+        message.error('Something went wrong');
       }
     },
   });
@@ -333,7 +333,7 @@ const columns = computed(() => [
   { title: t('Action'), key: 'actions', width: 70, align: 'center', fixed: 'left' },
   { title: t('Reference'), dataIndex: 'Ref', key: 'Ref', sorter: true },
   { title: t('date'), dataIndex: 'date', key: 'date', sorter: true, exportValue: r => date(r.date) },
-  { title: t('ExpectedDelivery') || 'Expected Delivery', dataIndex: 'expected_delivery_date', key: 'expected_delivery_date' },
+  { title: 'Expected Delivery', dataIndex: 'expected_delivery_date', key: 'expected_delivery_date' },
   { title: t('Supplier'), dataIndex: 'provider_name', key: 'provider_name' },
   { title: t('warehouse'), dataIndex: 'warehouse_name', key: 'warehouse_name' },
   { title: t('Status'), dataIndex: 'status', key: 'status', sorter: true, exportValue: r => statusLabel(r.status) },
@@ -342,8 +342,8 @@ const columns = computed(() => [
     : []),
   { title: t('Total'), dataIndex: 'GrandTotal', key: 'GrandTotal', sorter: true, align: 'right', exportValue: r => money(r.GrandTotal) },
   { title: t('Received') || 'Received', dataIndex: 'received_percent', key: 'received_percent', width: 160 },
-  { title: t('CreatedBy') || 'Created By', dataIndex: 'created_by_name', key: 'created_by_name', defaultHidden: true },
-  { title: t('LastGrnDate') || 'Last GRN Date', dataIndex: 'last_grn_date', key: 'last_grn_date', defaultHidden: true, exportValue: r => r.last_grn_date || '' },
+  { title: 'Created By', dataIndex: 'created_by_name', key: 'created_by_name' },
+  { title: 'Last GRN Date', dataIndex: 'last_grn_date', key: 'last_grn_date', exportValue: r => r.last_grn_date || '' },
   { title: t('Age') || 'Age', key: 'age', width: 90, align: 'center' },
   { title: '', key: 'has_documents', width: 40, align: 'center' },
 ]);
@@ -368,7 +368,11 @@ function overdueDays(record) {
 }
 
 function onAction(key, record) {
-  if (key === 'detail' || key === 'edit') {
+  if (key === 'detail') {
+    router.push(`/purchase-orders/${record.id}/view`);
+    return;
+  }
+  if (key === 'edit') {
     router.push(`/purchase-orders/${record.id}`);
     return;
   }
@@ -386,14 +390,14 @@ function onAction(key, record) {
   }
   if (key === 'email') {
     Modal.confirm({
-      title: t('EmailToSupplier') || 'Email to Supplier',
-      content: t('ConfirmEmailToSupplier') || `Send this Purchase Order to ${record.provider_name}?`,
+      title: 'Email to Supplier',
+      content: `Send this Purchase Order to ${record.provider_name}?`,
       onOk: async () => {
         try {
           await http.post(`purchase_orders/${record.id}/send_email`);
-          message.success(t('EmailSent') || 'Email sent successfully');
+          message.success('Email sent successfully');
         } catch (e) {
-          message.error(e?.response?.data?.message || t('SomethingWentWrong') || 'Something went wrong');
+          message.error(e?.response?.data?.message || 'Something went wrong');
         }
       },
     });
@@ -411,10 +415,10 @@ function onAction(key, record) {
       onOk: async () => {
         try {
           await http.delete(`purchase_orders/${record.id}`);
-          message.success(t('DeletedSuccessfully') || 'Deleted successfully');
+          message.success('Deleted successfully');
           crud.fetchRows();
         } catch (e) {
-          message.error(e?.response?.data?.message || t('SomethingWentWrong') || 'Something went wrong');
+          message.error(e?.response?.data?.message || 'Something went wrong');
         }
       },
     });

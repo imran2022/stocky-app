@@ -55,11 +55,11 @@
                action below the product search bar. Entirely optional — the
                original direct-purchase flow (no PO selected) is unchanged. -->
           <a-col v-if="!isEdit" :xs="24" :md="8">
-            <a-form-item :label="$t('PurchaseOrder') || 'Purchase Order (optional)'">
+            <a-form-item :label="'Purchase Order (optional)'">
               <a-select
                 v-model:value="selectedPoId"
                 allow-clear show-search option-filter-prop="label"
-                :placeholder="$t('SelectPoOptional') || 'Receive against a PO...'"
+                :placeholder="'Receive against a PO...'"
                 :options="poOptions"
                 :disabled="!purchase.supplier_id"
                 :loading="loadingPoOptions"
@@ -85,11 +85,11 @@
         <a-alert
           v-if="selectedPoId && poLines.length"
           type="info" show-icon closable style="margin-bottom: 12px"
-          :message="$t('PoItemsAvailable') || `${poLines.length} item(s) remaining to receive on this PO.`"
+          :message="`${poLines.length} item(s) remaining to receive on this PO.`"
         >
           <template #action>
             <a-button size="small" type="primary" @click="loadAllPoItems">
-              {{ $t('LoadAllItems') || 'Load All Items' }}
+              {{ 'Load All Items' }}
             </a-button>
           </template>
         </a-alert>
@@ -506,7 +506,7 @@ async function loadAllPoItems() {
       message.error(`${t('InvalidData')}: ${poLine.name}`);
     }
   }
-  message.success(t('ItemsLoaded') || 'Items loaded from Purchase Order');
+  message.success('Items loaded from Purchase Order');
 }
 
 const products = ref([]);

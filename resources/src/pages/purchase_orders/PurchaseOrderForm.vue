@@ -1,8 +1,8 @@
 <template>
   <div class="page">
     <PageHeader
-      :title="isEdit ? ($t('EditPurchaseOrder') || 'Edit Purchase Order') : ($t('AddPurchaseOrder') || 'Add Purchase Order')"
-      :breadcrumb="[$t('Purchases'), $t('PurchaseOrders') || 'Purchase Orders', isEdit ? ($t('Edit') || 'Edit') : ($t('Add') || 'Add')]"
+      :title="isEdit ? ('Edit Purchase Order') : ('Add Purchase Order')"
+      :breadcrumb="[$t('Purchases'), 'Purchase Orders', isEdit ? ($t('Edit') || 'Edit') : ($t('Add') || 'Add')]"
     />
 
     <div v-if="loadingRecord" style="display: flex; justify-content: center; padding: 96px 0">
@@ -12,7 +12,7 @@
     <a-alert
       v-else-if="isEdit && !po.is_editable"
       type="warning" show-icon style="margin-bottom: 16px"
-      :message="$t('PoNotEditable') || 'This Purchase Order can no longer be edited — it already has GRN receipts against it, or is cancelled.'"
+      :message="'This Purchase Order can no longer be edited — it already has GRN receipts against it, or is cancelled.'"
     />
 
     <a-form v-else layout="vertical">
@@ -24,7 +24,7 @@
             </a-form-item>
           </a-col>
           <a-col :xs="24" :md="8">
-            <a-form-item :label="$t('ExpectedDelivery') || 'Expected Delivery Date'">
+            <a-form-item :label="'Expected Delivery Date'">
               <a-date-picker v-model:value="po.expected_delivery_date" value-format="YYYY-MM-DD" style="width: 100%" :disabled="!editable" />
             </a-form-item>
           </a-col>
@@ -72,7 +72,7 @@
                 :disabled="!editable"
               />
               <div class="muted" style="margin-top: 4px">
-                {{ $t('PoStatusAutoNote') || 'Partially Received / Received are set automatically once a GRN is received against this PO.' }}
+                Partially Received / Received are set automatically once a GRN is received against this PO.
               </div>
             </a-form-item>
           </a-col>
@@ -109,7 +109,7 @@
                 Last Purchase: {{ docMoney(record.last_purchase.cost) }} ({{ record.last_purchase.date }}<template v-if="record.last_purchase.supplier_name">, {{ record.last_purchase.supplier_name }}</template>)
               </div>
               <div v-if="record.received_quantity" class="muted" style="font-size: 12px">
-                {{ $t('AlreadyReceived') || 'Already received' }}: {{ record.received_quantity }} / {{ record.quantity }}
+                {{ 'Already received' }}: {{ record.received_quantity }} / {{ record.quantity }}
               </div>
             </template>
             <template v-else-if="column.key === 'cost'">
@@ -129,7 +129,7 @@
                 @update:value="v => setQty(record, v)"
               />
               <div v-if="record.received_quantity" class="muted" style="font-size: 11px">
-                {{ $t('MinQuantityNote') || 'Cannot go below already-received quantity' }}
+                {{ 'Cannot go below already-received quantity' }}
               </div>
             </template>
             <template v-else-if="column.key === 'subtotal'">{{ docMoney(record.total) }}</template>
@@ -146,7 +146,7 @@
         <a-col :xs="24" :md="12">
           <a-card size="small" style="margin-bottom: 16px">
             <a-form-item :label="$t('Notes')">
-              <a-textarea v-model:value="po.notes" :rows="4" :disabled="!editable" :placeholder="$t('AFewWords') || 'A few words...'" />
+              <a-textarea v-model:value="po.notes" :rows="4" :disabled="!editable" :placeholder="'A few words...'" />
             </a-form-item>
           </a-card>
         </a-col>
@@ -389,11 +389,11 @@ function buildPayload() {
 
 async function submit() {
   if (!po.value.provider_id || !po.value.warehouse_id) {
-    message.warning(t('FieldIsRequired') || 'Please fill in all required fields');
+    message.warning('Please fill in all required fields');
     return;
   }
   if (lines.value.length === 0) {
-    message.warning(t('AddAtLeastOneProduct') || 'Add at least one product');
+    message.warning('Add at least one product');
     return;
   }
 
@@ -401,14 +401,14 @@ async function submit() {
   try {
     if (isEdit.value) {
       await http.put(`purchase_orders/${route.params.id}`, buildPayload());
-      message.success(t('UpdatedSuccessfully') || 'Updated successfully');
+      message.success('Updated successfully');
     } else {
       await http.post('purchase_orders', buildPayload());
-      message.success(t('SavedSuccessfully') || 'Saved successfully');
+      message.success('Saved successfully');
     }
     router.push('/purchase-orders');
   } catch (e) {
-    message.error(e?.response?.data?.message || t('SomethingWentWrong') || 'Something went wrong');
+    message.error(e?.response?.data?.message || 'Something went wrong');
   } finally {
     saving.value = false;
   }

@@ -297,7 +297,15 @@ class PurchaseOrderController extends Controller
                 'date' => $po->date,
                 'expected_delivery_date' => $po->expected_delivery_date,
                 'provider_id' => $po->provider_id,
+                // Added for the read-only View page (PurchaseOrderDetails.vue) —
+                // purely additive; the existing edit form only ever read the
+                // *_id fields above, so this cannot affect it.
+                'provider_name' => optional($po->provider)->name,
+                'provider_phone' => optional($po->provider)->phone,
+                'provider_email' => optional($po->provider)->email,
+                'provider_address' => optional($po->provider)->adresse,
                 'warehouse_id' => $po->warehouse_id,
+                'warehouse_name' => optional($po->warehouse)->name,
                 'status' => $po->status,
                 'tax_rate' => $po->tax_rate,
                 'TaxNet' => $po->TaxNet,
@@ -311,6 +319,10 @@ class PurchaseOrderController extends Controller
             ],
             'details' => $details,
             'documents' => $po->documents,
+            // Same company block shape PurchaseDetails.vue already consumes
+            // from GET purchases/{id} — reused here for visual/field parity
+            // between the two view pages.
+            'company' => Setting::whereNull('deleted_at')->first(),
         ]);
     }
 
