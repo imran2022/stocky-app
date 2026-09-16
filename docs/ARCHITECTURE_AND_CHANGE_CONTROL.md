@@ -143,6 +143,31 @@ history.
    you know whether a join will be added later should be qualified with its
    table name from the start (`sales.deleted_at`), not left bare.
 
+6. **`$t('SomeKey') || 'Fallback text'` does not do what it looks like it
+   does.** When a translation key is missing, vue-i18n returns the KEY
+   ITSELF as a non-empty string (not null/empty) — so `||`'s right-hand
+   fallback never triggers, since the left side is already truthy. This
+   shipped across 5 files (PO list, PO form, GRN create form, Price
+   Variance Report) before a user report caught raw key text like
+   "PoStatusAutoNote" rendering on screen. The fix is either plain text
+   (no `t()` call) for any label without a confirmed existing translation
+   key, or querying the actual `translations` table before assuming a key
+   exists — never assume `||` will catch a missing key.
+
+7. **A Vite build never deletes stale output from a previous build** —
+   every `npm run build` adds new content-hashed files but leaves old
+   ones sitting in `public/js/chunks/`, `public/js/assets/`, and
+   top-level `public/js/app.*.js`/`.css` files behind. Across ~20 builds
+   in one project's history, this accumulated to 13,000+ orphaned files
+   and pushed a ~20MB build up to 267MB — invisible in normal use (the
+   manifest only ever points to the current files) but bloating every
+   delivery ZIP. Before packaging a delivery ZIP, diff `public/js`'s
+   actual file list against `public/js/.vite/manifest.json`'s referenced
+   files and delete anything not referenced — never assume the build
+   output directory is already clean. `public/js/` itself is gitignored,
+   so this never affects the git history, only local build output and
+   ZIP deliveries built from it.
+
 ## Frontend release modes
 
 Normal development should run the documented Vite build and deploy the complete
