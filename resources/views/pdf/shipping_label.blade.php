@@ -1,4 +1,4 @@
-<!--
+{{--
     Standalone Shipping Label PDF (Build L4, 2026-09-19). Restyled to match
     the "DELIVERY INFORMATION" shipping-label section embedded at the
     bottom of the Modern Sale Invoice (sale_pdf_modern.blade.php) — same
@@ -6,7 +6,14 @@
     COD vs PAID badge — so both feel like one consistent design language.
     Inputs ($sale, $company, $symbol) are unchanged from
     SalesController::Sale_Shipping_Label(); no controller change needed.
--->
+
+    This must stay a Blade comment block, not a raw HTML comment: a raw
+    HTML comment with non-ASCII characters ends up in the rendered output
+    ahead of the charset meta tag and throws off DomPDF's encoding
+    auto-detection, garbling later unicode characters (a real bug found
+    and fixed in the Packing List template during Build L5 — this file
+    had the same latent risk and is fixed here as a precaution).
+--}}
 <!DOCTYPE html>
 <html>
 <head>

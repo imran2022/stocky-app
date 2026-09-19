@@ -3157,11 +3157,14 @@ class SalesController extends BaseController
             $totalBoxes = rtrim(rtrim(number_format($totalBoxes, 2, '.', ''), '0'), '.');
         }
 
+        $settings = Setting::where('deleted_at', '=', null)->first();
+
         $html = view('pdf.packing_list', [
             'sale' => $sale,
             'details' => $details,
             'totalQty' => $totalQty,
             'totalBoxes' => $totalBoxes,
+            'setting' => $settings,
         ])->render();
 
         return PDF::loadHTML($html, 'UTF-8')->download("packing-list-{$sale_data->Ref}.pdf");

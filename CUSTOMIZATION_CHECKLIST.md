@@ -1631,3 +1631,37 @@ new design needs data the current templates don't already receive.
       customizer panels must be completely unaffected by this build.
 
 **Regression test:** `tests/Regression/build_l4_modern_invoice_fixes_and_shipping_label.php`.
+
+---
+
+## 21. Build L5 — Packing List restyled to match the Modern Sale Invoice
+
+**What it does:** The Packing List PDF (warehouse pick/pack sheet, no
+prices) now uses the same colors, header layout, and product-table style
+as the Modern Sale Invoice. Its Box column is now dynamic — only shows
+when box quantities are actually in use for that sale, same as the
+invoice.
+
+**Files touched:**
+- `resources/views/pdf/packing_list.blade.php`
+- `resources/views/pdf/shipping_label.blade.php` (comment-only encoding
+  fix, no visual change)
+- `app/Http/Controllers/SalesController.php`
+
+**How to verify:**
+- [ ] Download the Packing List for a sale that has box quantities set on
+      at least one line item — it must show a "Box" column with the
+      right value per line (and a dash for any line without one), and a
+      "Total Boxes" row at the bottom, styled like the Modern invoice.
+- [ ] Download the Packing List for a sale with **no** box quantities on
+      any line — the Box column and "Total Boxes" row must not appear at
+      all.
+- [ ] The header must show your company name (and logo, if you have one
+      set) — it had no company info before this build.
+- [ ] Text with an em-dash ("—") anywhere in the PDF (e.g. the footer
+      note, or a dashed-out Box cell) must render as an actual dash, not
+      garbled characters.
+- [ ] Print Shipping Label must still work exactly as it did after Build
+      L4 (only its documentation comment changed in this build).
+
+**Regression test:** `tests/Regression/build_l5_packing_list_modern_style.php`.

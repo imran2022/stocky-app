@@ -3097,3 +3097,47 @@ existing regression suite (L1-L3) re-run with no new failures.
 **Not covered:** the Colors/Typography/Layout & logo/Items table panels
 still don't apply to Modern — it remains self-styled by design, per the
 user's own request to use their design as-is.
+
+## Build L5 — Packing List restyled to match the Modern Sale Invoice (2026-09-19)
+
+**Why:** The user liked the Modern Sale Invoice's look and asked for the
+Packing List PDF (used by warehouse staff, no prices) to follow the same
+visual style.
+
+**What changed:**
+- `resources/views/pdf/packing_list.blade.php` — rebuilt using the Modern
+  invoice's color palette, header layout (company name/logo on the left,
+  big document title on the right), product-table styling, and uppercase
+  micro-labels. The Box column is now dynamic like the invoice's: it only
+  appears when at least one line item actually has a box quantity, and
+  honors the `enable_box_qty` company setting — previously it always
+  showed a "Box" column with a dash for every item, regardless of the
+  setting.
+- `app/Http/Controllers/SalesController.php` — `Sale_Packing_List()` now
+  also fetches and passes the company settings row (`setting`) to the
+  view, since the old design had no company header at all.
+- New: `tests/Regression/build_l5_packing_list_modern_style.php`.
+
+**A real bug found and fixed along the way:** the restyled template (and,
+on inspection, Build L4's `shipping_label.blade.php`) opened with a
+documentation comment written as a raw HTML `<!-- -->` comment containing
+em-dash characters. Unlike a Blade comment, a raw HTML comment is not
+stripped at compile time — it reaches the rendered HTML ahead of the
+`<meta charset="UTF-8">` tag, and DomPDF's encoding auto-detection got
+confused by those early non-ASCII bytes, garbling every em-dash further
+down the document (visible as `â??` in the rendered PDF). Fixed in both
+files by switching to a Blade comment block, which compiles away
+entirely. A second, related mistake was caught while fixing it: the
+replacement comment's own explanatory text initially spelled out the
+literal Blade comment delimiters as an example, which closed the comment
+block early and leaked the rest of the note into the rendered PDF —
+fixed by describing them in prose instead.
+
+**Verification:** real PDF render tests — a sale with a box quantity on
+one line item and not the other (Box column shows the right value/dash
+per line, company header shows, no leaked comment text or mis-encoded
+characters); a sale with no box quantities anywhere (Box column and
+"Total Boxes" row both absent entirely, not just dashed out). Re-rendered
+the Build L4 shipping label after the same comment fix to confirm it
+still renders correctly. Full existing regression suite (L1–L4) re-run
+with no new failures.
