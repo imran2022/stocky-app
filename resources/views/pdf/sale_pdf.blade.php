@@ -343,6 +343,12 @@
                         <td style="padding: 6px 10px; font-size: 8.5pt; font-weight: bold; color: #92400e; text-align: right; direction: rtl;">{{ __('pdf.net_balance') }}{!! $rtlLabelSuffix !!}</td>
                     </tr>
                     @endif
+                    @if(!empty($sale['due_date']) && !empty($pdfT['show_due_date']))
+                    <tr style="background: #fef3c7;">
+                        <td style="padding: 6px 10px; font-size: 9pt; font-weight: bold; color: {{ !empty($sale['is_overdue']) ? '#dc2626' : '#92400e' }}; text-align: left; direction: ltr;">{{ $sale['due_date'] }}@if(!empty($sale['is_overdue'])) ({{ __('pdf.overdue') }})@endif</td>
+                        <td style="padding: 6px 10px; font-size: 8.5pt; font-weight: bold; color: #92400e; text-align: right; direction: rtl;">{{ __('pdf.due_date') }}{!! $rtlLabelSuffix !!}</td>
+                    </tr>
+                    @endif
                     @else
                     {{-- English: label left, amount right --}}
                     <tr style="background: {{ $pdfT['table_striped'] ? '#f9fafb' : '#ffffff' }}; border-bottom: 1px solid #e5e7eb;">
@@ -395,6 +401,12 @@
                     <tr style="background: #fef3c7;">
                         <td style="padding: 6px 10px; font-size: 8.5pt; font-weight: bold; color: #92400e;">{{ __('pdf.net_balance') }}</td>
                         <td style="padding: 6px 10px; font-size: 9pt; font-weight: bold; color: #92400e; text-align: right;">{{$symbol}} {{formatPrice((float)$sale['previous_dues'] + (float)$sale['due'], $priceDecimals, $priceFormat)}}</td>
+                    </tr>
+                    @endif
+                    @if(!empty($sale['due_date']) && !empty($pdfT['show_due_date']))
+                    <tr style="background: #fef3c7;">
+                        <td style="padding: 6px 10px; font-size: 8.5pt; font-weight: bold; color: {{ !empty($sale['is_overdue']) ? '#dc2626' : '#92400e' }};">{{ __('pdf.due_date') }}</td>
+                        <td style="padding: 6px 10px; font-size: 9pt; font-weight: bold; color: {{ !empty($sale['is_overdue']) ? '#dc2626' : '#92400e' }}; text-align: right;">{{ $sale['due_date'] }}@if(!empty($sale['is_overdue'])) ({{ __('pdf.overdue') }})@endif</td>
                     </tr>
                     @endif
                     @endif

@@ -433,14 +433,21 @@ class SalesController extends BaseController
             $order->zone_id = $request->filled('zone_id') ? $request->zone_id : null;
             $order->courier_id = $request->filled('courier_id') ? $request->courier_id : null;
             // Payment Terms hierarchy: resolve and snapshot the term + due date
-            // used for THIS invoice — see app/Support/PaymentTerms.php.
-            $termDays = PaymentTerms::resolveDays(
-                $request->filled('payment_term_days') ? (int) $request->payment_term_days : null,
-                optional(Client::find($request->client_id))->payment_term_days,
-                Setting::where('deleted_at', '=', null)->value('default_payment_term_days')
-            );
-            $order->payment_term_days = $termDays;
-            $order->due_date = PaymentTerms::dueDate($order->date, $termDays);
+            // used for THIS invoice — see app/Support/PaymentTerms.php. Skipped
+            // entirely while the feature is switched off (Settings > Features).
+            $paymentTermsSetting = Setting::where('deleted_at', '=', null)->first();
+            if ($paymentTermsSetting->enable_payment_terms ?? true) {
+                $termDays = PaymentTerms::resolveDays(
+                    $request->filled('payment_term_days') ? (int) $request->payment_term_days : null,
+                    optional(Client::find($request->client_id))->payment_term_days,
+                    $paymentTermsSetting->default_payment_term_days ?? null
+                );
+                $order->payment_term_days = $termDays;
+                $order->due_date = PaymentTerms::dueDate($order->date, $termDays);
+            } else {
+                $order->payment_term_days = null;
+                $order->due_date = null;
+            }
             $order->save();
 
             // Sale created from a quotation: remember the link so the
@@ -1142,11 +1149,16 @@ class SalesController extends BaseController
                     $payment_statut = 'unpaid';
                 }
 
-                $paymentTermDays = PaymentTerms::resolveDays(
-                    $request->filled('payment_term_days') ? (int) $request->payment_term_days : null,
-                    optional(Client::find($request['client_id']))->payment_term_days,
-                    Setting::where('deleted_at', '=', null)->value('default_payment_term_days')
-                );
+                // Skipped entirely while the feature is switched off (Settings > Features).
+                $paymentTermsSetting = Setting::where('deleted_at', '=', null)->first();
+                $paymentTermsEnabled = $paymentTermsSetting->enable_payment_terms ?? true;
+                $paymentTermDays = $paymentTermsEnabled
+                    ? PaymentTerms::resolveDays(
+                        $request->filled('payment_term_days') ? (int) $request->payment_term_days : null,
+                        optional(Client::find($request['client_id']))->payment_term_days,
+                        $paymentTermsSetting->default_payment_term_days ?? null
+                    )
+                    : null;
 
                 $current_Sale->update([
                     'date' => $request['date'],
@@ -1191,7 +1203,7 @@ class SalesController extends BaseController
                     // due date; omitting the override just re-resolves against
                     // the (possibly now-different) customer/system default.
                     'payment_term_days' => $paymentTermDays,
-                    'due_date' => PaymentTerms::dueDate($request['date'], $paymentTermDays),
+                    'due_date' => $paymentTermsEnabled ? PaymentTerms::dueDate($request['date'], $paymentTermDays) : null,
                 ] + helpers::resolve_request_currency($request, $current_Sale->currency_id, $current_Sale->exchange_rate));
             }
 
@@ -1810,6 +1822,7 @@ class SalesController extends BaseController
             'sale' => $sale_details,
             'company' => $company,
             'enable_box_qty' => (bool) ($company->enable_box_qty ?? true),
+            'enable_payment_terms' => (bool) ($company->enable_payment_terms ?? true),
         ]);
 
     }
@@ -2841,6 +2854,10 @@ class SalesController extends BaseController
         $sale['payment_status'] = $sale_data->payment_statut;
         $sale['previous_dues'] = number_format(SaleDocumentMath::convert($this->clientPreviousDues($sale_data->client_id, $id), $rate), helpers::price_decimals(), '.', '');
         $sale['notes'] = $sale_data->notes ?? '';
+        // Payment Terms & Due Dates (Build M1) — null when the feature was
+        // off at save time, or for a sale created before this build shipped.
+        $sale['due_date'] = $sale_data->due_date;
+        $sale['is_overdue'] = PaymentTerms::isOverdue($sale_data->due_date, (float) $sale['due']);
 
         $payments = PaymentSale::where('sale_id', $id)->whereNotNull('notes')->get();
         $payment_notes_array = [];
@@ -3233,6 +3250,10 @@ class SalesController extends BaseController
         $sale['payment_status'] = $sale_data->payment_statut;
         $sale['previous_dues'] = number_format($this->clientPreviousDues($sale_data->client_id, $id) * $docCurrency['rate'], helpers::price_decimals(), '.', '');
         $sale['notes'] = $sale_data->notes ?? '';
+        // Payment Terms & Due Dates (Build M1) — null when the feature was
+        // off at save time, or for a sale created before this build shipped.
+        $sale['due_date'] = $sale_data->due_date;
+        $sale['is_overdue'] = PaymentTerms::isOverdue($sale_data->due_date, (float) $sale['due']);
 
         // Get payment notes from payment_sales table with Ref
         $payments = PaymentSale::where('sale_id', $id)->whereNotNull('notes')->get();
@@ -3390,6 +3411,10 @@ class SalesController extends BaseController
         $sale['payment_status'] = $sale_data->payment_statut;
         $sale['previous_dues'] = number_format($this->clientPreviousDues($sale_data->client_id, $id) * $docCurrency['rate'], helpers::price_decimals(), '.', '');
         $sale['notes'] = $sale_data->notes ?? '';
+        // Payment Terms & Due Dates (Build M1) — null when the feature was
+        // off at save time, or for a sale created before this build shipped.
+        $sale['due_date'] = $sale_data->due_date;
+        $sale['is_overdue'] = PaymentTerms::isOverdue($sale_data->due_date, (float) $sale['due']);
 
         // Get payment notes from payment_sales table with Ref
         $payments = PaymentSale::where('sale_id', $id)->whereNotNull('notes')->get();
@@ -3547,6 +3572,7 @@ class SalesController extends BaseController
             'payment_methods' => $payment_methods,
             'point_to_amount_rate' => $settings->point_to_amount_rate,
             'enable_box_qty' => (bool) ($settings->enable_box_qty ?? true),
+            'enable_payment_terms' => (bool) ($settings->enable_payment_terms ?? true),
             'zones' => SaleZone::whereNull('deleted_at')->orderBy('name')->get(['id', 'name']),
             'couriers' => SaleCourier::whereNull('deleted_at')->orderBy('name')->get(['id', 'name']),
             'enable_pos_salesperson_switch' => $salesperson_switch_enabled,
@@ -3821,6 +3847,7 @@ class SalesController extends BaseController
                 'discount_from_points' => $Sale_data->discount_from_points,
                 'point_to_amount_rate' => $settings->point_to_amount_rate,
                 'enable_box_qty' => (bool) ($settings->enable_box_qty ?? true),
+                'enable_payment_terms' => (bool) ($settings->enable_payment_terms ?? true),
                 'zones' => SaleZone::whereNull('deleted_at')->orderBy('name')->get(['id', 'name']),
                 'couriers' => SaleCourier::whereNull('deleted_at')->orderBy('name')->get(['id', 'name']),
                 'enable_pos_salesperson_switch' => $salesperson_switch_enabled,

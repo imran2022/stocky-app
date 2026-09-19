@@ -358,6 +358,18 @@
             </div>
             <div class="setting-row">
               <div>
+                <div class="setting-label">Enable Payment Terms &amp; Due Dates</div>
+                <div class="setting-help">
+                  Master switch for the Payment Term / Due Date feature below. Turn off to
+                  remove the Payment Term controls from the Customer form, the Sale form, the
+                  Sale Detail page, and the invoice PDF's due-date line — new and edited sales
+                  will stop getting a due date at all.
+                </div>
+              </div>
+              <a-switch v-model:checked="setting.enable_payment_terms" />
+            </div>
+            <div v-if="setting.enable_payment_terms" class="setting-row">
+              <div>
                 <div class="setting-label">Default Payment Term</div>
                 <div class="setting-help">
                   Days after a credit sale's date it's due (Invoice Date + Payment Term = Due
@@ -1250,11 +1262,20 @@ const paymentTermPreset = computed({
   },
   set(val) {
     if (val === 'custom') {
-      if (!paymentTermCustom.value) {
+      // If the currently-stored value happens to already BE one of the preset
+      // numbers (e.g. 0/7/15/30), reusing it here would make the getter
+      // immediately re-classify it as that preset instead of "custom" — the
+      // radio would silently snap back and the custom input would never
+      // appear. Fall back to a genuinely non-preset value in that case.
+      let candidate = paymentTermCustom.value;
+      if (candidate === null || candidate === undefined || PAYMENT_TERM_PRESETS.includes(Number(candidate))) {
         const current = Number(setting.value.default_payment_term_days);
-        paymentTermCustom.value = (!Number.isNaN(current) && current >= 0) ? current : 45;
+        candidate = (!Number.isNaN(current) && current >= 0 && !PAYMENT_TERM_PRESETS.includes(current))
+          ? current
+          : 45;
       }
-      setting.value.default_payment_term_days = paymentTermCustom.value;
+      paymentTermCustom.value = candidate;
+      setting.value.default_payment_term_days = candidate;
     } else {
       setting.value.default_payment_term_days = Number(val);
     }
@@ -1326,6 +1347,7 @@ async function save() {
   fd.append('enable_multi_pack_selling', s.enable_multi_pack_selling ? 1 : 0);
   fd.append('enable_box_qty', s.enable_box_qty ? 1 : 0);
   fd.append('default_payment_term_days', s.default_payment_term_days ?? 7);
+  fd.append('enable_payment_terms', s.enable_payment_terms === false ? 0 : 1);
   fd.append('enable_wholesale_pricing', s.enable_wholesale_pricing ? 1 : 0);
   fd.append('enable_multi_currency', s.enable_multi_currency ? 1 : 0);
   fd.append('enable_pos_salesperson_switch', s.enable_pos_salesperson_switch ? 1 : 0);

@@ -177,6 +177,8 @@ return [
     'customer_ledger' => 'Customer Ledger',
     'opening_balance' => 'Opening Balance',
     'net_balance' => 'Net Balance',
+    'due_date' => 'Due Date',
+    'overdue' => 'Overdue',
     'type' => 'Type',
     'amount' => 'Amount',
     'sales' => 'Sales',

@@ -3247,3 +3247,93 @@ backend already returns the data — this is pure frontend display, not
 started); surfacing due date on the Sale PDF templates or the Public
 Invoice page. Phases B (Real Admin Customer Ledger) and C (Invoice-wise
 Payment Allocation) from the original spec are proposed future work only.
+
+## Build M2/M3 — Payment Terms fixes, on/off toggle, Due Date display (2026-09-19)
+
+**Why:** After Build M1 shipped, the user reported that clicking "Custom"
+for the Default Payment Term on Settings > Features did nothing visible
+(the custom-days input never appeared) — confirmed working on the
+Customer form's own field. They also asked whether the whole Payment
+Terms feature could be switched on/off, and asked for a Due Date column
+on the Sales list (fine if hidden by default) and Sale Detail page, plus
+a show/hide toggle for Due Date on the invoice PDF, matching the existing
+"Previous Dues" toggle.
+
+**Bug fixed — the "Custom" preset silently snapping back:** all three
+"switch to Custom" handlers (`SystemSettings.vue`, `CustomerForm.vue`,
+`SaleForm.vue`) reused the CURRENTLY STORED value as the starting point
+for the custom-days input. When that value already happened to be one of
+the presets (0/7/15/30 — the common case, e.g. a fresh install's default
+of 7, or "Immediate" = 0), the getter immediately re-classified it back
+to that preset instead of "custom", so the radio silently snapped back
+and the custom input never rendered. `CustomerForm.vue`/`SaleForm.vue`
+avoided the worst case only by accident (`value || 45` treats `0` as
+falsy) but had the exact same latent bug for 7/15/30. Fixed in all three
+the same way: never reuse a value that IS one of the presets; fall back
+to 45 instead.
+
+**New: master on/off switch — `enable_payment_terms`** (Settings >
+Features, default ON since the feature already ships active). When OFF:
+`SalesController::store()`/`update()` skip Payment Terms resolution
+entirely (both `payment_term_days` and `due_date` stay `null` on the
+sale — never silently resolved in the background); the Payment Term
+controls disappear from the Customer form, the Sale form, and the Sale
+Detail page; the invoice PDF's Due Date line naturally has nothing to
+show.
+
+**New: Due Date on the Sales list** — a `defaultHidden: true` column
+(same mechanism already used for Currency/Return/Shipping Charge), so it
+exists in the column picker but stays off the list until the user turns
+it on. Shows an "Overdue" tag when applicable.
+
+**New: Due Date on the Sale Detail page** — a row next to Payment
+Status, with the same "Overdue" tag, gated on `enable_payment_terms`.
+
+**New: `show_due_date` PDF toggle** — added to `PdfTemplate::DEFAULTS`
+(default `true`) and the Invoice PDF customizer's Sections panel,
+mirroring `show_previous_dues` exactly. Wired into both the Classic
+(`sale_pdf.blade.php`, both RTL and LTR label layouts) and Modern
+(`sale_pdf_modern.blade.php`) invoice templates, and into the Public
+Invoice page/API — the Due Date line only prints when the sale actually
+has one (feature was on when it was saved) AND the toggle is on; an
+overdue invoice's due date prints in red with an "(Overdue)" suffix.
+Added `pdf.due_date`/`pdf.overdue` translation keys (en, ar).
+
+**Files touched:**
+- `resources/src/pages/settings/SystemSettings.vue` — Custom-preset fix;
+  new "Enable Payment Terms & Due Dates" switch; Default Payment Term row
+  now hides when the switch is off; submits `enable_payment_terms`.
+- `resources/src/pages/people/CustomerForm.vue` — Custom-preset fix;
+  fetches and gates on `enable_payment_terms`.
+- `resources/src/pages/sales/SaleForm.vue` — Custom-preset fix; Payment
+  Term controls + Due Date preview now gate on `enable_payment_terms`.
+- `resources/src/pages/sales/SaleDetails.vue` — new Due Date row.
+- `resources/src/pages/sales/Sales.vue` — new Due Date column
+  (`defaultHidden: true`).
+- `resources/src/pages/settings/InvoicePdfSettings.vue` — new
+  "Due Date line" toggle + preview row.
+- `resources/src/pages/public/PublicInvoice.vue` — Due Date row.
+- New: `database/migrations/2026_09_19_000002_add_enable_payment_terms_toggle.php`.
+- `app/Models/Setting.php`, `app/Models/PdfTemplate.php`.
+- `app/Http/Controllers/SettingsController.php`,
+  `app/Http/Controllers/SalesController.php`,
+  `app/Http/Controllers/PublicInvoiceController.php`.
+- `resources/views/pdf/sale_pdf.blade.php`,
+  `resources/views/pdf/sale_pdf_modern.blade.php`.
+- `resources/lang/en/pdf.php`, `resources/lang/ar/pdf.php`.
+- New: `tests/Regression/build_m2_payment_terms_fixes_and_due_date_display.cjs`,
+  `tests/Regression/build_m3_due_date_pdf_and_toggle_backend.php`.
+
+**Verification:** the Custom-preset fix was verified by extracting and
+directly EXECUTING the real shipped setter code from all three .vue
+files (not a re-implementation of the logic) for every starting preset
+(0/7/15/30), confirming none of them snap back anymore. The
+`enable_payment_terms` toggle and the Due Date PDF line were verified
+with a real, DB-backed test that renders the actual invoice HTML
+(`SalesController::Sale_PDF_Inline` — the same template the downloadable
+PDF uses) in a fresh PHP process per settings change (so `PdfTemplate`'s
+per-process settings cache reflects each change exactly the way a real
+new HTTP request would), confirming the Due Date + Overdue line appears,
+hides when the PDF toggle is off, and never appears at all for a sale
+that has no due date. Full existing regression suite (L1–L6, M1) re-run
+with no new failures.

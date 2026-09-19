@@ -237,8 +237,10 @@
               </a-col>
               <!-- Payment Terms hierarchy, Level 3 (invoice override). "default"
                    means no override: the resolved term falls back to the
-                   customer's own default, and finally the system default. -->
-              <a-col :xs="24" :md="8">
+                   customer's own default, and finally the system default.
+                   The whole block hides when the feature is switched off
+                   (Settings > Features > Enable Payment Terms & Due Dates). -->
+              <a-col v-if="enablePaymentTerms" :xs="24" :md="8">
                 <a-form-item label="Payment Term">
                   <a-select v-model:value="paymentTermPreset" style="width: 100%">
                     <a-select-option value="default">
@@ -254,12 +256,12 @@
                   </a-select>
                 </a-form-item>
               </a-col>
-              <a-col v-if="paymentTermPreset === 'custom'" :xs="24" :md="8">
+              <a-col v-if="enablePaymentTerms && paymentTermPreset === 'custom'" :xs="24" :md="8">
                 <a-form-item label="Custom term (days)">
                   <a-input-number v-model:value="sale.payment_term_days" style="width: 100%" :min="0" :max="3650" />
                 </a-form-item>
               </a-col>
-              <a-col :xs="24" :md="8">
+              <a-col v-if="enablePaymentTerms" :xs="24" :md="8">
                 <a-form-item label="Due Date">
                   <a-input :value="dueDatePreview" disabled style="width: 100%" />
                 </a-form-item>
@@ -675,7 +677,14 @@ const paymentTermPreset = computed({
     if (val === 'default') {
       sale.value.payment_term_days = null;
     } else if (val === 'custom') {
-      sale.value.payment_term_days = sale.value.payment_term_days || 45;
+      // Never reuse a value that IS one of the presets (0/7/15/30) — that
+      // would make the getter re-classify it as that preset instead of
+      // "custom", so the radio would snap back and the custom input
+      // wouldn't show. Also guards against 0 being falsy in `|| 45`.
+      const current = sale.value.payment_term_days;
+      sale.value.payment_term_days = (current !== null && current !== undefined && !PAYMENT_TERM_PRESETS.includes(Number(current)))
+        ? current
+        : 45;
     } else {
       sale.value.payment_term_days = Number(val);
     }
@@ -722,6 +731,7 @@ const pointsState = ref({ discount_from_points: 0, used_points: 0 });
 // is what an "Unconverted" click restores.
 const point_to_amount_rate = ref(0);
 const enableBoxQty = ref(true);
+const enablePaymentTerms = ref(true);
 const selectedClientPoints = ref(0);
 const initialClientPoints = ref(0);
 const points_to_convert = ref(0);
@@ -1511,6 +1521,7 @@ onMounted(async () => {
       paymentMethods.value = create.payment_methods || [];
       point_to_amount_rate.value = Number(create.point_to_amount_rate) || 0;
       enableBoxQty.value = create.enable_box_qty !== undefined ? !!create.enable_box_qty : true;
+      enablePaymentTerms.value = create.enable_payment_terms !== undefined ? !!create.enable_payment_terms : true;
       zoneOptions.value = (create.zones || []).map(z => ({ value: z.id, label: z.name }));
       courierOptions.value = (create.couriers || []).map(c => ({ value: c.id, label: c.name }));
 
@@ -1568,6 +1579,7 @@ onMounted(async () => {
       salespeople.value = data.salespeople || [];
       salesSwitchEnabled.value = data.enable_pos_salesperson_switch === true;
       enableBoxQty.value = data.enable_box_qty !== undefined ? !!data.enable_box_qty : true;
+      enablePaymentTerms.value = data.enable_payment_terms !== undefined ? !!data.enable_payment_terms : true;
       zoneOptions.value = (data.zones || []).map(z => ({ value: z.id, label: z.name }));
       courierOptions.value = (data.couriers || []).map(c => ({ value: c.id, label: c.name }));
       const s = data.sale || {};
@@ -1634,6 +1646,7 @@ onMounted(async () => {
       paymentMethods.value = data.payment_methods || [];
       point_to_amount_rate.value = Number(data.point_to_amount_rate) || 0;
       enableBoxQty.value = data.enable_box_qty !== undefined ? !!data.enable_box_qty : true;
+      enablePaymentTerms.value = data.enable_payment_terms !== undefined ? !!data.enable_payment_terms : true;
       zoneOptions.value = (data.zones || []).map(z => ({ value: z.id, label: z.name }));
       courierOptions.value = (data.couriers || []).map(c => ({ value: c.id, label: c.name }));
       // Status defaults to pending (unpaid): no payment line until the user

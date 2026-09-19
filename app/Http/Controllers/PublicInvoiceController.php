@@ -88,6 +88,7 @@ class PublicInvoiceController extends BaseController
         $sale = $this->findByToken($token, ['details.product.unitSale', 'client']);
         $setting = Setting::where('deleted_at', null)->first();
         $enableBoxQty = (bool) ($setting->enable_box_qty ?? true);
+        $enablePaymentTerms = (bool) ($setting->enable_payment_terms ?? true);
 
         $subtotal = $sale->details->sum('total');
 
@@ -184,6 +185,10 @@ class PublicInvoiceController extends BaseController
                 'net_balance' => (float) $previousDues + $due,
                 'show_previous_dues' => (bool) $pdfSettings['show_previous_dues'],
                 'show_net_balance' => (bool) $pdfSettings['show_net_balance'],
+                // Payment Terms & Due Dates (Build M1).
+                'due_date' => $enablePaymentTerms ? $sale->due_date : null,
+                'is_overdue' => $enablePaymentTerms ? \App\Support\PaymentTerms::isOverdue($sale->due_date, $due) : false,
+                'show_due_date' => (bool) ($pdfSettings['show_due_date'] ?? true),
             ],
             'pdf_url' => $this->publicPdfUrl($token),
         ]);

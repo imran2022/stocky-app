@@ -110,6 +110,13 @@
         <template v-else-if="column.key === 'return_amount'">
           <span :style="{ color: Number(record.return_amount) > 0 ? '#faad14' : undefined }">{{ money(record.return_amount) }}</span>
         </template>
+        <template v-else-if="column.key === 'due_date'">
+          <span v-if="record.due_date">
+            {{ record.due_date }}
+            <a-tag v-if="record.is_overdue" color="red" style="margin-left: 4px">Overdue</a-tag>
+          </span>
+          <span v-else>—</span>
+        </template>
         <template v-else-if="column.key === 'shipping'">{{ money(record.shipping) }}</template>
         <template v-else-if="column.key === 'payment_status'">
           <a-tag :color="payStatusColor(record.payment_status)">
@@ -557,6 +564,9 @@ const columns = computed(() => [
   { title: t('Total'), dataIndex: 'GrandTotal', key: 'GrandTotal', sorter: true, align: 'right', exportValue: r => money(r.GrandTotal) },
   { title: t('Paid'), dataIndex: 'paid_amount', key: 'paid_amount', sorter: true, align: 'right', exportValue: r => money(r.paid_amount) },
   { title: t('Due'), dataIndex: 'due', key: 'due', align: 'right', exportValue: r => money(r.due) },
+  // Payment Terms & Due Dates (Build M1) — off the list by default; the
+  // column picker turns it on. Cell rendering flags overdue sales in red.
+  { title: 'Due Date', dataIndex: 'due_date', key: 'due_date', align: 'center', defaultHidden: true, exportValue: r => r.due_date || '' },
   { title: 'Return', dataIndex: 'return_amount', key: 'return_amount', align: 'right', defaultHidden: true, exportValue: r => money(r.return_amount) },
   { title: t('PaymentStatus'), dataIndex: 'payment_status', key: 'payment_status', exportValue: r => r.payment_status },
   { title: t('Shipping_status'), dataIndex: 'shipping_status', key: 'shipping_status', exportValue: r => r.shipping_status || '' },

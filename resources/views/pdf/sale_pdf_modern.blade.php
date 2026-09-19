@@ -382,6 +382,12 @@
                             <td style="font-weight: bold; text-align: right; color: #92400e;">{{$symbol}} {{formatPrice((float)$sale['previous_dues'] + (float)$sale['due'], 2, $priceFormat)}}</td>
                         </tr>
                         @endif
+                        @if(!empty($sale['due_date']) && !empty($pdfT['show_due_date']))
+                        <tr style="background: #fffbeb;">
+                            <td style="font-size: 8.5pt; color: {{ !empty($sale['is_overdue']) ? '#dc2626' : '#92400e' }};">Due Date</td>
+                            <td style="font-weight: bold; text-align: right; color: {{ !empty($sale['is_overdue']) ? '#dc2626' : '#92400e' }};">{{ $sale['due_date'] }}@if(!empty($sale['is_overdue'])) (Overdue)@endif</td>
+                        </tr>
+                        @endif
                     </table>
                 </div>
             </td>

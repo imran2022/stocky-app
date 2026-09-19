@@ -1741,3 +1741,55 @@ stability, overdue detection, Settings/Client/Sale field wiring).
 Detail pages (backend-ready, frontend not started); due date on PDF
 templates / Public Invoice. Phases B and C of the original spec remain
 proposed future work only, pending the user's go-ahead.
+
+## 24. Build M2/M3 — Payment Terms fixes, on/off toggle, Due Date display
+
+**What it does:** Fixes the "Custom" Payment Term option silently
+snapping back on Settings > Features; adds a master on/off switch for
+the whole Payment Terms & Due Dates feature; adds a Due Date column to
+the Sales list (off by default — turn on via the column picker), a Due
+Date row on the Sale Detail page, and a "Due Date line" toggle on the
+Invoice PDF customizer (mirrors "Previous Dues").
+
+**Files touched:**
+- `resources/src/pages/settings/SystemSettings.vue`
+- `resources/src/pages/people/CustomerForm.vue`
+- `resources/src/pages/sales/SaleForm.vue`
+- `resources/src/pages/sales/SaleDetails.vue`
+- `resources/src/pages/sales/Sales.vue`
+- `resources/src/pages/settings/InvoicePdfSettings.vue`
+- `resources/src/pages/public/PublicInvoice.vue`
+- `database/migrations/2026_09_19_000002_add_enable_payment_terms_toggle.php`
+- `app/Models/Setting.php`, `app/Models/PdfTemplate.php`
+- `app/Http/Controllers/SettingsController.php`,
+  `SalesController.php`, `PublicInvoiceController.php`
+- `resources/views/pdf/sale_pdf.blade.php`,
+  `resources/views/pdf/sale_pdf_modern.blade.php`
+- `resources/lang/en/pdf.php`, `resources/lang/ar/pdf.php`
+
+**How to verify:**
+- [ ] Settings > Features: click "Custom" next to Default Payment Term
+      while it's currently set to Immediate/7/15/30 Days — a "days" input
+      must appear immediately and stay selected on Custom (it must NOT
+      snap back to the previous preset).
+- [ ] Same check on a Customer's own Payment Term field, and on a Sale's
+      Payment Term field when creating/editing a sale.
+- [ ] Turn off "Enable Payment Terms & Due Dates" — the Payment Term
+      controls disappear from the Customer form, the Sale form, and the
+      Sale Detail page. Create a sale while it's off — it should get no
+      due date at all. Turn it back on — new sales resolve a due date
+      again as before.
+- [ ] Sales list: open the column picker — "Due Date" should be listed
+      but unchecked by default; check it and confirm the column appears
+      (with a red "Overdue" tag on an overdue sale).
+- [ ] Sale Detail page: a sale with a due date shows a "Due Date" row
+      (with the "Overdue" tag when applicable).
+- [ ] Settings > Invoice PDF customizer (Sale tab) > Sections: a new
+      "Due Date line" toggle exists; turning it off removes the Due Date
+      line from a downloaded/printed invoice; turning it back on restores
+      it. An overdue invoice's due date prints in red with "(Overdue)".
+
+**Regression tests:**
+`tests/Regression/build_m2_payment_terms_fixes_and_due_date_display.cjs`
+(run with `node`) and
+`tests/Regression/build_m3_due_date_pdf_and_toggle_backend.php`.

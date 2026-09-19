@@ -85,7 +85,7 @@
               <a-switch v-model:checked="form.is_royalty_eligible" />
             </a-form-item>
           </a-col>
-          <a-col :xs="24" :md="12">
+          <a-col v-if="enablePaymentTerms" :xs="24" :md="12">
             <a-form-item label="Payment Term">
               <a-select v-model:value="paymentTermPreset" style="width: 100%">
                 <a-select-option value="default">Use system default</a-select-option>
@@ -97,7 +97,7 @@
               </a-select>
             </a-form-item>
           </a-col>
-          <a-col :xs="24" :md="12" v-if="paymentTermPreset === 'custom'">
+          <a-col :xs="24" :md="12" v-if="enablePaymentTerms && paymentTermPreset === 'custom'">
             <a-form-item label="Custom term (days)">
               <a-input-number v-model:value="form.payment_term_days" style="width: 100%" :min="0" :max="3650" />
             </a-form-item>
@@ -159,7 +159,14 @@ const paymentTermPreset = computed({
     if (val === 'default') {
       form.value.payment_term_days = null;
     } else if (val === 'custom') {
-      form.value.payment_term_days = form.value.payment_term_days || 45;
+      // Never reuse a value that IS one of the presets (0/7/15/30) — that
+      // would make the getter re-classify it as that preset instead of
+      // "custom", so the radio would snap back and the custom input
+      // wouldn't show. Also guards against 0 being falsy in `|| 45`.
+      const current = form.value.payment_term_days;
+      form.value.payment_term_days = (current !== null && current !== undefined && !PAYMENT_TERM_PRESETS.includes(Number(current)))
+        ? current
+        : 45;
     } else {
       form.value.payment_term_days = Number(val);
     }
@@ -222,6 +229,16 @@ async function submit() {
   }
 }
 
+// Master on/off switch for the Payment Terms feature (Settings > Features).
+// Default true so the control still shows while this loads.
+const enablePaymentTerms = ref(true);
+async function loadPaymentTermsToggle() {
+  try {
+    const data = await http.get('get_Settings_data_api');
+    enablePaymentTerms.value = data?.settings?.enable_payment_terms !== false;
+  } catch (e) { /* default stays on */ }
+}
+
 async function loadRecord() {
   loadingRecord.value = true;
   try {
@@ -242,6 +259,7 @@ async function loadRecord() {
 }
 
 onMounted(() => {
+  loadPaymentTermsToggle();
   if (isEdit.value) loadRecord();
 });
 </script>

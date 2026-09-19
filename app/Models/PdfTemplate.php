@@ -46,6 +46,11 @@ class PdfTemplate extends Model
         // to carry on every doc type's settings row for schema simplicity.
         'show_previous_dues' => true,
         'show_net_balance' => true,
+        // Sale-only: this invoice's own Due Date (Payment Terms & Due Dates,
+        // Build M1). No effect when the feature is off in Settings, or on
+        // quotation/purchase PDFs — harmless to carry on every doc type's
+        // settings row for schema simplicity, same as the two rows above.
+        'show_due_date' => true,
         // Text overrides ('' = keep the translated default)
         'labels' => [
             'title' => '',

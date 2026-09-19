@@ -199,6 +199,9 @@
                   <tr v-if="docType === 'sale' && form.show_net_balance" style="background: #fef3c7; color: #92400e; font-weight: bold">
                     <td>Net Balance</td><td>540.00</td>
                   </tr>
+                  <tr v-if="docType === 'sale' && form.show_due_date" style="background: #fef3c7; color: #92400e; font-weight: bold">
+                    <td>Due Date</td><td>2026-09-26</td>
+                  </tr>
                 </table>
               </div>
 
@@ -288,6 +291,7 @@ const sectionFields = computed(() => [
   ...(docType.value === 'sale' ? [
     { key: 'show_previous_dues', label: 'Previous Dues line', desc: 'The client’s outstanding balance before this sale. Printed only when it is greater than zero.' },
     { key: 'show_net_balance', label: 'Net Balance line', desc: 'Previous dues plus what is still due on this sale. Printed only when previous dues are greater than zero.' },
+    { key: 'show_due_date', label: 'Due Date line', desc: 'This invoice’s own Payment Term due date. Printed only when Payment Terms & Due Dates is enabled in Settings and the sale has one.' },
   ] : []),
 ]);
 

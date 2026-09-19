@@ -41,6 +41,8 @@ class Setting extends Model
         'enable_box_qty',
         // Custom: Payment Terms hierarchy, Level 1 (System Default) — see app/Support/PaymentTerms.php
         'default_payment_term_days',
+        // Custom: master on/off switch for the whole Payment Terms & Due Dates feature
+        'enable_payment_terms',
     ];
 
     protected $casts = [
@@ -76,6 +78,7 @@ class Setting extends Model
         'enable_pos_salesperson_switch' => 'boolean',
         'enable_multi_currency' => 'boolean',
         'default_payment_term_days' => 'integer',
+        'enable_payment_terms' => 'boolean',
         'session_timeout_minutes' => 'integer',
         'allow_overselling' => 'boolean',
         'vehicle_fitment_enabled' => 'boolean',

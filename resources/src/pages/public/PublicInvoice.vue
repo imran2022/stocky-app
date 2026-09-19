@@ -98,6 +98,10 @@
           <div class="totals-row totals-due"><span>Balance due</span><span>{{ formatMoney(data.totals.due) }}</span></div>
           <div class="totals-row" v-if="data.totals.previous_dues && data.totals.show_previous_dues !== false"><span>Previous Dues</span><span>{{ formatMoney(data.totals.previous_dues) }}</span></div>
           <div class="totals-row totals-net" v-if="data.totals.previous_dues && data.totals.show_net_balance !== false"><span>Net Balance</span><span>{{ formatMoney(data.totals.net_balance) }}</span></div>
+          <div class="totals-row totals-net" v-if="data.totals.due_date && data.totals.show_due_date !== false">
+            <span>Due Date</span>
+            <span>{{ data.totals.due_date }}<span v-if="data.totals.is_overdue" style="color: #ef4444; font-weight: bold"> (Overdue)</span></span>
+          </div>
         </div>
       </section>
 

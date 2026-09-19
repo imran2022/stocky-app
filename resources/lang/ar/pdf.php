@@ -177,6 +177,8 @@ return [
     'customer_ledger' => 'سجل العميل',
     'opening_balance' => 'الرصيد الافتتاحي',
     'net_balance' => 'صافي الرصيد',
+    'due_date' => 'تاريخ الاستحقاق',
+    'overdue' => 'متأخر',
     'type' => 'النوع',
     'amount' => 'المبلغ',
     'sales' => 'المبيعات',

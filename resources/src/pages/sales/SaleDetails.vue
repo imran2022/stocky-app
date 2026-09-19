@@ -103,6 +103,13 @@
                 </a-tag>
               </span>
             </div>
+            <div v-if="enablePaymentTerms && sale.due_date" class="inv-meta-row">
+              <span class="im-label">Due Date</span>
+              <span class="im-value">
+                {{ sale.due_date }}
+                <a-tag v-if="sale.is_overdue" color="red" style="margin-left: 6px">Overdue</a-tag>
+              </span>
+            </div>
             <div v-if="sale.warehouse" class="inv-meta-row"><span class="im-label">{{ $t('warehouse') }}</span><span class="im-value">{{ sale.warehouse }}</span></div>
             <div v-if="sale.tracking_ref" class="inv-meta-row"><span class="im-label">Tracking Ref</span><span class="im-value">{{ sale.tracking_ref }}</span></div>
             <div v-if="sale.consignment_id" class="inv-meta-row"><span class="im-label">Consignment ID</span><span class="im-value">{{ sale.consignment_id }}</span></div>
@@ -248,6 +255,7 @@ const { docMoney, currencyOptions, currencySelectId, showCurrencySelect } = useD
 const details = ref([]);
 const company = ref({});
 const enableBoxQty = ref(true);
+const enablePaymentTerms = ref(true);
 const sendingEmail = ref(false);
 const sendingSms = ref(false);
 const downloadingPdf = ref(false);
@@ -455,6 +463,7 @@ onMounted(async () => {
     details.value = data.details || [];
     company.value = data.company || {};
     enableBoxQty.value = data.enable_box_qty !== undefined ? !!data.enable_box_qty : true;
+    enablePaymentTerms.value = data.enable_payment_terms !== undefined ? !!data.enable_payment_terms : true;
   } catch (e) {
     message.error(t('InvalidData'));
     router.push('/sales');
