@@ -1665,3 +1665,26 @@ invoice.
       L4 (only its documentation comment changed in this build).
 
 **Regression test:** `tests/Regression/build_l5_packing_list_modern_style.php`.
+
+---
+
+## 22. Build L6 — Packing List: page-margin fix + full header parity
+
+**What it does:** Fixes the Packing List PDF looking cut off at the page
+edges (reported after Build L5) and adds the missing company phone/email
+line to its header, so it now matches the Modern invoice's header
+exactly.
+
+**Files touched:**
+- `resources/views/pdf/packing_list.blade.php`
+
+**How to verify:**
+- [ ] Download the Packing List for any sale — the content must have a
+      clear margin on all sides (nothing flush against the page edges),
+      matching how the Sale Invoice PDF looks.
+- [ ] The header must show three lines on the left: Company Name,
+      Address, and Phone | Email — same as the Sale Invoice PDF's header.
+- [ ] For a sale with no box quantities, the Code/SKU values should not
+      wrap awkwardly onto two lines.
+
+**Regression test:** `tests/Regression/build_l6_packing_list_margin_fix.php`.

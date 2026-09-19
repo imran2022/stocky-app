@@ -20,7 +20,15 @@
 <head>
 <meta charset="UTF-8">
 <style>
-    @page { margin: 0.4in; }
+    {{-- Same technique the Modern Sale Invoice uses for a PDF download:
+         @page margin at 0 and the visual margin done with body padding
+         instead. This is the pairing that's already proven reliable in
+         this app's PDF pipeline for downloads (Sale_Packing_List always
+         downloads, so it always uses this branch) — using a plain @page
+         margin on its own, as an earlier version of this file did, is
+         what produced the content sitting flush against the page edges
+         that was reported after Build L5. --}}
+    @page { margin: 0; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
         font-family: 'DejaVu Sans', sans-serif;
@@ -28,6 +36,7 @@
         color: #334155;
         line-height: 1.25;
         background-color: #ffffff;
+        padding: 25px 25px 35px 25px;
     }
     table { width: 100%; border-collapse: collapse; table-layout: fixed; }
     .label { font-size: 7.5pt; font-weight: bold; color: #94a3b8; text-transform: uppercase; margin-bottom: 1px; display: block; }
@@ -48,7 +57,8 @@
 
 @php
     $hasBoxQty = $totalBoxes !== null && (bool) ($setting['enable_box_qty'] ?? true);
-    $descWidth = $hasBoxQty ? 55 : 70;
+    $descWidth = $hasBoxQty ? 55 : 66;
+    $codeWidth = $hasBoxQty ? 12 : 16;
 
     $logoSrc = null;
     if (!empty($setting['logo'])) {
@@ -70,6 +80,7 @@
                     <td style="vertical-align: top; padding-left: 12px;">
                         <div style="font-size: 11pt; font-weight: bold; color: #0f172a;">{{ $setting['CompanyName'] ?? '' }}</div>
                         <div style="font-size: 8pt; color: #64748b;">{{ $setting['CompanyAdress'] ?? '' }}</div>
+                        <div style="font-size: 8pt; color: #64748b;">{{ $setting['CompanyPhone'] ?? '' }}{{ !empty($setting['CompanyPhone']) && !empty($setting['email']) ? ' | ' : '' }}{{ $setting['email'] ?? '' }}</div>
                     </td>
                 </tr>
             </table>
@@ -101,9 +112,9 @@
         <tr>
             <th style="width: 6%; text-align: center;">#</th>
             <th style="width: {{ $descWidth }}%;">Product</th>
-            <th style="width: 12%;">Code / SKU</th>
+            <th style="width: {{ $codeWidth }}%;">Code / SKU</th>
             @if($hasBoxQty) <th style="width: 8%; text-align: center;">Box</th> @endif
-            <th style="width: {{ $hasBoxQty ? 12 : 12 }}%; text-align: center;">Qty</th>
+            <th style="width: 12%; text-align: center;">Qty</th>
         </tr>
     </thead>
     <tbody>

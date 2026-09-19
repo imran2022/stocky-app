@@ -3141,3 +3141,32 @@ characters); a sale with no box quantities anywhere (Box column and
 the Build L4 shipping label after the same comment fix to confirm it
 still renders correctly. Full existing regression suite (L1–L4) re-run
 with no new failures.
+
+## Build L6 — Packing List: page-margin fix + full header parity (2026-09-19)
+
+**Why:** After Build L5 shipped, the user reported the Packing List
+looked cut off at the page edges, and that the header was missing the
+company phone/email line their invoice shows.
+
+**What changed:**
+- `resources/views/pdf/packing_list.blade.php`:
+  - **Root cause fixed:** the file used a plain `@page { margin: 0.4in; }`
+    rule for its page margins. The Modern invoice instead sets
+    `@page { margin: 0; }` for a PDF download and does the visual margin
+    with body padding instead — the pairing this app's actual PDF
+    download pipeline is already proven reliable with. Packing List
+    always downloads, so it now unconditionally uses that exact same
+    pairing rather than a different approach that turned out to render
+    content flush against the page edges in production.
+  - Added the company **Phone | Email** line to the header, so it now
+    shows the same three lines the invoice does (Name, Address,
+    Phone | Email) — previously only Name + Address were shown.
+  - The Code/SKU column now widens when the Box column is hidden, so
+    product codes don't wrap onto two lines unnecessarily.
+- New: `tests/Regression/build_l6_packing_list_margin_fix.php`.
+
+**Verification:** real PDF renders converted to PNG (`pdftoppm`) and
+visually compared side-by-side against a Modern invoice PDF rendered from
+the same sale — margins, header layout and typography now match. Checked
+both a sale with box quantities and one without. Full existing
+regression suite (L1–L5) re-run with no new failures.
