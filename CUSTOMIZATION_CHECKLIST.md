@@ -2037,3 +2037,40 @@ float→decimal columns, npm dependency upgrades.
 php vendor/bin/phpunit tests/Unit/ProductDisplayNameTest.php
 php tests/Regression/build_n1_product_variant_display_name.php
 ```
+
+---
+
+## Build N2 — High-Severity Findings (Overpayment, Stock Locking, Ref Uniqueness, PO Decimals)
+
+**How to verify:**
+- [ ] In POS/Sale checkout, tender MORE cash than the total (e.g. total
+      1044.06, pay with 1245.06) — the sale should show change 201.00 as
+      before, but "Paid" on the sale should read exactly the total
+      (1044.06), never the full tendered amount.
+- [ ] Same check on a Purchase payment (Payment Purchases → record a
+      payment larger than the outstanding due) — paid amount is capped at
+      the purchase's own total.
+- [ ] Create a Purchase (GRN), Adjustment, or Damage for a product in a
+      warehouse it has never been stocked in before — it should complete
+      AND a stock row should be created with the correct quantity, not
+      silently do nothing (previously: silently did nothing outside the
+      Sales module).
+- [ ] Create/approve a Transfer for a product that has both a plain
+      (non-variant) stock row and a separate variant-specific stock row in
+      the destination warehouse — the plain transfer must affect the
+      PLAIN row, never the variant row.
+- [ ] Add a new Purchase Order line with a fractional cost/quantity (e.g.
+      10.10, 1.125) and reload it — the value must come back exactly as
+      entered, no rounding drift.
+- [ ] Two sales/purchases can no longer end up with the identical
+      reference number, even under back-to-back rapid creation.
+
+**Regression test:**
+`tests/Regression/build_n2_high_severity_fixes.php`.
+
+**Not covered by this build (see CUSTOMIZATIONS.md "Known gaps"):**
+attachment access control (H-03), release-artifact hygiene (H-04),
+regression-suite exit-code masking (H-05), npm dependency upgrades
+(H-08), soft-delete audit trail depth (H-09), and the same stock-locking
+pattern in PurchasesReturnController/SalesReturnController (found during
+this build but outside its stated scope).

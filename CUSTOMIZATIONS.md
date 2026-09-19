@@ -4084,3 +4084,153 @@ overlay manifest. New tests:
 **Database/frontend impact:** no migration, no stored-name rewrite, and no
 frontend component change. Production assets were rebuilt as a regression
 check because this is delivered with the complete customized application.
+
+---
+
+## Build N2 — High-Severity Findings from the Same Third-Party Audit (2026-09-20)
+
+**Why:** Build N1a fixed the audit's 5 Critical findings, scoped to the
+Sales module only, and explicitly documented the High-severity findings
+and the Purchases/Transfer/Adjustment/Damage versions of C-01/C-02 as
+follow-up work ("Build N2"). This build does that follow-up. Each finding
+below was independently re-verified against the actual (post-N1a/N1b)
+codebase via a dedicated verification pass before any fix was written —
+all four were confirmed real.
+
+### H-01 — Overpayment/change accounting inflated paid_amount past GrandTotal
+
+**The problem:** Neither Sale nor Purchase payment creation capped the
+amount applied to `paid_amount` at the document's own `GrandTotal`. A
+customer/supplier tendering more than due — completely normal in retail,
+e.g. handing over a larger note and getting change back — had the FULL
+tendered amount added to `paid_amount`; `change` was recorded on the
+payment row but never subtracted. The audit's own reproduction: a
+1,044.06 sale tendered 1,245.06 with 201.00 change recorded ended up with
+`paid_amount = 1,245.06` — 201.00 more than the invoice was ever worth.
+Same shape on Purchases.
+
+**The fix:** `app/Support/PaymentCapper.php` — `capPaid($grandTotal,
+$rawPaidAmount)` returns `max(0, min($grandTotal, $rawPaidAmount))`.
+Deliberately minimal: it does not change what a payment *means*, does not
+touch `change` (still recorded exactly as before), and does not touch
+account/cash-drawer balance logic (a separate concern from what the
+document's own `paid_amount` is allowed to say). Wired into:
+- `SalesController`'s inline payment-on-checkout block.
+- `PaymentSalesController::store()/update()/destroy()`.
+- `PaymentPurchasesController::store()/update()/destroy()`.
+
+Also fixed in passing: `PaymentPurchasesController::getNumberOrder()`
+crashed (`Undefined array key 1`) on any legacy/malformed `Ref` with no
+`_` separator — now falls back to the default prefix, matching the
+tolerant pattern already used by Sales/Purchases/Adjustment's own
+`getNumberOrder()`.
+
+### C-02/H-02 (extension) — stock lock-or-create beyond Sales
+
+**The problem:** Build N1a fixed the "`product_warehouse` row silently
+never created, so a stock mutation silently no-ops" bug (C-02) and added
+row-locking against concurrent double-updates (part of H-02) — but only
+in `SalesController`. The identical pattern was confirmed still present,
+unfixed, in `PurchasesController` (8 call sites), `AdjustmentController`
+(the add/subtract × single/combo × store/update/destroy matrix — 4
+call-site *groups*, dozens of literal occurrences), and
+`DamageController` (4 call-site groups). `TransferController` had its own
+partial fix (`resolveProductWarehouseRow()`, from an earlier build) that
+already auto-created a missing row, but never row-locked it (the H-02
+half was still open) — and had a separate latent bug: when called with a
+NULL `product_variant_id` it did not filter with
+`whereNull('product_variant_id')`, so on a product that also has
+variant-specific stock rows it could return the WRONG row.
+
+**The fix:** all four controllers now go through
+`app/Support/StockMutator::lockOrCreate()` — the same hardened helper
+Sales already used — instead of their own copy-pasted
+`->first()`+`if($product_warehouse)` blocks:
+- `PurchasesController` — all 8 stock-mutation sites (store ×2 flows,
+  update reverse/apply, destroy ×2 reversal paths) replaced directly.
+- `AdjustmentController`/`DamageController` — the repeated add/subtract ×
+  single/combo blocks were extracted into a small private
+  `applyStockDelta()` helper (delegating to `StockMutator`) to both fix
+  the bug and remove ~500 lines of copy-pasted logic; `DamageController`'s
+  helper preserves its existing "never go below zero" floor via a
+  `$clampFloor` flag. This also fixed a latent bug in
+  `AdjustmentController::update()`'s "apply new lines" block, which
+  checked the stale leftover `$value['product_variant_id']` from an
+  earlier, already-finished loop instead of the actual row being
+  processed (`$product_detail['product_variant_id']`) — a variant-typed
+  line being edited could silently fall into the wrong branch.
+- `TransferController::resolveProductWarehouseRow()` now delegates to
+  `StockMutator::lockOrCreate()` directly (same method signature, so
+  every one of its 36 existing call sites is unaffected) — gaining both
+  the row lock and the NULL-variant filtering fix.
+
+### H-06 — `sales.Ref`/`purchases.Ref` had no database-level uniqueness
+
+**The problem:** Both `SalesController::getNumberOrder()` and
+`PurchasesController::getNumberOrder()` generated the "next" reference
+number purely at the application level (read the last Ref, increment) —
+with no DB constraint and no locking read. Two near-simultaneous requests
+could both compute and save the same Ref.
+
+**The fix:** migration
+`2026_09_20_000001_add_unique_ref_to_sales_and_purchases` adds a real
+unique index on `sales.Ref` and `purchases.Ref` — deliberately a *plain*
+unique index, not composite with `deleted_at` (unlike the earlier
+`payment_sales` fix): both `getNumberOrder()` methods already compute
+"last Ref" from every row regardless of `deleted_at`, so this app's own
+numbering logic never intended to reuse a deleted document's Ref, and a
+composite index would reopen the exact gap the audit itself pointed out
+for `payment_sales` (MySQL allows unlimited NULLs in a unique index, and
+`deleted_at` is NULL for every active row). `app/Support/UniqueRefGenerator.php`
+wraps the generate+save step: on a unique-constraint collision it
+regenerates a fresh Ref and retries (up to 5 attempts) instead of ever
+surfacing the collision to the user. Wired into `SalesController::store()`
+(both flows) and `PurchasesController::store()` (both flows).
+
+### H-07 — Purchase Order columns used FLOAT for money/quantity
+
+**The problem:** `purchase_orders`/`purchase_order_details` (created
+2026-09-13) used `FLOAT` for `tax_rate`, `TaxNet`, `discount`, `shipping`,
+`GrandTotal`, `cost`, `quantity`, `received_quantity`, `total` — the exact
+problem the sibling `purchases`/`purchase_details` tables had already been
+fixed for, 7 months earlier
+(`2026_02_11_000002_convert_purchases_and_purchase_details_float_to_decimal`).
+Binary floating point cannot exactly represent most decimal currency
+values, so repeated arithmetic can silently drift by fractions of a cent.
+
+**The fix:** migration
+`2026_09_20_000002_convert_purchase_orders_float_to_decimal` applies the
+identical `DECIMAL(15,2)`/`DECIMAL(12,3)` precision already used on
+`purchases`/`purchase_details`, so a PO's totals and a GRN's totals for
+the same items are computed with identical precision.
+
+**Verification:** `tests/Regression/build_n2_high_severity_fixes.php` —
+real, DB-backed: (a) confirms the DB itself now rejects a duplicate
+`sales.Ref` insert, and that `UniqueRefGenerator::save()` retries past a
+collision rather than raising it (H-06); (b) confirms
+`purchase_orders`/`purchase_order_details` columns are DECIMAL and that a
+fractional PO detail cost/quantity round-trips exactly through save/reload
+(H-07); (c) submits the audit's exact overpayment numbers through the
+real `PaymentSalesController`/`PaymentPurchasesController` and confirms
+`paid_amount` is capped at `GrandTotal`, never above it (H-01); (d)
+creates a fresh warehouse with zero stock rows and confirms
+Purchases/Adjustment(add+subtract)/Damage(floor-at-zero)/Transfer all
+create-or-lock the stock row correctly instead of silently skipping the
+mutation (C-02/H-02 extension). `tests/Regression/build_k2_transfer_stock_integrity.php`
+(an existing Transfer test) was updated to check for the new
+`StockMutator`-delegating implementation instead of the old inline shape
+it used to grep for. Full cumulative regression suite (44 files) re-run
+afterward — no new failures (the same 3 pre-existing
+compiled-frontend-asset failures as Build N1a, unrelated to this build).
+
+**Known gaps — intentionally out of scope for this build:**
+- H-03 (attachment access control on upload/download/delete endpoints),
+  H-04 (release artifact hygiene — cached app key, machine-specific
+  paths), H-05 (regression-suite shell-exit-code masking a fatal DB
+  error), H-08 (npm dependency upgrades), and H-09 (soft-delete audit
+  trail depth) are **not** part of this build.
+- The same C-02/H-02 stock-mutation pattern also exists, unfixed, in
+  `PurchasesReturnController` and `SalesReturnController` — found during
+  this build's own verification pass but outside the audit's explicit
+  High-severity list and this build's stated scope. Recommended as a
+  further follow-up if/when those flows matter for this deployment.

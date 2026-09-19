@@ -13,6 +13,7 @@ use App\Models\Sale;
 use App\Models\Setting;
 use App\Models\sms_gateway;
 use App\Models\SMSMessage;
+use App\Support\PaymentCapper;
 use App\utils\helpers;
 use ArPHP\I18N\Arabic;
 use Carbon\Carbon;
@@ -269,7 +270,9 @@ class PaymentSalesController extends BaseController
                     }
                 }
 
-                $total_paid = $sale->paid_amount + $amount_paid_now;
+                // Security fix (Build N2 / audit H-01): see
+                // app/Support/PaymentCapper.php.
+                $total_paid = PaymentCapper::capPaid($sale->GrandTotal, $sale->paid_amount + $amount_paid_now);
                 $due = $sale->GrandTotal - $total_paid;
 
                 if ($due <= 0.0) {
@@ -343,7 +346,8 @@ class PaymentSalesController extends BaseController
 
             $sale = Sale::find($payment->sale_id);
             $old_total_paid = $sale->paid_amount - $payment->montant;
-            $new_total_paid = $old_total_paid + $request['montant'];
+            // Security fix (Build N2 / audit H-01): see app/Support/PaymentCapper.php.
+            $new_total_paid = PaymentCapper::capPaid($sale->GrandTotal, $old_total_paid + $request['montant']);
 
             $due = $sale->GrandTotal - $new_total_paid;
             if ($due === 0.0 || $due < 0.0) {
@@ -428,7 +432,9 @@ class PaymentSalesController extends BaseController
             }
 
             $sale = Sale::find($payment->sale_id);
-            $total_paid = $sale->paid_amount - $payment->montant;
+            // Security fix (Build N2 / audit H-01): floors at 0 — see
+            // app/Support/PaymentCapper.php.
+            $total_paid = PaymentCapper::capPaid($sale->GrandTotal, $sale->paid_amount - $payment->montant);
             $due = $sale->GrandTotal - $total_paid;
 
             if ($due === 0.0 || $due < 0.0) {

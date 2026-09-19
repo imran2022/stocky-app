@@ -39,7 +39,9 @@ use App\Support\PaymentTerms;
 use App\Support\SaleMetadataRules;
 use App\Support\SafeDocumentUpload;
 use App\Support\SaleTotalsGuard;
+use App\Support\PaymentCapper;
 use App\Support\StockMutator;
+use App\Support\UniqueRefGenerator;
 use App\Support\ZatcaQr;
 use App\utils\helpers;
 use ArPHP\I18N\Arabic;
@@ -444,7 +446,6 @@ class SalesController extends BaseController
             $order->is_pos = 0;
             $order->date = $request->date;
             $order->time = now()->toTimeString();
-            $order->Ref = $this->getNumberOrder();
             $order->client_id = $request->client_id;
             $order->GrandTotal = $request->GrandTotal;
             $order->warehouse_id = $request->warehouse_id;
@@ -485,7 +486,11 @@ class SalesController extends BaseController
                 $order->payment_term_days = null;
                 $order->due_date = null;
             }
-            $order->save();
+            // Security fix (Build N2 / audit H-06): Ref is now generated and
+            // saved atomically with retry-on-collision instead of a single
+            // unlocked read+save, so a concurrent request can no longer
+            // produce a duplicate Ref. See app/Support/UniqueRefGenerator.php.
+            UniqueRefGenerator::save($order, fn () => $this->getNumberOrder());
 
             // Sale created from a quotation: remember the link so the
             // quotations list can flag it and hide "Convert to Invoice".
@@ -662,7 +667,12 @@ class SalesController extends BaseController
                         }
                     }
 
-                    $total_paid = $sale->paid_amount + $amount_paid_now;
+                    // Security fix (Build N2 / audit H-01): paid_amount is
+                    // capped at GrandTotal — a customer tendering more than
+                    // due (and getting change back, recorded separately
+                    // above) no longer inflates paid_amount past the
+                    // invoice's own total. See app/Support/PaymentCapper.php.
+                    $total_paid = PaymentCapper::capPaid($sale->GrandTotal, $sale->paid_amount + $amount_paid_now);
                     $due = $sale->GrandTotal - $total_paid;
 
                     if ($due <= 0.0) {
@@ -2335,7 +2345,6 @@ class SalesController extends BaseController
             $order->is_pos = 0;
             $order->date = $request->date;
             $order->time = now()->toTimeString();
-            $order->Ref = $this->getNumberOrder();
             $order->client_id = $request->client_id;
             $order->GrandTotal = 0;
             $order->warehouse_id = $request->warehouse_id;
@@ -2349,7 +2358,8 @@ class SalesController extends BaseController
             $order->notes = $request->notes;
             $order->user_id = Auth::id();
             $order->sales_agent_id = $request->sales_agent_id ?? null;
-            $order->save();
+            // Security fix (Build N2 / audit H-06): see note above.
+            UniqueRefGenerator::save($order, fn () => $this->getNumberOrder());
 
             $total = 0;
             $orderDetails = [];

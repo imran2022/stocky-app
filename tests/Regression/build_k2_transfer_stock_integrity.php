@@ -27,9 +27,22 @@ $assert(
     str_contains($body, 'protected function resolveProductWarehouseRow(int $warehouseId, int $productId, $variantId = null): product_warehouse'),
     'TransferController must define resolveProductWarehouseRow(warehouseId, productId, variantId).'
 );
+// Build N2 (audit H-02): resolveProductWarehouseRow() now delegates to the
+// already-hardened App\Support\StockMutator::lockOrCreate() (also used by
+// Sales/Purchases/Adjustment/Damage) instead of its own bare
+// ->first()+create, so it gains row-locking (lockForUpdate()) and correctly
+// filters on a NULL product_variant_id — a bug the old inline version had.
+// StockMutator::lockOrCreate() itself is what now creates a fresh row at
+// qte=0 when none exists; that behavior is verified directly against
+// StockMutator.php below rather than by grepping for the old inline shape.
 $assert(
-    str_contains($body, 'if (! $row) {') && str_contains($body, '$row->qte = 0;'),
-    'resolveProductWarehouseRow must create a fresh row (qte=0) when none exists.'
+    str_contains($body, 'return StockMutator::lockOrCreate($warehouseId, $productId, $variantId);'),
+    'resolveProductWarehouseRow must delegate to the row-locking StockMutator::lockOrCreate().'
+);
+$stockMutatorBody = file_get_contents($root.'/app/Support/StockMutator.php');
+$assert(
+    str_contains($stockMutatorBody, '$row->qte = 0;') && str_contains($stockMutatorBody, '->lockForUpdate()'),
+    'StockMutator::lockOrCreate() must create a fresh row (qte=0) when none exists, and row-lock it.'
 );
 
 // --- Every stock-moving call site must go through the helper ---

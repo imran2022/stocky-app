@@ -14,6 +14,7 @@ use App\Models\User;
 use App\Models\UserWarehouse;
 use App\Models\Warehouse;
 use App\Services\BatchService;
+use App\Support\StockMutator;
 use App\utils\helpers;
 use ArPHP\I18N\Arabic;
 use Carbon\Carbon;
@@ -24,6 +25,22 @@ use PDF;
 
 class AdjustmentController extends BaseController
 {
+    /**
+     * Security fix (Build N2 / audit C-02 + H-02): centralizes what used to
+     * be a copy-pasted ->first() + if($product_warehouse) block at every
+     * stock-mutation site in this controller (store/update/destroy, add and
+     * subtract, single and combo products). Always returns a row-locked
+     * stock row, creating one at qte=0 first if none existed yet, so an
+     * adjustment for a product never stocked in this warehouse before can
+     * no longer silently do nothing. See app/Support/StockMutator.php.
+     */
+    private function applyStockDelta(int $warehouseId, int $productId, $variantId, $delta): void
+    {
+        $product_warehouse = StockMutator::lockOrCreate($warehouseId, $productId, $variantId !== null ? $variantId : null);
+        $product_warehouse->qte += $delta;
+        $product_warehouse->save();
+    }
+
     // ------------ Show All Adjustement  -----------\\
 
     public function index(request $request)
@@ -195,124 +212,47 @@ class AdjustmentController extends BaseController
                     'type' => $value['type'],
                 ]);
 
+                // Security fix (Build N2 / audit C-02 + H-02): the repeated
+                // ->first() + if($product_warehouse) blocks here used to
+                // silently no-op when no stock row existed yet for a
+                // product/warehouse pair. applyStockDelta() (below) always
+                // row-locks-or-creates it. See app/Support/StockMutator.php.
                 if ($value['type'] == 'add') {
                     if ($value['product_variant_id'] !== null) {
-                        $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $order->warehouse_id)
-                            ->where('product_id', $value['product_id'])
-                            ->where('product_variant_id', $value['product_variant_id'])
-                            ->first();
-
-                        if ($product_warehouse) {
-                            $product_warehouse->qte += $value['quantity'];
-                            $product_warehouse->save();
-                        }
-
+                        $this->applyStockDelta($order->warehouse_id, $value['product_id'], $value['product_variant_id'], $value['quantity']);
                     } else {
                         $product_detail = Product::where('id', $value['product_id'])->first();
 
                         if ($product_detail && $product_detail->type == 'is_single') {
-
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $order->warehouse_id)
-                                ->where('product_id', $value['product_id'])
-                                ->first();
-
-                            if ($product_warehouse) {
-                                $product_warehouse->qte += $value['quantity'];
-                                $product_warehouse->save();
-                            }
+                            $this->applyStockDelta($order->warehouse_id, $value['product_id'], null, $value['quantity']);
                         } elseif ($product_detail && $product_detail->type == 'is_combo') {
-
                             $combined_products = CombinedProduct::where('product_id', $value['product_id'])->with('product')->get();
 
                             foreach ($combined_products as $combined_product) {
-
                                 $qty_combined = $combined_product->quantity * $value['quantity'];
-
-                                $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                    ->where('warehouse_id', $order->warehouse_id)
-                                    ->where('product_id', $combined_product->combined_product_id)
-                                    ->first();
-
-                                if ($product_warehouse) {
-                                    $product_warehouse->qte -= $qty_combined;
-                                    $product_warehouse->save();
-                                }
-
+                                $this->applyStockDelta($order->warehouse_id, $combined_product->combined_product_id, null, -$qty_combined);
                             }
 
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $order->warehouse_id)
-                                ->where('product_id', $value['product_id'])
-                                ->first();
-
-                            if ($product_warehouse) {
-                                $product_warehouse->qte += $value['quantity'];
-                                $product_warehouse->save();
-                            }
-
+                            $this->applyStockDelta($order->warehouse_id, $value['product_id'], null, $value['quantity']);
                         }
                     }
                 } else {
-
                     if ($value['product_variant_id'] !== null) {
-                        $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $order->warehouse_id)
-                            ->where('product_id', $value['product_id'])
-                            ->where('product_variant_id', $value['product_variant_id'])
-                            ->first();
-
-                        if ($product_warehouse) {
-                            $product_warehouse->qte -= $value['quantity'];
-                            $product_warehouse->save();
-                        }
-
+                        $this->applyStockDelta($order->warehouse_id, $value['product_id'], $value['product_variant_id'], -$value['quantity']);
                     } else {
-
                         $product_detail = Product::where('id', $value['product_id'])->first();
 
                         if ($product_detail && $product_detail->type == 'is_single') {
-
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $order->warehouse_id)
-                                ->where('product_id', $value['product_id'])
-                                ->first();
-
-                            if ($product_warehouse) {
-                                $product_warehouse->qte -= $value['quantity'];
-                                $product_warehouse->save();
-                            }
+                            $this->applyStockDelta($order->warehouse_id, $value['product_id'], null, -$value['quantity']);
                         } elseif ($product_detail && $product_detail->type == 'is_combo') {
-
                             $combined_products = CombinedProduct::where('product_id', $value['product_id'])->with('product')->get();
 
                             foreach ($combined_products as $combined_product) {
-
                                 $qty_combined = $combined_product->quantity * $value['quantity'];
-
-                                $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                    ->where('warehouse_id', $order->warehouse_id)
-                                    ->where('product_id', $combined_product->combined_product_id)
-                                    ->first();
-
-                                if ($product_warehouse) {
-                                    $product_warehouse->qte += $qty_combined;
-                                    $product_warehouse->save();
-                                }
-
+                                $this->applyStockDelta($order->warehouse_id, $combined_product->combined_product_id, null, $qty_combined);
                             }
 
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $order->warehouse_id)
-                                ->where('product_id', $value['product_id'])
-                                ->first();
-
-                            if ($product_warehouse) {
-                                $product_warehouse->qte -= $value['quantity'];
-                                $product_warehouse->save();
-                            }
-
+                            $this->applyStockDelta($order->warehouse_id, $value['product_id'], null, -$value['quantity']);
                         }
                     }
                 }
@@ -411,126 +351,43 @@ class AdjustmentController extends BaseController
             // Init Data with old Parametre
             foreach ($old_adjustment_details as $key => $value) {
                 $old_products_id[] = $value->id;
+                // Security fix (Build N2 / audit C-02 + H-02): see note in store().
                 if ($value['type'] == 'add') {
-
                     if ($value['product_variant_id'] !== null) {
-                        $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $current_adjustment->warehouse_id)
-                            ->where('product_id', $value['product_id'])
-                            ->where('product_variant_id', $value['product_variant_id'])
-                            ->first();
-
-                        if ($product_warehouse) {
-                            $product_warehouse->qte -= $value['quantity'];
-                            $product_warehouse->save();
-                        }
-
+                        $this->applyStockDelta($current_adjustment->warehouse_id, $value['product_id'], $value['product_variant_id'], -$value['quantity']);
                     } else {
-
                         $product_detail = Product::where('id', $value['product_id'])->first();
 
                         if ($product_detail && $product_detail->type == 'is_single') {
-
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $current_adjustment->warehouse_id)
-                                ->where('product_id', $value['product_id'])
-                                ->first();
-
-                            if ($product_warehouse) {
-                                $product_warehouse->qte -= $value['quantity'];
-                                $product_warehouse->save();
-                            }
+                            $this->applyStockDelta($current_adjustment->warehouse_id, $value['product_id'], null, -$value['quantity']);
                         } elseif ($product_detail && $product_detail->type == 'is_combo') {
-
                             $combined_products = CombinedProduct::where('product_id', $value['product_id'])->with('product')->get();
 
                             foreach ($combined_products as $combined_product) {
-
                                 $qty_combined = $combined_product->quantity * $value['quantity'];
-
-                                $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                    ->where('warehouse_id', $current_adjustment->warehouse_id)
-                                    ->where('product_id', $combined_product->combined_product_id)
-                                    ->first();
-
-                                if ($product_warehouse) {
-                                    $product_warehouse->qte += $qty_combined;
-                                    $product_warehouse->save();
-                                }
-
+                                $this->applyStockDelta($current_adjustment->warehouse_id, $combined_product->combined_product_id, null, $qty_combined);
                             }
 
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $current_adjustment->warehouse_id)
-                                ->where('product_id', $value['product_id'])
-                                ->first();
-
-                            if ($product_warehouse) {
-                                $product_warehouse->qte -= $value['quantity'];
-                                $product_warehouse->save();
-                            }
-
+                            $this->applyStockDelta($current_adjustment->warehouse_id, $value['product_id'], null, -$value['quantity']);
                         }
-
                     }
                 } else {
                     if ($value['product_variant_id'] !== null) {
-                        $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $current_adjustment->warehouse_id)
-                            ->where('product_id', $value['product_id'])
-                            ->where('product_variant_id', $value['product_variant_id'])
-                            ->first();
-
-                        if ($product_warehouse) {
-                            $product_warehouse->qte += $value['quantity'];
-                            $product_warehouse->save();
-                        }
-
+                        $this->applyStockDelta($current_adjustment->warehouse_id, $value['product_id'], $value['product_variant_id'], $value['quantity']);
                     } else {
-
                         $product_detail = Product::where('id', $value['product_id'])->first();
 
                         if ($product_detail && $product_detail->type == 'is_single') {
-
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $current_adjustment->warehouse_id)
-                                ->where('product_id', $value['product_id'])
-                                ->first();
-
-                            if ($product_warehouse) {
-                                $product_warehouse->qte += $value['quantity'];
-                                $product_warehouse->save();
-                            }
+                            $this->applyStockDelta($current_adjustment->warehouse_id, $value['product_id'], null, $value['quantity']);
                         } elseif ($product_detail && $product_detail->type == 'is_combo') {
-
                             $combined_products = CombinedProduct::where('product_id', $value['product_id'])->with('product')->get();
 
                             foreach ($combined_products as $combined_product) {
-
                                 $qty_combined = $combined_product->quantity * $value['quantity'];
-
-                                $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                    ->where('warehouse_id', $current_adjustment->warehouse_id)
-                                    ->where('product_id', $combined_product->combined_product_id)
-                                    ->first();
-
-                                if ($product_warehouse) {
-                                    $product_warehouse->qte -= $qty_combined;
-                                    $product_warehouse->save();
-                                }
-
+                                $this->applyStockDelta($current_adjustment->warehouse_id, $combined_product->combined_product_id, null, -$qty_combined);
                             }
 
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $current_adjustment->warehouse_id)
-                                ->where('product_id', $value['product_id'])
-                                ->first();
-
-                            if ($product_warehouse) {
-                                $product_warehouse->qte += $value['quantity'];
-                                $product_warehouse->save();
-                            }
-
+                            $this->applyStockDelta($current_adjustment->warehouse_id, $value['product_id'], null, $value['quantity']);
                         }
                     }
                 }
@@ -546,129 +403,55 @@ class AdjustmentController extends BaseController
             // Update Data with New request
             $newPersistedDetails = [];
             foreach ($new_adjustment_details as $key => $product_detail) {
+                // Security fix (Build N2 / audit C-02 + H-02): see note in
+                // store(). This also fixes a pre-existing bug in the
+                // "subtract" branch below: it previously checked the STALE
+                // loop variable `$value['product_variant_id']` left over
+                // from the earlier foreach above instead of THIS row's
+                // `$product_detail['product_variant_id']` — a variant-typed
+                // adjustment being edited could silently fall into the
+                // wrong (non-variant) branch. Fixed by always reading from
+                // `$product_detail`, the actual row being processed here.
                 if ($product_detail['type'] == 'add') {
-
                     if ($product_detail['product_variant_id'] !== null) {
-                        $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $request->warehouse_id)
-                            ->where('product_id', $product_detail['product_id'])
-                            ->where('product_variant_id', $product_detail['product_variant_id'])
-                            ->first();
-
-                        if ($product_warehouse) {
-                            $product_warehouse->qte += $product_detail['quantity'];
-                            $product_warehouse->save();
-                        }
-
+                        $this->applyStockDelta($request->warehouse_id, $product_detail['product_id'], $product_detail['product_variant_id'], $product_detail['quantity']);
                     } else {
-
                         $product_detail_type = Product::where('deleted_at', '=', null)
                             ->where('id', $product_detail['product_id'])
                             ->first();
 
                         if ($product_detail_type->type == 'is_single') {
-
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $request->warehouse_id)
-                                ->where('product_id', $product_detail['product_id'])
-                                ->first();
-
-                            if ($product_warehouse) {
-                                $product_warehouse->qte += $product_detail['quantity'];
-                                $product_warehouse->save();
-                            }
+                            $this->applyStockDelta($request->warehouse_id, $product_detail['product_id'], null, $product_detail['quantity']);
                         } elseif ($product_detail_type->type == 'is_combo') {
-
                             $combined_products = CombinedProduct::where('product_id', $product_detail['product_id'])->with('product')->get();
 
                             foreach ($combined_products as $combined_product) {
-
                                 $qty_combined = $combined_product->quantity * $product_detail['quantity'];
-
-                                $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                    ->where('warehouse_id', $request->warehouse_id)
-                                    ->where('product_id', $combined_product->combined_product_id)
-                                    ->first();
-
-                                if ($product_warehouse) {
-                                    $product_warehouse->qte -= $qty_combined;
-                                    $product_warehouse->save();
-                                }
-
+                                $this->applyStockDelta($request->warehouse_id, $combined_product->combined_product_id, null, -$qty_combined);
                             }
 
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $request->warehouse_id)
-                                ->where('product_id', $product_detail['product_id'])
-                                ->first();
-
-                            if ($product_warehouse) {
-                                $product_warehouse->qte += $product_detail['quantity'];
-                                $product_warehouse->save();
-                            }
-
+                            $this->applyStockDelta($request->warehouse_id, $product_detail['product_id'], null, $product_detail['quantity']);
                         }
                     }
                 } else {
-                    if ($value['product_variant_id'] !== null) {
-                        $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $request->warehouse_id)
-                            ->where('product_id', $product_detail['product_id'])
-                            ->where('product_variant_id', $product_detail['product_variant_id'])
-                            ->first();
-
-                        if ($product_warehouse) {
-                            $product_warehouse->qte -= $product_detail['quantity'];
-                            $product_warehouse->save();
-                        }
-
+                    if ($product_detail['product_variant_id'] !== null) {
+                        $this->applyStockDelta($request->warehouse_id, $product_detail['product_id'], $product_detail['product_variant_id'], -$product_detail['quantity']);
                     } else {
-
                         $product_detail_type = Product::where('deleted_at', '=', null)
                             ->where('id', $product_detail['product_id'])
                             ->first();
 
                         if ($product_detail_type->type == 'is_single') {
-
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $request->warehouse_id)
-                                ->where('product_id', $product_detail['product_id'])
-                                ->first();
-
-                            if ($product_warehouse) {
-                                $product_warehouse->qte -= $product_detail['quantity'];
-                                $product_warehouse->save();
-                            }
+                            $this->applyStockDelta($request->warehouse_id, $product_detail['product_id'], null, -$product_detail['quantity']);
                         } elseif ($product_detail_type->type == 'is_combo') {
-
                             $combined_products = CombinedProduct::where('product_id', $product_detail['product_id'])->with('product')->get();
 
                             foreach ($combined_products as $combined_product) {
-
                                 $qty_combined = $combined_product->quantity * $product_detail['quantity'];
-
-                                $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                    ->where('warehouse_id', $request->warehouse_id)
-                                    ->where('product_id', $combined_product->combined_product_id)
-                                    ->first();
-
-                                if ($product_warehouse) {
-                                    $product_warehouse->qte += $qty_combined;
-                                    $product_warehouse->save();
-                                }
-
+                                $this->applyStockDelta($request->warehouse_id, $combined_product->combined_product_id, null, $qty_combined);
                             }
 
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $request->warehouse_id)
-                                ->where('product_id', $product_detail['product_id'])
-                                ->first();
-
-                            if ($product_warehouse) {
-                                $product_warehouse->qte -= $product_detail['quantity'];
-                                $product_warehouse->save();
-                            }
-
+                            $this->applyStockDelta($request->warehouse_id, $product_detail['product_id'], null, -$product_detail['quantity']);
                         }
                     }
                 }
@@ -774,125 +557,43 @@ class AdjustmentController extends BaseController
 
             // Init Data with old Parametre
             foreach ($old_adjustment_details as $key => $value) {
+                // Security fix (Build N2 / audit C-02 + H-02): see note in store().
                 if ($value['type'] == 'add') {
-
                     if ($value['product_variant_id'] !== null) {
-                        $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $current_adjustment->warehouse_id)
-                            ->where('product_id', $value['product_id'])
-                            ->where('product_variant_id', $value['product_variant_id'])
-                            ->first();
-
-                        if ($product_warehouse) {
-                            $product_warehouse->qte -= $value['quantity'];
-                            $product_warehouse->save();
-                        }
-
+                        $this->applyStockDelta($current_adjustment->warehouse_id, $value['product_id'], $value['product_variant_id'], -$value['quantity']);
                     } else {
-
                         $product_detail = Product::where('id', $value['product_id'])->first();
 
                         if ($product_detail && $product_detail->type == 'is_single') {
-
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $current_adjustment->warehouse_id)
-                                ->where('product_id', $value['product_id'])
-                                ->first();
-
-                            if ($product_warehouse) {
-                                $product_warehouse->qte -= $value['quantity'];
-                                $product_warehouse->save();
-                            }
+                            $this->applyStockDelta($current_adjustment->warehouse_id, $value['product_id'], null, -$value['quantity']);
                         } elseif ($product_detail && $product_detail->type == 'is_combo') {
-
                             $combined_products = CombinedProduct::where('product_id', $value['product_id'])->with('product')->get();
 
                             foreach ($combined_products as $combined_product) {
-
                                 $qty_combined = $combined_product->quantity * $value['quantity'];
-
-                                $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                    ->where('warehouse_id', $current_adjustment->warehouse_id)
-                                    ->where('product_id', $combined_product->combined_product_id)
-                                    ->first();
-
-                                if ($product_warehouse) {
-                                    $product_warehouse->qte += $qty_combined;
-                                    $product_warehouse->save();
-                                }
-
+                                $this->applyStockDelta($current_adjustment->warehouse_id, $combined_product->combined_product_id, null, $qty_combined);
                             }
 
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $current_adjustment->warehouse_id)
-                                ->where('product_id', $value['product_id'])
-                                ->first();
-
-                            if ($product_warehouse) {
-                                $product_warehouse->qte -= $value['quantity'];
-                                $product_warehouse->save();
-                            }
-
+                            $this->applyStockDelta($current_adjustment->warehouse_id, $value['product_id'], null, -$value['quantity']);
                         }
                     }
                 } else {
                     if ($value['product_variant_id'] !== null) {
-                        $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $current_adjustment->warehouse_id)
-                            ->where('product_id', $value['product_id'])
-                            ->where('product_variant_id', $value['product_variant_id'])
-                            ->first();
-
-                        if ($product_warehouse) {
-                            $product_warehouse->qte += $value['quantity'];
-                            $product_warehouse->save();
-                        }
-
+                        $this->applyStockDelta($current_adjustment->warehouse_id, $value['product_id'], $value['product_variant_id'], $value['quantity']);
                     } else {
-
                         $product_detail = Product::where('id', $value['product_id'])->first();
 
                         if ($product_detail && $product_detail->type == 'is_single') {
-
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $current_adjustment->warehouse_id)
-                                ->where('product_id', $value['product_id'])
-                                ->first();
-
-                            if ($product_warehouse) {
-                                $product_warehouse->qte += $value['quantity'];
-                                $product_warehouse->save();
-                            }
+                            $this->applyStockDelta($current_adjustment->warehouse_id, $value['product_id'], null, $value['quantity']);
                         } elseif ($product_detail && $product_detail->type == 'is_combo') {
-
                             $combined_products = CombinedProduct::where('product_id', $value['product_id'])->with('product')->get();
 
                             foreach ($combined_products as $combined_product) {
-
                                 $qty_combined = $combined_product->quantity * $value['quantity'];
-
-                                $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                    ->where('warehouse_id', $current_adjustment->warehouse_id)
-                                    ->where('product_id', $combined_product->combined_product_id)
-                                    ->first();
-
-                                if ($product_warehouse) {
-                                    $product_warehouse->qte -= $qty_combined;
-                                    $product_warehouse->save();
-                                }
-
+                                $this->applyStockDelta($current_adjustment->warehouse_id, $combined_product->combined_product_id, null, -$qty_combined);
                             }
 
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $current_adjustment->warehouse_id)
-                                ->where('product_id', $value['product_id'])
-                                ->first();
-
-                            if ($product_warehouse) {
-                                $product_warehouse->qte += $value['quantity'];
-                                $product_warehouse->save();
-                            }
-
+                            $this->applyStockDelta($current_adjustment->warehouse_id, $value['product_id'], null, $value['quantity']);
                         }
                     }
                 }

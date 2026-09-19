@@ -40,6 +40,8 @@ use Illuminate\Support\Str;
 use Infobip\Api\SendSmsApi;
 use Infobip\Configuration;
 use App\Support\SafeDocumentUpload;
+use App\Support\StockMutator;
+use App\Support\UniqueRefGenerator;
 use Infobip\Model\SmsAdvancedTextualRequest;
 use Infobip\Model\SmsDestination;
 use Infobip\Model\SmsTextualMessage;
@@ -259,7 +261,6 @@ class PurchasesController extends BaseController
 
             $order->date = $request->date;
             $order->time = now()->toTimeString();
-            $order->Ref = $this->getNumberOrder();
             $order->provider_id = $request->supplier_id;
             $order->GrandTotal = $request->GrandTotal;
             $order->warehouse_id = $request->warehouse_id;
@@ -281,7 +282,8 @@ class PurchasesController extends BaseController
             $order->currency_id = $docCurrency['currency_id'];
             $order->exchange_rate = $docCurrency['exchange_rate'];
 
-            $order->save();
+            // Security fix (Build N2 / audit H-06): see app/Support/UniqueRefGenerator.php.
+            UniqueRefGenerator::save($order, fn () => $this->getNumberOrder());
 
             $data = $request['details'];
             foreach ($data as $key => $value) {
@@ -302,37 +304,31 @@ class PurchasesController extends BaseController
                 ];
 
                 if ($order->statut == 'received') {
-                    if ($value['product_variant_id'] !== null) {
-                        $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $order->warehouse_id)
-                            ->where('product_id', $value['product_id'])
-                            ->where('product_variant_id', $value['product_variant_id'])
-                            ->first();
-
-                        if ($unit && $product_warehouse) {
-                            if ($unit->operator == '/') {
-                                $product_warehouse->qte += $value['quantity'] / $unit->operator_value;
-                            } else {
-                                $product_warehouse->qte += $value['quantity'] * $unit->operator_value;
-                            }
-                            $product_warehouse->save();
-                        }
-
-                    } else {
-                        $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $order->warehouse_id)
-                            ->where('product_id', $value['product_id'])
-                            ->first();
-
-                        if ($unit && $product_warehouse) {
-                            if ($unit->operator == '/') {
-                                $product_warehouse->qte += $value['quantity'] / $unit->operator_value;
-                            } else {
-                                $product_warehouse->qte += $value['quantity'] * $unit->operator_value;
-                            }
-                            $product_warehouse->save();
-                        }
+                    // Security fix (Build N2 / audit C-02 + H-02, same class
+                    // of bug already fixed in SalesController): the old
+                    // ->first() + if($product_warehouse) pattern silently
+                    // skipped the stock increase when no row existed yet for
+                    // this product/warehouse. StockMutator::lockOrCreate()
+                    // always returns a row-locked row, creating it at qte=0
+                    // first if needed.
+                    if (! $unit) {
+                        throw new \RuntimeException(
+                            'Purchase line for product '.$value['product_id'].' has an unknown/missing purchase unit; cannot safely update stock.'
+                        );
                     }
+
+                    $product_warehouse = StockMutator::lockOrCreate(
+                        $order->warehouse_id,
+                        $value['product_id'],
+                        $value['product_variant_id'] !== null ? $value['product_variant_id'] : null
+                    );
+
+                    if ($unit->operator == '/') {
+                        $product_warehouse->qte += $value['quantity'] / $unit->operator_value;
+                    } else {
+                        $product_warehouse->qte += $value['quantity'] * $unit->operator_value;
+                    }
+                    $product_warehouse->save();
                 }
             }
             PurchaseDetail::insert($orderDetails);
@@ -516,39 +512,22 @@ class PurchasesController extends BaseController
 
                     if ($value['purchase_unit_id'] !== null) {
                         if ($current_Purchase->statut == 'received') {
+                            // Security fix (Build N2 / audit C-02 + H-02): see
+                            // note at the create-time stock block above.
+                            if ($unit) {
+                                $product_warehouse = StockMutator::lockOrCreate(
+                                    $current_Purchase->warehouse_id,
+                                    $value['product_id'],
+                                    $value['product_variant_id'] !== null ? $value['product_variant_id'] : null
+                                );
 
-                            if ($value['product_variant_id'] !== null) {
-                                $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                    ->where('warehouse_id', $current_Purchase->warehouse_id)
-                                    ->where('product_id', $value['product_id'])
-                                    ->where('product_variant_id', $value['product_variant_id'])
-                                    ->first();
-
-                                if ($unit && $product_warehouse) {
-                                    if ($unit->operator == '/') {
-                                        $product_warehouse->qte -= $value['quantity'] / $unit->operator_value;
-                                    } else {
-                                        $product_warehouse->qte -= $value['quantity'] * $unit->operator_value;
-                                    }
-
-                                    $product_warehouse->save();
+                                if ($unit->operator == '/') {
+                                    $product_warehouse->qte -= $value['quantity'] / $unit->operator_value;
+                                } else {
+                                    $product_warehouse->qte -= $value['quantity'] * $unit->operator_value;
                                 }
 
-                            } else {
-                                $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                    ->where('warehouse_id', $current_Purchase->warehouse_id)
-                                    ->where('product_id', $value['product_id'])
-                                    ->first();
-
-                                if ($unit && $product_warehouse) {
-                                    if ($unit->operator == '/') {
-                                        $product_warehouse->qte -= $value['quantity'] / $unit->operator_value;
-                                    } else {
-                                        $product_warehouse->qte -= $value['quantity'] * $unit->operator_value;
-                                    }
-
-                                    $product_warehouse->save();
-                                }
+                                $product_warehouse->save();
                             }
                         }
 
@@ -573,41 +552,23 @@ class PurchasesController extends BaseController
                         $unit_prod = Unit::where('id', $prod_detail['purchase_unit_id'])->first();
 
                         if ($request['statut'] == 'received') {
+                            // Security fix (Build N2 / audit C-02 + H-02): see
+                            // note at the create-time stock block above.
+                            if ($unit_prod) {
+                                $product_warehouse = StockMutator::lockOrCreate(
+                                    $request->warehouse_id,
+                                    $prod_detail['product_id'],
+                                    $prod_detail['product_variant_id'] !== null ? $prod_detail['product_variant_id'] : null
+                                );
 
-                            if ($prod_detail['product_variant_id'] !== null) {
-                                $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                    ->where('warehouse_id', $request->warehouse_id)
-                                    ->where('product_id', $prod_detail['product_id'])
-                                    ->where('product_variant_id', $prod_detail['product_variant_id'])
-                                    ->first();
-
-                                if ($unit_prod && $product_warehouse) {
-                                    if ($unit_prod->operator == '/') {
-                                        $product_warehouse->qte += $prod_detail['quantity'] / $unit_prod->operator_value;
-                                    } else {
-                                        $product_warehouse->qte += $prod_detail['quantity'] * $unit_prod->operator_value;
-                                    }
-
-                                    $product_warehouse->save();
+                                if ($unit_prod->operator == '/') {
+                                    $product_warehouse->qte += $prod_detail['quantity'] / $unit_prod->operator_value;
+                                } else {
+                                    $product_warehouse->qte += $prod_detail['quantity'] * $unit_prod->operator_value;
                                 }
 
-                            } else {
-                                $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                    ->where('warehouse_id', $request->warehouse_id)
-                                    ->where('product_id', $prod_detail['product_id'])
-                                    ->first();
-
-                                if ($unit_prod && $product_warehouse) {
-                                    if ($unit_prod->operator == '/') {
-                                        $product_warehouse->qte += $prod_detail['quantity'] / $unit_prod->operator_value;
-                                    } else {
-                                        $product_warehouse->qte += $prod_detail['quantity'] * $unit_prod->operator_value;
-                                    }
-
-                                    $product_warehouse->save();
-                                }
+                                $product_warehouse->save();
                             }
-
                         }
 
                         $orderDetails['purchase_id'] = $id;
@@ -779,39 +740,22 @@ class PurchasesController extends BaseController
                     }
 
                     if ($current_Purchase->statut == 'received') {
+                        // Security fix (Build N2 / audit C-02 + H-02): see
+                        // note at the create-time stock block above.
+                        if ($unit) {
+                            $product_warehouse = StockMutator::lockOrCreate(
+                                $current_Purchase->warehouse_id,
+                                $value['product_id'],
+                                $value['product_variant_id'] !== null ? $value['product_variant_id'] : null
+                            );
 
-                        if ($value['product_variant_id'] !== null) {
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $current_Purchase->warehouse_id)
-                                ->where('product_id', $value['product_id'])
-                                ->where('product_variant_id', $value['product_variant_id'])
-                                ->first();
-
-                            if ($unit && $product_warehouse) {
-                                if ($unit->operator == '/') {
-                                    $product_warehouse->qte -= $value['quantity'] / $unit->operator_value;
-                                } else {
-                                    $product_warehouse->qte -= $value['quantity'] * $unit->operator_value;
-                                }
-
-                                $product_warehouse->save();
+                            if ($unit->operator == '/') {
+                                $product_warehouse->qte -= $value['quantity'] / $unit->operator_value;
+                            } else {
+                                $product_warehouse->qte -= $value['quantity'] * $unit->operator_value;
                             }
 
-                        } else {
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $current_Purchase->warehouse_id)
-                                ->where('product_id', $value['product_id'])
-                                ->first();
-
-                            if ($unit && $product_warehouse) {
-                                if ($unit->operator == '/') {
-                                    $product_warehouse->qte -= $value['quantity'] / $unit->operator_value;
-                                } else {
-                                    $product_warehouse->qte -= $value['quantity'] * $unit->operator_value;
-                                }
-
-                                $product_warehouse->save();
-                            }
+                            $product_warehouse->save();
                         }
                     }
                 }
@@ -954,39 +898,22 @@ class PurchasesController extends BaseController
                         }
 
                         if ($current_Purchase->statut == 'received') {
+                            // Security fix (Build N2 / audit C-02 + H-02): see
+                            // note at the create-time stock block above.
+                            if ($unit) {
+                                $product_warehouse = StockMutator::lockOrCreate(
+                                    $current_Purchase->warehouse_id,
+                                    $value['product_id'],
+                                    $value['product_variant_id'] !== null ? $value['product_variant_id'] : null
+                                );
 
-                            if ($value['product_variant_id'] !== null) {
-                                $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                    ->where('warehouse_id', $current_Purchase->warehouse_id)
-                                    ->where('product_id', $value['product_id'])
-                                    ->where('product_variant_id', $value['product_variant_id'])
-                                    ->first();
-
-                                if ($unit && $product_warehouse) {
-                                    if ($unit->operator == '/') {
-                                        $product_warehouse->qte -= $value['quantity'] / $unit->operator_value;
-                                    } else {
-                                        $product_warehouse->qte -= $value['quantity'] * $unit->operator_value;
-                                    }
-
-                                    $product_warehouse->save();
+                                if ($unit->operator == '/') {
+                                    $product_warehouse->qte -= $value['quantity'] / $unit->operator_value;
+                                } else {
+                                    $product_warehouse->qte -= $value['quantity'] * $unit->operator_value;
                                 }
 
-                            } else {
-                                $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                    ->where('warehouse_id', $current_Purchase->warehouse_id)
-                                    ->where('product_id', $value['product_id'])
-                                    ->first();
-
-                                if ($unit && $product_warehouse) {
-                                    if ($unit->operator == '/') {
-                                        $product_warehouse->qte -= $value['quantity'] / $unit->operator_value;
-                                    } else {
-                                        $product_warehouse->qte -= $value['quantity'] * $unit->operator_value;
-                                    }
-
-                                    $product_warehouse->save();
-                                }
+                                $product_warehouse->save();
                             }
                         }
                     }
@@ -2356,7 +2283,6 @@ class PurchasesController extends BaseController
 
             $order->date = $request->date;
             $order->time = now()->toTimeString();
-            $order->Ref = $this->getNumberOrder();
             $order->provider_id = $request->supplier_id;
             $order->GrandTotal = 0;
             $order->warehouse_id = $request->warehouse_id;
@@ -2369,7 +2295,8 @@ class PurchasesController extends BaseController
             $order->notes = $request->notes;
             $order->user_id = Auth::user()->id;
 
-            $order->save();
+            // Security fix (Build N2 / audit H-06): see app/Support/UniqueRefGenerator.php.
+            UniqueRefGenerator::save($order, fn () => $this->getNumberOrder());
 
             $total = 0;
             $inputDetailsForBatches = [];
@@ -2401,13 +2328,15 @@ class PurchasesController extends BaseController
                 ];
 
                 if ($order->statut == 'received') {
+                    // Security fix (Build N2 / audit C-02 + H-02): see note
+                    // at the earlier create-time stock block in store().
+                    if ($unit) {
+                        $product_warehouse = StockMutator::lockOrCreate(
+                            $order->warehouse_id,
+                            $product->id,
+                            null
+                        );
 
-                    $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                        ->where('warehouse_id', $order->warehouse_id)
-                        ->where('product_id', $product->id)
-                        ->first();
-
-                    if ($unit && $product_warehouse) {
                         if ($unit->operator == '/') {
                             $product_warehouse->qte += $value['qty'] / $unit->operator_value;
                         } else {

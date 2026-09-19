@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Product;
 use App\Models\product_warehouse;
+use App\Support\StockMutator;
 use App\Models\ProductVariant;
 use App\Models\Role;
 use App\Models\Setting;
@@ -1455,29 +1456,23 @@ class TransferController extends BaseController
      * cases where that backfill was bypassed (a variant added after the
      * fact, legacy data, etc.) — the common path is unchanged.
      */
+    /**
+     * Security fix (Build N2 / audit H-02): this method already
+     * auto-created a missing row (the C-02 half of the bug was already
+     * fixed here), but it never row-locked the row it returned — two
+     * concurrent transfers touching the same product/warehouse could still
+     * read-modify-write the same `qte` and lose one of the updates. It also
+     * had a subtler bug: when $variantId was null it did NOT filter with
+     * `whereNull('product_variant_id')`, so on a product that also has
+     * variant-specific stock rows it could match and return the WRONG row
+     * (some other variant's row) instead of the plain product's row.
+     * Delegating to the already-hardened StockMutator::lockOrCreate() (used
+     * by Sales/Purchases/Adjustment/Damage) fixes both without changing
+     * this method's signature or any of its call sites below.
+     */
     protected function resolveProductWarehouseRow(int $warehouseId, int $productId, $variantId = null): product_warehouse
     {
-        $query = product_warehouse::where('deleted_at', '=', null)
-            ->where('warehouse_id', $warehouseId)
-            ->where('product_id', $productId);
-
-        if ($variantId !== null) {
-            $query->where('product_variant_id', $variantId);
-        }
-
-        $row = $query->first();
-
-        if (! $row) {
-            $row = new product_warehouse;
-            $row->warehouse_id = $warehouseId;
-            $row->product_id = $productId;
-            $row->product_variant_id = $variantId;
-            $row->qte = 0;
-            $row->manage_stock = 1;
-            $row->save();
-        }
-
-        return $row;
+        return StockMutator::lockOrCreate($warehouseId, $productId, $variantId);
     }
 
     protected function applyInitialStockMovement(Transfer $transfer)

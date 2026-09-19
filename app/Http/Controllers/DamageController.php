@@ -13,6 +13,7 @@ use App\Models\Setting;
 use App\Models\UserWarehouse;
 use App\Models\Warehouse;
 use App\Services\BatchService;
+use App\Support\StockMutator;
 use App\utils\helpers;
 use ArPHP\I18N\Arabic;
 use Carbon\Carbon;
@@ -23,6 +24,27 @@ use PDF;
 
 class DamageController extends BaseController
 {
+    /**
+     * Security fix (Build N2 / audit C-02 + H-02): centralizes what used to
+     * be a copy-pasted ->first() + if($product_warehouse) block at every
+     * stock-mutation site in this controller. Always returns a row-locked
+     * stock row, creating one at qte=0 first if none existed yet, so a
+     * damage record for a product never stocked in this warehouse before
+     * can no longer silently do nothing. See app/Support/StockMutator.php.
+     * $clampFloor preserves this controller's existing "never go below
+     * zero" behavior (unlike Sales/Purchases/Adjustment, which allow
+     * negative qte).
+     */
+    private function applyStockDelta(int $warehouseId, int $productId, $variantId, $delta, bool $clampFloor = false): void
+    {
+        $product_warehouse = StockMutator::lockOrCreate($warehouseId, $productId, $variantId !== null ? $variantId : null);
+        $product_warehouse->qte += $delta;
+        if ($clampFloor && $product_warehouse->qte < 0) {
+            $product_warehouse->qte = 0;
+        }
+        $product_warehouse->save();
+    }
+
     // ------------ Show All Damages  -----------\\
     public function index(Request $request)
     {
@@ -139,71 +161,26 @@ class DamageController extends BaseController
                     'product_variant_id' => $value['product_variant_id'] ?? null,
                 ]);
 
-                // Always subtract for damage
+                // Always subtract for damage. Security fix (Build N2 /
+                // audit C-02 + H-02): see class docblock above.
                 if (! empty($value['product_variant_id'])) {
-                    $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                        ->where('warehouse_id', $order->warehouse_id)
-                        ->where('product_id', $value['product_id'])
-                        ->where('product_variant_id', $value['product_variant_id'])
-                        ->first();
-
-                    if ($product_warehouse) {
-                        $product_warehouse->qte -= $value['quantity'];
-                        if ($product_warehouse->qte < 0) {
-                            $product_warehouse->qte = 0;
-                        }
-                        $product_warehouse->save();
-                    }
+                    $this->applyStockDelta($order->warehouse_id, $value['product_id'], $value['product_variant_id'], -$value['quantity'], true);
                 } else {
                     $product_detail = Product::where('deleted_at', '=', null)
                         ->where('id', $value['product_id'])
                         ->first();
 
                     if ($product_detail && $product_detail->type == 'is_single') {
-                        $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $order->warehouse_id)
-                            ->where('product_id', $value['product_id'])
-                            ->first();
-
-                        if ($product_warehouse) {
-                            $product_warehouse->qte -= $value['quantity'];
-                            if ($product_warehouse->qte < 0) {
-                                $product_warehouse->qte = 0;
-                            }
-                            $product_warehouse->save();
-                        }
+                        $this->applyStockDelta($order->warehouse_id, $value['product_id'], null, -$value['quantity'], true);
                     } elseif ($product_detail && $product_detail->type == 'is_combo') {
                         $combined_products = CombinedProduct::where('product_id', $value['product_id'])->with('product')->get();
 
                         foreach ($combined_products as $combined_product) {
                             $qty_combined = $combined_product->quantity * $value['quantity'];
-
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $order->warehouse_id)
-                                ->where('product_id', $combined_product->combined_product_id)
-                                ->first();
-
-                            if ($product_warehouse) {
-                                $product_warehouse->qte -= $qty_combined;
-                                if ($product_warehouse->qte < 0) {
-                                    $product_warehouse->qte = 0;
-                                }
-                                $product_warehouse->save();
-                            }
+                            $this->applyStockDelta($order->warehouse_id, $combined_product->combined_product_id, null, -$qty_combined, true);
                         }
 
-                        $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $order->warehouse_id)
-                            ->where('product_id', $value['product_id'])
-                            ->first();
-
-                        if ($product_warehouse) {
-                            $product_warehouse->qte -= $value['quantity'];
-                            if ($product_warehouse->qte < 0) {
-                                $product_warehouse->qte = 0;
-                            }
-                            $product_warehouse->save();
-                        }
+                        $this->applyStockDelta($order->warehouse_id, $value['product_id'], null, -$value['quantity'], true);
                     }
                 }
             }
@@ -271,58 +248,25 @@ class DamageController extends BaseController
             foreach ($old_details as $key => $value) {
                 $old_ids[] = $value->id;
 
-                // Reverse previous subtraction
+                // Reverse previous subtraction. Security fix (Build N2 /
+                // audit C-02 + H-02): see class docblock above.
                 if ($value['product_variant_id'] !== null) {
-                    $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                        ->where('warehouse_id', $current_damage->warehouse_id)
-                        ->where('product_id', $value['product_id'])
-                        ->where('product_variant_id', $value['product_variant_id'])
-                        ->first();
-
-                    if ($product_warehouse) {
-                        $product_warehouse->qte += $value['quantity'];
-                        $product_warehouse->save();
-                    }
+                    $this->applyStockDelta($current_damage->warehouse_id, $value['product_id'], $value['product_variant_id'], $value['quantity']);
                 } else {
                     $product_detail = Product::where('deleted_at', '=', null)
                         ->where('id', $value['product_id'])
                         ->first();
 
                     if ($product_detail && $product_detail->type == 'is_single') {
-                        $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $current_damage->warehouse_id)
-                            ->where('product_id', $value['product_id'])
-                            ->first();
-
-                        if ($product_warehouse) {
-                            $product_warehouse->qte += $value['quantity'];
-                            $product_warehouse->save();
-                        }
+                        $this->applyStockDelta($current_damage->warehouse_id, $value['product_id'], null, $value['quantity']);
                     } elseif ($product_detail && $product_detail->type == 'is_combo') {
                         $combined_products = CombinedProduct::where('product_id', $value['product_id'])->with('product')->get();
                         foreach ($combined_products as $combined_product) {
                             $qty_combined = $combined_product->quantity * $value['quantity'];
-
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $current_damage->warehouse_id)
-                                ->where('product_id', $combined_product->combined_product_id)
-                                ->first();
-
-                            if ($product_warehouse) {
-                                $product_warehouse->qte += $qty_combined;
-                                $product_warehouse->save();
-                            }
+                            $this->applyStockDelta($current_damage->warehouse_id, $combined_product->combined_product_id, null, $qty_combined);
                         }
 
-                        $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $current_damage->warehouse_id)
-                            ->where('product_id', $value['product_id'])
-                            ->first();
-
-                        if ($product_warehouse) {
-                            $product_warehouse->qte += $value['quantity'];
-                            $product_warehouse->save();
-                        }
+                        $this->applyStockDelta($current_damage->warehouse_id, $value['product_id'], null, $value['quantity']);
                     }
                 }
 
@@ -334,69 +278,25 @@ class DamageController extends BaseController
 
             $newPersistedDetails = [];
             foreach ($new_details as $key => $product_detail) {
-                // Apply new subtraction
+                // Apply new subtraction. Security fix (Build N2 / audit
+                // C-02 + H-02): see class docblock above.
                 if (! empty($product_detail['product_variant_id'])) {
-                    $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                        ->where('warehouse_id', $request->warehouse_id)
-                        ->where('product_id', $product_detail['product_id'])
-                        ->where('product_variant_id', $product_detail['product_variant_id'])
-                        ->first();
-
-                    if ($product_warehouse) {
-                        $product_warehouse->qte -= $product_detail['quantity'];
-                        if ($product_warehouse->qte < 0) {
-                            $product_warehouse->qte = 0;
-                        }
-                        $product_warehouse->save();
-                    }
+                    $this->applyStockDelta($request->warehouse_id, $product_detail['product_id'], $product_detail['product_variant_id'], -$product_detail['quantity'], true);
                 } else {
                     $prod = Product::where('deleted_at', '=', null)
                         ->where('id', $product_detail['product_id'])
                         ->first();
 
                     if ($prod && $prod->type == 'is_single') {
-                        $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $request->warehouse_id)
-                            ->where('product_id', $product_detail['product_id'])
-                            ->first();
-
-                        if ($product_warehouse) {
-                            $product_warehouse->qte -= $product_detail['quantity'];
-                            if ($product_warehouse->qte < 0) {
-                                $product_warehouse->qte = 0;
-                            }
-                            $product_warehouse->save();
-                        }
+                        $this->applyStockDelta($request->warehouse_id, $product_detail['product_id'], null, -$product_detail['quantity'], true);
                     } elseif ($prod && $prod->type == 'is_combo') {
                         $combined_products = CombinedProduct::where('product_id', $product_detail['product_id'])->with('product')->get();
                         foreach ($combined_products as $combined_product) {
                             $qty_combined = $combined_product->quantity * $product_detail['quantity'];
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $request->warehouse_id)
-                                ->where('product_id', $combined_product->combined_product_id)
-                                ->first();
-
-                            if ($product_warehouse) {
-                                $product_warehouse->qte -= $qty_combined;
-                                if ($product_warehouse->qte < 0) {
-                                    $product_warehouse->qte = 0;
-                                }
-                                $product_warehouse->save();
-                            }
+                            $this->applyStockDelta($request->warehouse_id, $combined_product->combined_product_id, null, -$qty_combined, true);
                         }
 
-                        $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $request->warehouse_id)
-                            ->where('product_id', $product_detail['product_id'])
-                            ->first();
-
-                        if ($product_warehouse) {
-                            $product_warehouse->qte -= $product_detail['quantity'];
-                            if ($product_warehouse->qte < 0) {
-                                $product_warehouse->qte = 0;
-                            }
-                            $product_warehouse->save();
-                        }
+                        $this->applyStockDelta($request->warehouse_id, $product_detail['product_id'], null, -$product_detail['quantity'], true);
                     }
                 }
 
@@ -473,58 +373,25 @@ class DamageController extends BaseController
             }
 
             foreach ($old_details as $key => $value) {
-                // Reverse subtraction (add back)
+                // Reverse subtraction (add back). Security fix (Build N2 /
+                // audit C-02 + H-02): see class docblock above.
                 if ($value['product_variant_id'] !== null) {
-                    $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                        ->where('warehouse_id', $current_damage->warehouse_id)
-                        ->where('product_id', $value['product_id'])
-                        ->where('product_variant_id', $value['product_variant_id'])
-                        ->first();
-
-                    if ($product_warehouse) {
-                        $product_warehouse->qte += $value['quantity'];
-                        $product_warehouse->save();
-                    }
+                    $this->applyStockDelta($current_damage->warehouse_id, $value['product_id'], $value['product_variant_id'], $value['quantity']);
                 } else {
                     $product_detail = Product::where('deleted_at', '=', null)
                         ->where('id', $value['product_id'])
                         ->first();
 
                     if ($product_detail && $product_detail->type == 'is_single') {
-                        $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $current_damage->warehouse_id)
-                            ->where('product_id', $value['product_id'])
-                            ->first();
-
-                        if ($product_warehouse) {
-                            $product_warehouse->qte += $value['quantity'];
-                            $product_warehouse->save();
-                        }
+                        $this->applyStockDelta($current_damage->warehouse_id, $value['product_id'], null, $value['quantity']);
                     } elseif ($product_detail && $product_detail->type == 'is_combo') {
                         $combined_products = CombinedProduct::where('product_id', $value['product_id'])->with('product')->get();
                         foreach ($combined_products as $combined_product) {
                             $qty_combined = $combined_product->quantity * $value['quantity'];
-
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $current_damage->warehouse_id)
-                                ->where('product_id', $combined_product->combined_product_id)
-                                ->first();
-
-                            if ($product_warehouse) {
-                                $product_warehouse->qte += $qty_combined;
-                                $product_warehouse->save();
-                            }
+                            $this->applyStockDelta($current_damage->warehouse_id, $combined_product->combined_product_id, null, $qty_combined);
                         }
 
-                        $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $current_damage->warehouse_id)
-                            ->where('product_id', $value['product_id'])
-                            ->first();
-
-                        if ($product_warehouse) {
-                            $product_warehouse->qte += $value['quantity'];
-                            $product_warehouse->save();
-                        }
+                        $this->applyStockDelta($current_damage->warehouse_id, $value['product_id'], null, $value['quantity']);
                     }
                 }
             }

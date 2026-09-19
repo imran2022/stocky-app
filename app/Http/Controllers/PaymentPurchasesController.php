@@ -13,6 +13,7 @@ use App\Models\Role;
 use App\Models\Setting;
 use App\Models\sms_gateway;
 use App\Models\SMSMessage;
+use App\Support\PaymentCapper;
 use App\utils\helpers;
 use ArPHP\I18N\Arabic;
 use Carbon\Carbon;
@@ -220,7 +221,8 @@ class PaymentPurchasesController extends BaseController
                     $this->authorizeForUser($request->user('api'), 'check_record', $purchase);
                 }
 
-                $total_paid = $purchase->paid_amount + $request['montant'];
+                // Security fix (Build N2 / audit H-01): see app/Support/PaymentCapper.php.
+                $total_paid = PaymentCapper::capPaid($purchase->GrandTotal, $purchase->paid_amount + $request['montant']);
                 $due = $purchase->GrandTotal - $total_paid;
 
                 if ($due === 0.0 || $due < 0.0) {
@@ -297,7 +299,8 @@ class PaymentPurchasesController extends BaseController
 
             $purchase = Purchase::whereId($request['purchase_id'])->first();
             $old_total_paid = $purchase->paid_amount - $payment->montant;
-            $new_total_paid = $old_total_paid + $request['montant'];
+            // Security fix (Build N2 / audit H-01): see app/Support/PaymentCapper.php.
+            $new_total_paid = PaymentCapper::capPaid($purchase->GrandTotal, $old_total_paid + $request['montant']);
 
             $due = $purchase->GrandTotal - $new_total_paid;
             if ($due === 0.0 || $due < 0.0) {
@@ -373,7 +376,9 @@ class PaymentPurchasesController extends BaseController
             }
 
             $purchase = Purchase::find($payment->purchase_id);
-            $total_paid = $purchase->paid_amount - $payment->montant;
+            // Security fix (Build N2 / audit H-01): floors at 0 — see
+            // app/Support/PaymentCapper.php.
+            $total_paid = PaymentCapper::capPaid($purchase->GrandTotal, $purchase->paid_amount - $payment->montant);
             $due = $purchase->GrandTotal - $total_paid;
 
             if ($due === 0.0 || $due < 0.0) {
@@ -427,11 +432,21 @@ class PaymentPurchasesController extends BaseController
     {
         $last = DB::table('payment_purchases')->latest('id')->first();
 
+        // Defensive fix: a legacy/malformed Ref with no '_' separator (e.g.
+        // seeded data like "PPU-9001") used to crash this with an
+        // "Undefined array key 1" error on `$nwMsg[1]`. Falls back to the
+        // same default used when there is no prior row at all, matching
+        // the tolerant pattern already used by
+        // Sales/Purchases/Adjustment::getNumberOrder().
         if ($last) {
-            $item = $last->Ref;
+            $item = (string) $last->Ref;
             $nwMsg = explode('_', $item);
-            $inMsg = $nwMsg[1] + 1;
-            $code = $nwMsg[0].'_'.$inMsg;
+            if (isset($nwMsg[1]) && is_numeric($nwMsg[1])) {
+                $inMsg = $nwMsg[1] + 1;
+                $code = $nwMsg[0].'_'.$inMsg;
+            } else {
+                $code = 'INV/PR_1111';
+            }
         } else {
             $code = 'INV/PR_1111';
         }
