@@ -264,8 +264,10 @@ class SyncService
             ->get();
 
         foreach ($details as $detail) {
-            $description = trim((string) ($detail->product_name ?? 'Item'))
-                .($detail->variant_name ? ' — '.$detail->variant_name : '');
+            $description = \App\Support\ProductDisplayName::format(
+                $detail->product_name ?? 'Item',
+                $detail->variant_name
+            );
             $code = $detail->variant_code ?: $detail->product_code;
             if ($code) {
                 $description .= ' ('.$code.')';

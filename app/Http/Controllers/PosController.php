@@ -237,10 +237,7 @@ class PosController extends BaseController
         $items = $sale->details->map(function ($d) use ($variants, $units) {
             $product = $d->product;
             $variant = $d->product_variant_id ? $variants->get($d->product_variant_id) : null;
-            $name = $product ? $product->name : null;
-            if ($variant && $variant->name) {
-                $name = trim(($name ?? '') . ' [' . $variant->name . ']');
-            }
+            $name = \App\Support\ProductDisplayName::format($product?->name, $variant?->name);
             $image = $variant && $variant->image ? $variant->image : ($product ? $product->image : null);
             $unitRow = $d->sale_unit_id ? $units->get($d->sale_unit_id) : null;
 
@@ -1840,7 +1837,7 @@ class PosController extends BaseController
                 $item_product ? $data['del'] = 0 : $data['del'] = 1;
                 $data['product_variant_id'] = $detail->product_variant_id;
                 $data['code'] = $productsVariants->code;
-                $data['name'] = '['.$productsVariants->name.']'.$detail['product']['name'];
+                $data['name'] = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
 
                 if ($unit && $unit->operator == '/') {
                     $stock = $item_product ? $item_product->qte * $unit->operator_value : 0;
@@ -2079,8 +2076,8 @@ class PosController extends BaseController
                     ->first();
 
                 $item['product_variant_id'] = $product_warehouse->product_variant_id;
-                $item['Variant'] = '['.$productsVariants->name.']'.$product_warehouse['product']->name;
-                $item['name'] = '['.$productsVariants->name.']'.$product_warehouse['product']->name;
+                $item['Variant'] = \App\Support\ProductDisplayName::format($product_warehouse['product']->name, $productsVariants->name);
+                $item['name'] = \App\Support\ProductDisplayName::format($product_warehouse['product']->name, $productsVariants->name);
 
                 $item['code'] = $productsVariants->code;
                 $item['barcode'] = $productsVariants->code;

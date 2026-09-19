@@ -4796,7 +4796,7 @@ class ReportController extends BaseController
                 $productsVariants = ProductVariant::where('product_id', $detail->product_id)
                     ->where('id', $detail->product_variant_id)->first();
 
-                $product_name = '[' . $productsVariants->name . ']' . $detail['product']['name'];
+                $product_name = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
             } else {
                 $product_name = $detail['product']['name'];
             }
@@ -4933,7 +4933,7 @@ class ReportController extends BaseController
                 $productsVariants = ProductVariant::where('product_id', $detail->product_id)
                     ->where('id', $detail->product_variant_id)->first();
 
-                $product_name = '[' . $productsVariants->name . ']' . $detail['product']['name'];
+                $product_name = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
             } else {
                 $product_name = $detail['product']['name'];
             }
@@ -5067,7 +5067,7 @@ class ReportController extends BaseController
                 $productsVariants = ProductVariant::where('product_id', $detail->product_id)
                     ->where('id', $detail->product_variant_id)->first();
 
-                $product_name = '[' . $productsVariants->name . ']' . $detail['product']['name'];
+                $product_name = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
             } else {
                 $product_name = $detail['product']['name'];
             }
@@ -5207,7 +5207,7 @@ class ReportController extends BaseController
                 $productsVariants = ProductVariant::where('product_id', $detail->product_id)
                     ->where('id', $detail->product_variant_id)->first();
 
-                $product_name = '[' . $productsVariants->name . ']' . $detail['product']['name'];
+                $product_name = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
             } else {
                 $product_name = $detail['product']['name'];
             }
@@ -5319,7 +5319,7 @@ class ReportController extends BaseController
             ->get()
             ->map(function ($r) {
                 return [
-                    'name' => $r->variant_name ? ('['.$r->variant_name.'] '.$r->product_name) : $r->product_name,
+                    'name' => \App\Support\ProductDisplayName::format($r->product_name, $r->variant_name),
                     'units_short' => (float) $r->units_short,
                 ];
             })
@@ -5339,7 +5339,7 @@ class ReportController extends BaseController
 
         $data = [];
         foreach ($rows as $r) {
-            $name = $r->variant_name ? ('['.$r->variant_name.'] '.$r->product_name) : $r->product_name;
+            $name = \App\Support\ProductDisplayName::format($r->product_name, $r->variant_name);
             $data[] = [
                 'id' => $r->id,
                 'product_id' => $r->product_id,
@@ -5481,7 +5481,7 @@ class ReportController extends BaseController
                 $productsVariants = ProductVariant::where('product_id', $detail->product_id)
                     ->where('id', $detail->product_variant_id)->first();
 
-                $product_name = '[' . $productsVariants->name . ']' . $detail['product']['name'];
+                $product_name = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
             } else {
                 $product_name = $detail['product']['name'];
             }
@@ -5615,7 +5615,7 @@ class ReportController extends BaseController
                     ->where('id', $detail->product_variant_id)
                     ->first();
 
-                $product_name = '[' . $productsVariants->name . ']' . $detail['product']['name'];
+                $product_name = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
             } else {
                 $product_name = $detail['product']['name'];
             }
@@ -5731,7 +5731,7 @@ class ReportController extends BaseController
                     ->where('id', $detail->product_variant_id)
                     ->first();
 
-                $product_name = '[' . $productsVariants->name . ']' . $detail['product']['name'];
+                $product_name = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
             } else {
                 $product_name = $detail['product']['name'];
             }
@@ -6300,7 +6300,7 @@ class ReportController extends BaseController
                 $productsVariants = ProductVariant::where('product_id', $detail->product_id)
                     ->where('id', $detail->product_variant_id)->first();
 
-                $product_name = '[' . $productsVariants->name . ']' . $detail['product']['name'];
+                $product_name = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
             } else {
                 $product_name = $detail['product']['name'];
             }
@@ -6502,7 +6502,7 @@ class ReportController extends BaseController
                 $productsVariants = ProductVariant::where('product_id', $detail->product_id)
                     ->where('id', $detail->product_variant_id)->first();
 
-                $product_name = '[' . $productsVariants->name . ']' . $detail['product']['name'];
+                $product_name = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
             } else {
                 $product_name = $detail['product']['name'];
             }
@@ -6677,9 +6677,7 @@ class ReportController extends BaseController
                 ];
             }
 
-            $product_name = $row->variant_name
-                ? '[' . $row->variant_name . ']' . $row->product_name
-                : $row->product_name;
+            $product_name = \App\Support\ProductDisplayName::format($row->product_name, $row->variant_name);
 
             $quantity = round((float) $row->quantity, 2);
             $total = round((float) $row->total, 2);
@@ -6971,7 +6969,7 @@ class ReportController extends BaseController
                 $productsVariants = ProductVariant::where('product_id', $detail->product_id)
                     ->where('id', $detail->product_variant_id)->first();
 
-                $product_name = '[' . $productsVariants->name . ']' . $detail['product']['name'];
+                $product_name = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
             } else {
                 $product_name = $detail['product']['name'];
             }

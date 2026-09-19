@@ -1975,7 +1975,7 @@ optional; the line just doesn't render when empty).
 
 ---
 
-## Build N1 — Security Hardening (Critical findings from third-party audit)
+## Build N1a — Security Hardening (Critical findings from third-party audit)
 
 **How to verify:**
 - [ ] Try creating a Sale via the API/POS with a line's subtotal
@@ -2008,3 +2008,32 @@ optional; the line just doesn't render when empty).
 overpayment capping, Purchase/Transfer/Adjustment/Damage versions of
 the C-01/C-02 fixes, DB-level unique constraints, Purchase Order
 float→decimal columns, npm dependency upgrades.
+
+---
+
+## Build N1b — Readable Product + Variant Display Names
+
+**Expected format:** `Apple Macbook 2026 - Variant: Grey`.
+
+**How to verify:**
+
+- [ ] Product/item list and product suggestions show the expected format.
+- [ ] POS search, recent-sale history, and cart lines show the same format.
+- [ ] Sale Create/Edit/Detail and all sale invoice/print/PDF paths match.
+- [ ] Purchase, Purchase Order, Quotation, Returns, Transfer, Adjustment, and
+      Damage screens/documents match.
+- [ ] Reports, public invoice, customer portal, online-order invoice, and
+      kitchen order labels match.
+- [ ] A simple product shows only its name, with no `Variant:` suffix.
+- [ ] A multi-option variant such as `Blue / XL` is not split or reordered.
+- [ ] Search by product name, variant name, and variant code still returns the
+      correct item.
+- [ ] SKU/code, stock, price, tax, discount, and all calculations are unchanged.
+- [ ] No legacy `[Grey]Apple Macbook 2026` label remains.
+
+**Automated tests:**
+
+```bash
+php vendor/bin/phpunit tests/Unit/ProductDisplayNameTest.php
+php tests/Regression/build_n1_product_variant_display_name.php
+```

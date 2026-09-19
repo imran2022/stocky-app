@@ -43,7 +43,7 @@ class OnlineOrderInvoiceService
             $lineTotal = $it->line_total !== null ? (float) $it->line_total : round($qty * $price, 2);
 
             $lines[] = [
-                'name' => $variant ? ($name.' - '.$variant) : $name,
+                'name' => \App\Support\ProductDisplayName::format($name, $variant),
                 'qty' => $qty,
                 'price' => $price,
                 'tax' => (float) ($it->TaxNet ?? 0),

@@ -616,9 +616,7 @@ class KitchenOrderController extends Controller
                     $variantCache[$d->product_variant_id] = ProductVariant::find($d->product_variant_id);
                 }
                 $variant = $variantCache[$d->product_variant_id];
-                if ($variant) {
-                    $name .= ' - '.$variant->name;
-                }
+                $name = \App\Support\ProductDisplayName::format($name, $variant?->name);
             }
 
             $unitName = null;

@@ -156,7 +156,7 @@ class MyOrdersApiController extends Controller
                     'id' => $d->id,
                     'product_id' => $d->product_id,
                     'product_variant_id' => $d->product_variant_id,
-                    'name' => $variant ? ($name.' - '.$variant) : $name,
+                    'name' => \App\Support\ProductDisplayName::format($name, $variant),
                     'qty' => (float) $d->qty,
                     'price' => (float) $d->price,
                     'line_total' => (float) $d->line_total,

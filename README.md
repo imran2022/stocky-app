@@ -1,3 +1,12 @@
+# Latest overlay: Build N1 — Readable Product + Variant Display Names
+
+Variable products now display as `Product - Variant: Name` consistently across
+Products, POS, transactions, reports, and documents. See
+`BUILD_N1_PRODUCT_VARIANT_DISPLAY_NAMES.md` for scope, apply steps, tests, and
+rollback. Earlier build notes continue below.
+
+---
+
 # Build K.4 — Activity Log Report missing after fresh install + custom permissions missing from Roles & Permissions
 
 ## What this fixes

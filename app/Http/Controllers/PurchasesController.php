@@ -1112,7 +1112,7 @@ class PurchasesController extends BaseController
                     ->where('id', $detail->product_variant_id)->first();
 
                 $data['code'] = $productsVariants->code;
-                $data['name'] = '['.$productsVariants->name.']'.$detail['product']['name'];
+                $data['name'] = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
 
             } else {
                 $data['code'] = $detail['product']['code'];
@@ -1300,7 +1300,7 @@ class PurchasesController extends BaseController
                     ->where('id', $detail->product_variant_id)->first();
 
                 $data['code'] = $productsVariants->code;
-                $data['name'] = '['.$productsVariants->name.']'.$detail['product']['name'];
+                $data['name'] = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
             } else {
                 $data['code'] = $detail['product']['code'];
                 $data['name'] = $detail['product']['name'];
@@ -1429,7 +1429,7 @@ class PurchasesController extends BaseController
                     ->where('id', $detail->product_variant_id)->first();
 
                 $data['code'] = $productsVariants->code;
-                $data['name'] = '['.$productsVariants->name.']'.$detail['product']['name'];
+                $data['name'] = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
             } else {
                 $data['code'] = $detail['product']['code'];
                 $data['name'] = $detail['product']['name'];
@@ -1652,7 +1652,7 @@ class PurchasesController extends BaseController
                     $item_product ? $data['del'] = 0 : $data['del'] = 1;
 
                     $data['code'] = $productsVariants->code;
-                    $data['name'] = '['.$productsVariants->name.']'.$detail['product']['name'];
+                    $data['name'] = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
                     $data['product_variant_id'] = $detail->product_variant_id;
 
                     if ($unit && $unit->operator == '/') {
@@ -1806,7 +1806,7 @@ class PurchasesController extends BaseController
                     ->where('id', $detail->product_variant_id)->first();
 
                 $item_product ? $data['del'] = 0 : $data['del'] = 1;
-                $data['name'] = '['.$productsVariants->name.']'.$detail['product']['name'];
+                $data['name'] = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
                 $data['code'] = $productsVariants->code;
 
                 $data['product_variant_id'] = $detail->product_variant_id;
@@ -1928,7 +1928,7 @@ class PurchasesController extends BaseController
 
                 if ($variant) {
                     $item['code'] = $variant->code;
-                    $item['name'] = '['.$variant->name.']'.$product->name;
+                    $item['name'] = \App\Support\ProductDisplayName::format($product->name, $variant->name);
                     $barcodeValue = $variant->code;
                     $product_price = $variant->price ?? $product->price;
                 } else {

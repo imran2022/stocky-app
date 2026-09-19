@@ -277,7 +277,7 @@ class PurchaseOrderController extends Controller
                     'id' => $d->id,
                     'product_id' => $d->product_id,
                     'product_variant_id' => $d->product_variant_id,
-                    'name' => optional($d->variant)->name ?? optional($d->product)->name,
+                    'name' => \App\Support\ProductDisplayName::format(optional($d->product)->name, optional($d->variant)->name),
                     'code' => optional($d->variant)->code ?? optional($d->product)->code,
                     'cost' => $d->cost,
                     'tax_percent' => $d->TaxNet,
@@ -475,7 +475,7 @@ class PurchaseOrderController extends Controller
                     'purchase_order_detail_id' => $d->id,
                     'product_id' => $d->product_id,
                     'product_variant_id' => $d->product_variant_id,
-                    'name' => optional($d->variant)->name ?? optional($d->product)->name,
+                    'name' => \App\Support\ProductDisplayName::format(optional($d->product)->name, optional($d->variant)->name),
                     'code' => optional($d->variant)->code ?? optional($d->product)->code,
                     'ordered_quantity' => $d->quantity,
                     'received_quantity' => $d->received_quantity,
@@ -649,7 +649,7 @@ class PurchaseOrderController extends Controller
                 $cost = (float) $d->cost * $docCurrency['rate'];
 
                 return [
-                    'name' => optional($d->variant)->name ?? optional($d->product)->name,
+                    'name' => \App\Support\ProductDisplayName::format(optional($d->product)->name, optional($d->variant)->name),
                     'code' => optional($d->variant)->code ?? optional($d->product)->code,
                     'quantity' => number_format($d->quantity, helpers::price_decimals(), '.', ''),
                     'cost' => number_format($cost, helpers::price_decimals(), '.', ''),

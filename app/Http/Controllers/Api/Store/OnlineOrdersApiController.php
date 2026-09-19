@@ -191,7 +191,7 @@ class OnlineOrdersApiController extends Controller
                     'id' => $d->id,
                     'product_id' => $d->product_id,
                     'product_variant_id' => $d->product_variant_id,
-                    'name' => $variant ? ($name.' - '.$variant) : $name,
+                    'name' => \App\Support\ProductDisplayName::format($name, $variant),
                     'qty' => (float) $d->qty,
                     'price' => (float) $d->price,
                     'line_total' => (float) $d->line_total,
@@ -222,9 +222,7 @@ class OnlineOrdersApiController extends Controller
             $product = $it->product;
             $unit = $this->saleUnitForProduct($product);
             $name = $product?->name ?? ('#'.$it->product_id);
-            if ($it->productVariant?->name) {
-                $name .= ' - '.$it->productVariant->name;
-            }
+            $name = \App\Support\ProductDisplayName::format($name, $it->productVariant?->name);
             $lines[] = [
                 'product_id' => (int) $it->product_id,
                 'product_variant_id' => $it->product_variant_id ? (int) $it->product_variant_id : null,

@@ -1796,7 +1796,7 @@ class SalesController extends BaseController
                     ->where('id', $detail->product_variant_id)->first();
 
                 $data['code'] = $productsVariants->code;
-                $data['name'] = '['.$productsVariants->name.']'.$detail['product']['name'];
+                $data['name'] = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
 
             } else {
                 $data['code'] = $detail['product']['code'];
@@ -1935,7 +1935,7 @@ class SalesController extends BaseController
                     ->where('id', $detail->product_variant_id)->first();
 
                 $data['code'] = $productsVariants->code;
-                $data['name'] = '['.$productsVariants->name.']'.$detail['product']['name'];
+                $data['name'] = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
 
             } else {
                 $data['code'] = $detail['product']['code'];
@@ -2122,7 +2122,7 @@ class SalesController extends BaseController
             if ($detail->product_variant_id) {
                 $pv = ProductVariant::where('product_id', $detail->product_id)
                     ->where('id', $detail->product_variant_id)->first();
-                $name = ($pv ? ('[' . $pv->name . ']') : '') . ($detail->product->name ?? '');
+                $name = \App\Support\ProductDisplayName::format($detail->product->name ?? '', $pv?->name);
             } else {
                 $name = $detail->product->name ?? '';
             }
@@ -2573,7 +2573,7 @@ class SalesController extends BaseController
                 $variant = ProductVariant::whereNull('deleted_at')->where('id', $variantId)->first();
                 if ($variant) {
                     $code = $variant->code;
-                    $name = '['.$variant->name.'] '.$product->name;
+                    $name = \App\Support\ProductDisplayName::format($product->name, $variant->name);
                 }
             }
 
@@ -2922,7 +2922,7 @@ class SalesController extends BaseController
                 $productsVariants = ProductVariant::where('product_id', $detail->product_id)
                     ->where('id', $detail->product_variant_id)->first();
                 $data['code'] = $productsVariants->code;
-                $data['name'] = '['.$productsVariants->name.']'.$detail['product']['name'];
+                $data['name'] = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
             } else {
                 $data['code'] = $detail['product']['code'];
                 $data['name'] = $detail['product']['name'];
@@ -3227,7 +3227,7 @@ class SalesController extends BaseController
             if ($detail->product_variant_id) {
                 $variant = ProductVariant::where('product_id', $detail->product_id)->where('id', $detail->product_variant_id)->first();
                 $code = $variant->code ?? '';
-                $name = $variant ? '['.$variant->name.']'.$detail->product->name : $detail->product->name;
+                $name = \App\Support\ProductDisplayName::format($detail->product->name, $variant?->name);
             } else {
                 $code = $detail->product->code;
                 $name = $detail->product->name;
@@ -3353,7 +3353,7 @@ class SalesController extends BaseController
                     ->where('id', $detail->product_variant_id)->first();
 
                 $data['code'] = $productsVariants->code;
-                $data['name'] = '['.$productsVariants->name.']'.$detail['product']['name'];
+                $data['name'] = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
             } else {
                 $data['code'] = $detail['product']['code'];
                 $data['name'] = $detail['product']['name'];
@@ -3521,7 +3521,7 @@ class SalesController extends BaseController
                     ->where('id', $detail->product_variant_id)->first();
 
                 $data['code'] = $productsVariants->code;
-                $data['name'] = '['.$productsVariants->name.']'.$detail['product']['name'];
+                $data['name'] = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
             } else {
                 $data['code'] = $detail['product']['code'];
                 $data['name'] = $detail['product']['name'];
@@ -3807,7 +3807,7 @@ class SalesController extends BaseController
                     $item_product ? $data['del'] = 0 : $data['del'] = 1;
                     $data['product_variant_id'] = $detail->product_variant_id;
                     $data['code'] = $productsVariants->code;
-                    $data['name'] = '['.$productsVariants->name.']'.$detail['product']['name'];
+                    $data['name'] = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
 
                     if ($unit && $unit->operator == '/') {
                         $stock = $item_product ? $item_product->qte * $unit->operator_value : 0;
@@ -4024,7 +4024,7 @@ class SalesController extends BaseController
                     $item_product ? $data['del'] = 0 : $data['del'] = 1;
                     $data['product_variant_id'] = $detail->product_variant_id;
                     $data['code'] = $productsVariants->code;
-                    $data['name'] = '['.$productsVariants->name.']'.$detail['product']['name'];
+                    $data['name'] = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
 
                     if ($unit && $unit->operator == '/') {
                         $stock = $item_product ? $item_product->qte / $unit->operator_value : 0;
@@ -4187,7 +4187,7 @@ class SalesController extends BaseController
                 $item_product ? $data['del'] = 0 : $data['del'] = 1;
                 $data['product_variant_id'] = $detail->product_variant_id;
                 $data['code'] = $productsVariants->code;
-                $data['name'] = '['.$productsVariants->name.']'.$detail['product']['name'];
+                $data['name'] = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
 
                 if ($unit && $unit->operator == '/') {
                     $stock = $item_product ? $item_product->qte * $unit->operator_value : 0;
@@ -5027,7 +5027,7 @@ class SalesController extends BaseController
             if ($detail->product_variant_id) {
                 $variant = ProductVariant::where('product_id', $detail->product_id)
                     ->where('id', $detail->product_variant_id)->first();
-                $name = '[' . ($variant ? $variant->name : '') . ']' . $detail->product->name;
+                $name = \App\Support\ProductDisplayName::format($detail->product->name, $variant?->name);
             } else {
                 $name = $detail->product->name;
             }
