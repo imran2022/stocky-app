@@ -3679,7 +3679,9 @@ build introduced):**
 - Two new Dashboard panels, matching what the user asked to see,
   added to the main Dashboard page (new row between "Stock Alert /
   Top Selling" and "Recent Sales"):
-  - **"Today's sales by hour"** — a bar chart, always today, same
+  - **"Today's sales by hour"** — a smooth gradient area chart (with
+    hover markers, matching the styling of the Payment Sent/Received
+    chart already on this Dashboard), always today, same
     hourly data source as the Real-time Sales Counter's chart (now
     fixed).
   - **"Sales by Warehouse"** — a small table (Name / Total Invoice /

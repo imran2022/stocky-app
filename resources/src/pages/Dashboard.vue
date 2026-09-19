@@ -220,7 +220,7 @@
       <a-row :gutter="[16, 16]" style="margin-top: 16px">
         <a-col :xs="24" :xl="14">
           <a-card class="chart-card" :title="$t('Hourly_Sales_Today')">
-            <apexchart v-if="hourlyChart.series[0]?.data.length" :key="'hourly-' + loadCount" type="bar" height="300" :options="hourlyChart.options" :series="hourlyChart.series" />
+            <apexchart v-if="hourlyChart.series[0]?.data.length" :key="'hourly-' + loadCount" type="area" height="300" :options="hourlyChart.options" :series="hourlyChart.series" />
             <a-empty v-else :description="$t('No_sales_today')" style="padding: 48px 0" />
           </a-card>
         </a-col>
@@ -474,16 +474,20 @@ const GRID = { borderColor: 'rgba(128,128,128,0.2)', strokeDashArray: 4 };
 // Cohesive, modern categorical palette shared across every dashboard chart.
 const PALETTE = ['#6366f1', '#22d3ee', '#f59e0b', '#ec4899', '#10b981', '#8b5cf6', '#0ea5e9', '#f43f5e'];
 
-// Today's Sales by Hour — same bar chart as the Real-time Sales Counter page.
+// Today's Sales by Hour — smooth gradient area chart (same "modern" style
+// as the Payment Sent/Received chart above on this same Dashboard), with
+// hover markers for a more interactive feel than a plain bar chart.
 const hourlyChart = computed(() => {
   const totals = hourlySalesToday.value.map(h => Number(h.total) || 0);
   return {
     series: [{ name: t('Sales'), data: hourlySalesToday.value.map(h => Number(h.count) || 0) }],
     options: {
-      chart: { ...CHART_BASE, type: 'bar' },
-      plotOptions: { bar: { columnWidth: '55%', borderRadius: 6 } },
-      dataLabels: { enabled: false },
+      chart: { ...CHART_BASE, type: 'area' },
       colors: ['#6d28d9'],
+      stroke: { curve: 'smooth', width: 3 },
+      fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.45, opacityTo: 0.05, stops: [0, 95] } },
+      markers: { size: 0, hover: { size: 6 }, strokeWidth: 2, strokeColors: '#fff' },
+      dataLabels: { enabled: false },
       xaxis: {
         categories: Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, '0')}h`),
         axisBorder: { show: false }, axisTicks: { show: false },
