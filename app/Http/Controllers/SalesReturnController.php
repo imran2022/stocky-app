@@ -1280,6 +1280,8 @@ class SalesReturnController extends BaseController
 
     public function Return_pdf(Request $request, $id)
     {
+        // Security fix (Build N1 / audit C-05)
+        $this->authorizeForUser($request->user('api'), 'view', SaleReturn::class);
 
         $details = [];
         $helpers = new helpers;

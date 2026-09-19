@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Console\Commands\DatabaseBackUp;
 use ArPHP\I18N\Arabic;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -146,7 +147,9 @@ class SystemHealthController extends Controller
 
     protected function getLastBackupDate(): ?array
     {
-        $dir = storage_path('app/public/backup');
+        // Security fix (Build N1 / audit C-04): read from the new, private
+        // backup directory.
+        $dir = DatabaseBackUp::backupDir();
         if (! is_dir($dir)) {
             return ['date' => null, 'human' => null, 'message' => 'Backup directory not found'];
         }

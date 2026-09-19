@@ -10,6 +10,7 @@ use App\Models\Setting;
 use App\Models\User;
 use App\Models\UserWarehouse;
 use App\Models\Warehouse;
+use App\Support\SafeDocumentUpload;
 use App\utils\helpers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -537,7 +538,9 @@ class PurchaseOrderController extends Controller
         $this->abortIfWarehouseDenied($po->warehouse_id);
 
         $request->validate([
-            'documents.*' => 'required|file|max:10240',
+            // Security fix (Build N1 / audit C-03): allow-list of safe
+            // document types only — was previously unrestricted.
+            'documents.*' => SafeDocumentUpload::validationRule(),
         ]);
 
         $uploaded = [];
@@ -551,7 +554,10 @@ class PurchaseOrderController extends Controller
                 $originalName = $file->getClientOriginalName();
                 $mime = $file->getClientMimeType();
                 $size = $file->getSize();
-                $storedName = uniqid('po_'.$po->id.'_').'.'.$file->getClientOriginalExtension();
+                // Security fix: filename built from the VALIDATED extension
+                // only, never trusting the client-supplied original name/
+                // extension directly.
+                $storedName = SafeDocumentUpload::safeFilename($file, 'po_'.$po->id);
                 $file->move($uploadPath, $storedName);
 
                 $documentId = DB::table('purchase_order_documents')->insertGetId([

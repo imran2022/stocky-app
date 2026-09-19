@@ -1275,6 +1275,9 @@ class TransferController extends BaseController
 
     public function transfer_pdf(Request $request, $id)
     {
+        // Security fix (Build N1 / audit C-05)
+        $this->authorizeForUser($request->user('api'), 'view', Transfer::class);
+
         $details = [];
         $helpers = new helpers;
         $transfer_data = Transfer::with('details.product.unitPurchase')

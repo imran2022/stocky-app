@@ -8,6 +8,7 @@ use App\Models\Setting;
 use App\Models\sms_gateway;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
+use App\Console\Commands\DatabaseBackUp;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use ZipArchive;
@@ -739,7 +740,9 @@ class AutoUpdateController extends Controller
 
     private function createApplicationBackupZip(): string
     {
-        $backupDir = storage_path('app/public/backup');
+        // Security fix (Build N1 / audit C-04): private directory, not the
+        // publicly web-reachable storage/app/public path.
+        $backupDir = DatabaseBackUp::backupDir();
         if (! File::exists($backupDir)) {
             File::makeDirectory($backupDir, 0755, true);
         }
@@ -757,7 +760,8 @@ class AutoUpdateController extends Controller
         // Exclude only updater temp/backup directories to avoid recursion; include everything else
         $excludePaths = [
             'storage/app/updates',
-            'storage/app/public/backup',
+            'storage/app/backups',
+            'storage/app/public/backup', // legacy path, excluded in case it still has residue
         ];
 
         $normalize = function (string $path): string {
@@ -1094,7 +1098,9 @@ class AutoUpdateController extends Controller
 
     private function findLatestDatabaseBackup(): ?string
     {
-        $dir = storage_path('app/public/backup');
+        // Security fix (Build N1 / audit C-04): private directory, not the
+        // publicly web-reachable storage/app/public path.
+        $dir = DatabaseBackUp::backupDir();
         if (! File::exists($dir)) {
             return null;
         }

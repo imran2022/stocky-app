@@ -37,6 +37,9 @@ use App\Models\Warehouse;
 use App\Support\SaleDocumentMath;
 use App\Support\PaymentTerms;
 use App\Support\SaleMetadataRules;
+use App\Support\SafeDocumentUpload;
+use App\Support\SaleTotalsGuard;
+use App\Support\StockMutator;
 use App\Support\ZatcaQr;
 use App\utils\helpers;
 use ArPHP\I18N\Arabic;
@@ -400,6 +403,40 @@ class SalesController extends BaseController
             $this->assertPackStockSufficient($request);
         }
 
+        // Security fix (Build N1 / audit C-01): reject a request whose
+        // GrandTotal/TaxNet/line totals aren't arithmetically consistent
+        // with the quantity/price/discount/tax it also submitted. See
+        // app/Support/SaleTotalsGuard.php for exactly what is and isn't
+        // enforced here.
+        try {
+            $lineTotalsSum = 0.0;
+            foreach ((array) $request['details'] as $value) {
+                SaleTotalsGuard::checkLine(
+                    $value['quantity'] ?? 0,
+                    $value['Unit_price'] ?? 0,
+                    $value['discount'] ?? 0,
+                    $value['discount_Method'] ?? '2',
+                    $value['tax_percent'] ?? 0,
+                    $value['subtotal'] ?? 0
+                );
+                $lineTotalsSum += (float) ($value['subtotal'] ?? 0);
+            }
+            SaleTotalsGuard::checkGrandTotal(
+                $lineTotalsSum,
+                $request->shipping ?? 0,
+                $request->discount ?? 0,
+                $request->has('discount_Method') ? (string) $request->discount_Method : '2',
+                $request->GrandTotal ?? 0
+            );
+            SaleTotalsGuard::checkTaxNet($request->GrandTotal ?? 0, $request->TaxNet ?? 0);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'The submitted totals do not match the line items and were rejected.',
+                'error' => $e->getMessage(),
+            ], 422);
+        }
+
         $sale = \DB::transaction(function () use ($request) {
             $helpers = new helpers;
             $order = new Sale;
@@ -503,37 +540,34 @@ class SalesController extends BaseController
                 ], $warrantyGuarantee);
 
                 if ($order->statut == 'completed') {
-                    if ($value['product_variant_id'] !== null) {
-                        $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $order->warehouse_id)
-                            ->where('product_id', $value['product_id'])
-                            ->where('product_variant_id', $value['product_variant_id'])
-                            ->first();
-
-                        if ($unit && $product_warehouse) {
-                            if ($unit->operator == '/') {
-                                $product_warehouse->qte -= $packQty / $unit->operator_value;
-                            } else {
-                                $product_warehouse->qte -= $packQty * $unit->operator_value;
-                            }
-                            $product_warehouse->save();
-                        }
-
-                    } else {
-                        $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $order->warehouse_id)
-                            ->where('product_id', $value['product_id'])
-                            ->first();
-
-                        if ($unit && $product_warehouse) {
-                            if ($unit->operator == '/') {
-                                $product_warehouse->qte -= $packQty / $unit->operator_value;
-                            } else {
-                                $product_warehouse->qte -= $packQty * $unit->operator_value;
-                            }
-                            $product_warehouse->save();
-                        }
+                    // Security fix (Build N1 / audit C-02 + H-02): the stock
+                    // row used to be looked up with `->first()` and only
+                    // touched `if ($product_warehouse)` — a product never
+                    // stocked in this warehouse before had no row, the
+                    // condition was silently false, and the sale completed
+                    // with NO stock deducted at all. StockMutator::lockOrCreate()
+                    // always returns a (row-locked) row, creating it at
+                    // qte=0 first if needed, so the deduction can never be
+                    // silently skipped. If the unit can't be resolved we
+                    // abort the whole sale rather than guess a quantity.
+                    if (! $unit) {
+                        throw new \RuntimeException(
+                            'Sale line for product '.$value['product_id'].' has an unknown/missing sale unit; cannot safely update stock.'
+                        );
                     }
+
+                    $product_warehouse = StockMutator::lockOrCreate(
+                        $order->warehouse_id,
+                        $value['product_id'],
+                        $value['product_variant_id'] !== null ? $value['product_variant_id'] : null
+                    );
+
+                    if ($unit->operator == '/') {
+                        $product_warehouse->qte -= $packQty / $unit->operator_value;
+                    } else {
+                        $product_warehouse->qte -= $packQty * $unit->operator_value;
+                    }
+                    $product_warehouse->save();
                 }
             }
             SaleDetail::insert($orderDetails);
@@ -790,6 +824,37 @@ class SalesController extends BaseController
             'client_id' => 'required',
         ], SaleMetadataRules::saleFields()));
 
+        // Security fix (Build N1 / audit C-01) — see the matching check in
+        // store() and app/Support/SaleTotalsGuard.php.
+        try {
+            $lineTotalsSum = 0.0;
+            foreach ((array) $request['details'] as $value) {
+                SaleTotalsGuard::checkLine(
+                    $value['quantity'] ?? 0,
+                    $value['Unit_price'] ?? 0,
+                    $value['discount'] ?? 0,
+                    $value['discount_Method'] ?? '2',
+                    $value['tax_percent'] ?? 0,
+                    $value['subtotal'] ?? 0
+                );
+                $lineTotalsSum += (float) ($value['subtotal'] ?? 0);
+            }
+            SaleTotalsGuard::checkGrandTotal(
+                $lineTotalsSum,
+                $request->shipping ?? 0,
+                $request->discount ?? 0,
+                $request->has('discount_Method') ? (string) $request->discount_Method : '2',
+                $request->GrandTotal ?? 0
+            );
+            SaleTotalsGuard::checkTaxNet($request->GrandTotal ?? 0, $request->TaxNet ?? 0);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'The submitted totals do not match the line items and were rejected.',
+                'error' => $e->getMessage(),
+            ], 422);
+        }
+
         $sale = \DB::transaction(function () use ($request, $id) {
 
             $user = Auth::user();
@@ -884,36 +949,23 @@ class SalesController extends BaseController
                     $oldPackQty = $value['quantity'] * $oldPackMultiplier;
 
                     if ($current_Sale->statut == 'completed') {
+                        // Security fix (Build N1 / audit C-02 + H-02): see
+                        // the matching note in store() — always lock-or-create
+                        // the row instead of silently skipping the restore
+                        // when no row exists yet.
+                        if ($old_unit) {
+                            $product_warehouse = StockMutator::lockOrCreate(
+                                $current_Sale->warehouse_id,
+                                $value['product_id'],
+                                $value['product_variant_id'] !== null ? $value['product_variant_id'] : null
+                            );
 
-                        if ($value['product_variant_id'] !== null) {
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $current_Sale->warehouse_id)
-                                ->where('product_id', $value['product_id'])
-                                ->where('product_variant_id', $value['product_variant_id'])
-                                ->first();
-
-                            if ($product_warehouse && $old_unit) {
-                                if ($old_unit->operator == '/') {
-                                    $product_warehouse->qte += $oldPackQty / $old_unit->operator_value;
-                                } else {
-                                    $product_warehouse->qte += $oldPackQty * $old_unit->operator_value;
-                                }
-                                $product_warehouse->save();
+                            if ($old_unit->operator == '/') {
+                                $product_warehouse->qte += $oldPackQty / $old_unit->operator_value;
+                            } else {
+                                $product_warehouse->qte += $oldPackQty * $old_unit->operator_value;
                             }
-
-                        } else {
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $current_Sale->warehouse_id)
-                                ->where('product_id', $value['product_id'])
-                                ->first();
-                            if ($product_warehouse && $old_unit) {
-                                if ($old_unit->operator == '/') {
-                                    $product_warehouse->qte += $oldPackQty / $old_unit->operator_value;
-                                } else {
-                                    $product_warehouse->qte += $oldPackQty * $old_unit->operator_value;
-                                }
-                                $product_warehouse->save();
-                            }
+                            $product_warehouse->save();
                         }
                     }
                     // Delete Detail
@@ -942,39 +994,26 @@ class SalesController extends BaseController
                         $newPackQty = $prod_detail['quantity'] * $newPackMultiplier;
 
                         if ($request['statut'] == 'completed') {
-
-                            if ($prod_detail['product_variant_id'] !== null) {
-                                $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                    ->where('warehouse_id', $request->warehouse_id)
-                                    ->where('product_id', $prod_detail['product_id'])
-                                    ->where('product_variant_id', $prod_detail['product_variant_id'])
-                                    ->first();
-
-                                if ($product_warehouse && $unit_prod) {
-                                    if ($unit_prod->operator == '/') {
-                                        $product_warehouse->qte -= $newPackQty / $unit_prod->operator_value;
-                                    } else {
-                                        $product_warehouse->qte -= $newPackQty * $unit_prod->operator_value;
-                                    }
-                                    $product_warehouse->save();
-                                }
-
-                            } else {
-                                $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                    ->where('warehouse_id', $request->warehouse_id)
-                                    ->where('product_id', $prod_detail['product_id'])
-                                    ->first();
-
-                                if ($product_warehouse && $unit_prod) {
-                                    if ($unit_prod->operator == '/') {
-                                        $product_warehouse->qte -= $newPackQty / $unit_prod->operator_value;
-                                    } else {
-                                        $product_warehouse->qte -= $newPackQty * $unit_prod->operator_value;
-                                    }
-                                    $product_warehouse->save();
-                                }
+                            // Security fix (Build N1 / audit C-02 + H-02): see
+                            // the matching note in store().
+                            if (! $unit_prod) {
+                                throw new \RuntimeException(
+                                    'Sale line for product '.$prod_detail['product_id'].' has an unknown/missing sale unit; cannot safely update stock.'
+                                );
                             }
 
+                            $product_warehouse = StockMutator::lockOrCreate(
+                                $request->warehouse_id,
+                                $prod_detail['product_id'],
+                                $prod_detail['product_variant_id'] !== null ? $prod_detail['product_variant_id'] : null
+                            );
+
+                            if ($unit_prod->operator == '/') {
+                                $product_warehouse->qte -= $newPackQty / $unit_prod->operator_value;
+                            } else {
+                                $product_warehouse->qte -= $newPackQty * $unit_prod->operator_value;
+                            }
+                            $product_warehouse->save();
                         }
 
                         $orderDetails['sale_id'] = $id;
@@ -1558,36 +1597,21 @@ class SalesController extends BaseController
                         $selPackQty = $value['quantity'] * $selPackMul;
 
                         if ($current_Sale->statut == 'completed') {
+                            // Security fix (Build N1 / audit C-02 + H-02): see
+                            // the matching note in store().
+                            if ($old_unit) {
+                                $product_warehouse = StockMutator::lockOrCreate(
+                                    $current_Sale->warehouse_id,
+                                    $value['product_id'],
+                                    $value['product_variant_id'] !== null ? $value['product_variant_id'] : null
+                                );
 
-                            if ($value['product_variant_id'] !== null) {
-                                $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                    ->where('warehouse_id', $current_Sale->warehouse_id)
-                                    ->where('product_id', $value['product_id'])
-                                    ->where('product_variant_id', $value['product_variant_id'])
-                                    ->first();
-
-                                if ($product_warehouse && $old_unit) {
-                                    if ($old_unit->operator == '/') {
-                                        $product_warehouse->qte += $selPackQty / $old_unit->operator_value;
-                                    } else {
-                                        $product_warehouse->qte += $selPackQty * $old_unit->operator_value;
-                                    }
-                                    $product_warehouse->save();
+                                if ($old_unit->operator == '/') {
+                                    $product_warehouse->qte += $selPackQty / $old_unit->operator_value;
+                                } else {
+                                    $product_warehouse->qte += $selPackQty * $old_unit->operator_value;
                                 }
-
-                            } else {
-                                $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                    ->where('warehouse_id', $current_Sale->warehouse_id)
-                                    ->where('product_id', $value['product_id'])
-                                    ->first();
-                                if ($product_warehouse && $old_unit) {
-                                    if ($old_unit->operator == '/') {
-                                        $product_warehouse->qte += $selPackQty / $old_unit->operator_value;
-                                    } else {
-                                        $product_warehouse->qte += $selPackQty * $old_unit->operator_value;
-                                    }
-                                    $product_warehouse->save();
-                                }
+                                $product_warehouse->save();
                             }
                         }
 
@@ -1831,6 +1855,9 @@ class SalesController extends BaseController
 
     public function Print_Invoice_POS(Request $request, $id)
     {
+        // Security fix (Build N1 / audit C-05)
+        $this->authorizeForUser($request->user('api'), 'view', Sale::class);
+
         $helpers = new helpers;
         $details = [];
 
@@ -2014,6 +2041,9 @@ class SalesController extends BaseController
     // (window.print / PDF popup) is untouched and remains the default.
     public function Direct_Network_Print_POS(Request $request, $id)
     {
+        // Security fix (Build N1 / audit C-05)
+        $this->authorizeForUser($request->user('api'), 'view', Sale::class);
+
         $pos_settings = PosSetting::where('deleted_at', '=', null)->first();
 
         if (!$pos_settings || !$pos_settings->direct_network_printing) {
@@ -2961,6 +2991,9 @@ class SalesController extends BaseController
      */
     public function Sale_PDF_Bulk(Request $request)
     {
+        // Security fix (Build N1 / audit C-05)
+        $this->authorizeForUser($request->user('api'), 'view', Sale::class);
+
         $ids = array_filter(array_map('trim', explode(',', (string) $request->query('ids', ''))));
         if (empty($ids)) {
             abort(422, 'No sales selected.');
@@ -2978,6 +3011,9 @@ class SalesController extends BaseController
      */
     public function Sale_Shipping_Label_Bulk(Request $request)
     {
+        // Security fix (Build N1 / audit C-05)
+        $this->authorizeForUser($request->user('api'), 'view', Sale::class);
+
         $ids = array_filter(array_map('trim', explode(',', (string) $request->query('ids', ''))));
         if (empty($ids)) {
             abort(422, 'No sales selected.');
@@ -3138,6 +3174,9 @@ class SalesController extends BaseController
 
     public function Sale_Shipping_Label(Request $request, $id)
     {
+        // Security fix (Build N1 / audit C-05)
+        $this->authorizeForUser($request->user('api'), 'view', Sale::class);
+
         $sale_data = Sale::where('deleted_at', '=', null)->findOrFail($id);
         $helpers = new helpers;
 
@@ -3170,6 +3209,9 @@ class SalesController extends BaseController
      */
     public function Sale_Packing_List(Request $request, $id)
     {
+        // Security fix (Build N1 / audit C-05)
+        $this->authorizeForUser($request->user('api'), 'view', Sale::class);
+
         $sale_data = Sale::with('details.product')->where('deleted_at', '=', null)->findOrFail($id);
 
         $sale = [
@@ -3227,6 +3269,8 @@ class SalesController extends BaseController
 
     public function Sale_PDF(Request $request, $id)
     {
+        // Security fix (Build N1 / audit C-05)
+        $this->authorizeForUser($request->user('api'), 'view', Sale::class);
 
         $details = [];
         $helpers = new helpers;
@@ -3395,6 +3439,9 @@ class SalesController extends BaseController
      */
     public function Sale_PDF_Inline(Request $request, $id)
     {
+        // Security fix (Build N1 / audit C-05)
+        $this->authorizeForUser($request->user('api'), 'view', Sale::class);
+
         $details = [];
         $helpers = new helpers;
         $sale_data = Sale::with('details.product.unitSale', 'warehouse', 'zone', 'courier')
@@ -4832,7 +4879,10 @@ class SalesController extends BaseController
         $sale = Sale::findOrFail($saleId);
 
         $request->validate([
-            'documents.*' => 'required|file|max:10240', // Max 10MB per file
+            // Security fix (Build N1 / audit C-03): allow-list of safe
+            // document types only — was previously 'required|file|max:10240'
+            // with no extension/mime restriction at all.
+            'documents.*' => SafeDocumentUpload::validationRule(),
         ]);
 
         $uploadedDocuments = [];
@@ -4850,8 +4900,12 @@ class SalesController extends BaseController
                 $size = $file->getSize();
                 $mimeType = $file->getMimeType();
 
-                $filename = time() . '_' . Str::random(10) . '_' . $originalName;
-                
+                // Security fix (Build N1 / audit C-03): filename is built
+                // from the VALIDATED extension only, never the client's
+                // original filename, so a "invoice.pdf.php" trick can't
+                // land a .php file on disk.
+                $filename = SafeDocumentUpload::safeFilename($file, 'sale');
+
                 // Move file to public/images/sale_documents
                 $file->move($uploadPath, $filename);
                 

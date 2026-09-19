@@ -456,6 +456,9 @@ class PaymentPurchaseReturnsController extends BaseController
 
     public function payment_return(Request $request, $id)
     {
+        // Security fix (Build N1 / audit C-05)
+        $this->authorizeForUser($request->user('api'), 'view', PaymentPurchaseReturns::class);
+
         $payment = PaymentPurchaseReturns::with('PurchaseReturn', 'PurchaseReturn.provider')->findOrFail($id);
 
         $payment_data['return_Ref'] = $payment['PurchaseReturn']->Ref;

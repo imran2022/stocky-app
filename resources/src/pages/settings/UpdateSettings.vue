@@ -248,7 +248,7 @@
           <ol class="manual-steps">
             <li>
               Take back up of your database. Go to <router-link to="/settings/backup">Backup</router-link>, click Generate Backup —
-              you will find it in <strong>/storage/app/public/backup</strong> — or export your database from PhpMyAdmin and save it to your PC.
+              you will find it in <strong>/storage/app/backups</strong> — or export your database from PhpMyAdmin and save it to your PC.
             </li>
             <li>Take back up of your files before updating.</li>
             <li>Download the latest version from your CodeCanyon account and extract it.</li>

@@ -125,6 +125,8 @@ class UpdaterPaths
             // legacy updater working dirs
             'storage/app/updates',
             'storage/app/public/backup',
+            // database:backup / BackupController output (Build N1 / audit C-04)
+            'storage/app/backups',
             'node_modules',
             '.git',
         ])));

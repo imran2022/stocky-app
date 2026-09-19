@@ -456,6 +456,8 @@ class PaymentSaleReturnsController extends BaseController
 
     public function payment_return(Request $request, $id)
     {
+        // Security fix (Build N1 / audit C-05)
+        $this->authorizeForUser($request->user('api'), 'view', PaymentSaleReturns::class);
 
         $payment = PaymentSaleReturns::with('SaleReturn', 'SaleReturn.client')->findOrFail($id);
 

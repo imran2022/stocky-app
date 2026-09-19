@@ -705,6 +705,8 @@ class QuotationsController extends BaseController
 
     public function Quotation_pdf(Request $request, $id)
     {
+        // Security fix (Build N1 / audit C-05)
+        $this->authorizeForUser($request->user('api'), 'view', Quotation::class);
 
         $details = [];
         $Quotation = Quotation::with('details.product.unitSale')
@@ -823,6 +825,9 @@ class QuotationsController extends BaseController
      */
     public function Quotation_PDF_Inline(Request $request, $id)
     {
+        // Security fix (Build N1 / audit C-05)
+        $this->authorizeForUser($request->user('api'), 'view', Quotation::class);
+
         $details = [];
         $Quotation = Quotation::with('details.product.unitSale')
             ->where('deleted_at', '=', null)

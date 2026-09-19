@@ -1972,3 +1972,39 @@ optional; the line just doesn't render when empty).
 
 **Regression test:**
 `tests/Regression/build_m8_invoice_receivables_report.php`.
+
+---
+
+## Build N1 — Security Hardening (Critical findings from third-party audit)
+
+**How to verify:**
+- [ ] Try creating a Sale via the API/POS with a line's subtotal
+      deliberately not matching its quantity × price (e.g. through
+      browser dev tools) — the request should be rejected (422), not
+      saved.
+- [ ] A normal sale with a real discount and tax still saves correctly
+      (nothing about the ordinary checkout flow changed).
+- [ ] Complete a sale for a product in a warehouse it has never been
+      stocked in before — the sale should complete AND a stock row
+      should be created with the correct (negative) quantity, not
+      silently do nothing.
+- [ ] Try uploading a `.php` file as a Sale/Purchase/Purchase Order/
+      Expense attachment — it should be rejected. A real PDF/image/
+      Office file should still upload fine.
+- [ ] Settings → Backup → Generate Backup still works; check that
+      `storage/app/backups` (not `storage/app/public/backup`) now
+      contains the `.sql` file.
+- [ ] Log out (or open an invoice PDF link in a private/incognito
+      window with no login) and try opening a `sale_pdf/{id}` or
+      similar link directly — it should now require login instead of
+      opening the PDF straight away.
+- [ ] The public, shareable invoice link (`public/invoice/{token}`)
+      still works without login, exactly as before.
+
+**Regression test:**
+`tests/Regression/build_n1_security_hardening.php`.
+
+**Not covered by this build (see CUSTOMIZATIONS.md "Known gaps"):**
+overpayment capping, Purchase/Transfer/Adjustment/Damage versions of
+the C-01/C-02 fixes, DB-level unique constraints, Purchase Order
+float→decimal columns, npm dependency upgrades.

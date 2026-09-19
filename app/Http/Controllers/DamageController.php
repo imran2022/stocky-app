@@ -720,6 +720,9 @@ class DamageController extends BaseController
     // -------------- damage_pdf -----------\\
     public function damage_pdf(Request $request, $id)
     {
+        // Security fix (Build N1 / audit C-05)
+        $this->authorizeForUser($request->user('api'), 'view', Damage::class);
+
         $details = [];
         $helpers = new helpers;
         $damage_data = Damage::with('details.product.unit')

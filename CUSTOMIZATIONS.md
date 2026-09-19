@@ -3850,3 +3850,204 @@ Payment Status — against hand-worked expected values, plus the
 summary-card totals and the Status/"Show Outstanding Only" filters.
 Re-ran L1–L6, A, A.1, B, C, D1, D2 and M1, M3–M7 regression gates —
 all still pass.
+
+---
+
+## Build N1 — Security Hardening (Phase 0 / Critical findings from third-party audit)
+
+**Why:** The user shared a third-party ("ChatGPT") deep security/financial
+audit of a packaged export of this app ("STOP-SHIP" verdict). Each
+Critical finding was independently re-verified against THIS codebase
+(not just taken on faith) before fixing — every one of the 5 Criticals
+turned out to be real. This build fixes all 5. It does not attempt the
+audit's separate High-severity list (overpayment capping, stock-row
+DB locking everywhere, float→decimal columns on Purchase Orders, etc.)
+or extend the C-01/C-02 fixes beyond the Sales module — see "Known gaps"
+below for exactly what's left and why.
+
+### C-01 — Server trusted client-submitted invoice totals
+
+**The problem:** `SalesController::store()`/`update()` saved
+`GrandTotal`, `TaxNet`, and every line's price/subtotal exactly as
+submitted by the request, with no server-side consistency check
+whatsoever. The audit demonstrated submitting a line with
+`Unit_price=100` but `subtotal=1`, and a `GrandTotal=987,654.321`
+completely unrelated to the actual line items — both were saved
+unchanged.
+
+**The fix — and, importantly, what it deliberately does NOT do:**
+`app/Support/SaleTotalsGuard.php` now checks, before anything is saved,
+that every line's discount%/tax% are within a sane 0–100 range, that
+each line's submitted subtotal is arithmetically consistent with its
+own quantity/price/discount/tax (a generous, rounding-tolerant band —
+not an exact single formula, to allow for tax-inclusive vs -exclusive
+handling), and that the header `GrandTotal` exactly equals the sum of
+(now-validated) line totals minus the header discount plus shipping.
+Any violation returns HTTP 422 with a plain message instead of saving.
+
+This does **not** lock `Unit_price` to the product's catalog price, and
+does **not** forbid per-line discounts. Staff typing a negotiated
+price/discount per line is this app's existing, intended behavior (no
+"override price" permission gates it anywhere) — this fix only rejects
+a total that doesn't mathematically follow from the quantity/price/
+discount/tax the *same* request also submitted. Locking prices to
+catalog would be a real change to how the business works and needs its
+own explicit decision — it was **not** bundled into this security fix.
+
+### C-02 — A completed sale could silently skip inventory deduction
+
+**The problem:** Every stock-mutating call site in `SalesController`
+looked up the `product_warehouse` row with `->first()` and only acted
+`if ($product_warehouse)` — if no row existed yet for that product in
+that warehouse (e.g. a product just added, never stocked there before),
+the condition was silently false: no row was created, no quantity was
+deducted, and the sale still completed normally, as if nothing were
+wrong.
+
+**The fix:** `app/Support/StockMutator::lockOrCreate()` always returns a
+row — creating one at `qte = 0` first if necessary, and row-locking it
+(`lockForUpdate()`) for the rest of the transaction (this also closes
+part of the audit's H-02 concurrency finding for these specific call
+sites). All 8 stock-mutation sites in `SalesController` (create,
+edit-restore-old-line, edit-deduct-new-line, delete-restore) now go
+through it. Where the code can't safely compute a quantity at all (the
+line's unit couldn't be resolved), the whole sale is now aborted with a
+clear error instead of silently doing nothing.
+
+### C-03 — Unrestricted file upload (`.php` into the public webroot)
+
+**The problem:** Sale/Purchase/Purchase-Order/Expense document uploads
+validated only `'required|file|max:10240'` — no extension or MIME
+check at all — and stored the file under `public/images/..._documents`
+using the client's own filename. A `.php` file uploaded this way landed
+directly in the public webroot.
+
+**The fix:** `app/Support/SafeDocumentUpload.php` adds an allow-list
+(pdf, jpg, jpeg, png, gif, webp, doc, docx, xls, xlsx, csv, txt, zip)
+enforced by Laravel's `mimes:` rule (checks both the extension AND the
+file's actual detected content — a `.php` file renamed to `.pdf` still
+fails), and the on-disk filename is now built ONLY from the validated
+extension, never from the client's original filename — so a
+`invoice.pdf.php` double-extension trick can't land a `.php` file on
+disk either. Applied to all four upload endpoints (Sale, Purchase,
+Purchase Order, Expense).
+
+### C-04 — Backup design (public path, predictable name, delete-before-verify, CLI password)
+
+**The problem:** `database:backup` wrote to
+`storage/app/public/backup/backup-YYYY-MM-DD.sql` — a location that
+becomes web-downloadable if `php artisan storage:link` has ever been
+run, with a predictable filename — and deleted **every existing
+backup** before even attempting the new dump, so a failed run left zero
+recovery points. It also passed the DB password as a `--password=...`
+command-line argument (readable by other local users via `ps`).
+
+**The fix:**
+- Backups now write to `storage/app/backups` (private — never under
+  `storage/app/public`, so `storage:link` can never expose it). Any
+  backups still sitting at the old public path are moved into the new
+  location automatically the first time the backup command runs.
+- Old backups are pruned only **after** a new backup is confirmed
+  non-empty on disk, and the last 14 are kept (previously: only 1, and
+  it was deleted before the new one even started).
+- The DB password is now written to a short-lived, mode-0600
+  `--defaults-extra-file` that `mysqldump` reads directly and which is
+  deleted immediately after — never a command-line argument.
+- `BackupController` (list/generate/delete), `SystemHealthController`
+  ("last backup" dashboard widget), and the legacy `AutoUpdateController`
+  backup/restore flow were all updated to the new path so nothing that
+  reads "where are backups" was left pointing at the old, now-unused
+  location.
+
+### C-05 — Invoice/PDF/print routes had no authentication
+
+**The problem:** Routes like `sale_pdf/{id}`, `purchase_pdf/{id}`,
+`transfer_pdf/{id}`, `payment_sale_pdf/{id}`, shipping labels, packing
+lists, etc. (23 routes total) sat **outside** any `auth:api` middleware
+group in `routes/api.php`, and most of their controller methods
+performed no authorization check at all — an unauthenticated request
+could view any invoice/PO/payment receipt by guessing its numeric ID.
+
+**The fix:** All 23 routes are now inside a
+`Route::middleware(['auth:api', 'Is_Active'])->group(...)` block, and
+every one of the 20 controller methods that lacked it now calls the
+matching model's `view` policy (`Sale`, `Purchase`, `Quotation`,
+`SaleReturn`, `PurchaseReturn`, `PaymentSale`, `PaymentPurchase`,
+`PaymentSaleReturns`, `PaymentPurchaseReturns`, `Transfer`,
+`Adjustment`, `Damage` — `Booking`/`ServiceJob`'s PDF methods already
+had this check). The separate, intentionally-public,
+token-based `public/invoice/{token}` route (unguessable token, not a
+sequential ID) is untouched — that one is meant to be shareable.
+
+**Files touched:**
+- New: `app/Support/SaleTotalsGuard.php`, `app/Support/StockMutator.php`,
+  `app/Support/SafeDocumentUpload.php`.
+- `app/Http/Controllers/SalesController.php` — C-01 guard wired into
+  `store()`/`update()`; all `product_warehouse` lookups replaced with
+  `StockMutator::lockOrCreate()`; `view`-policy check added to
+  `Sale_PDF`, `Sale_Shipping_Label`, `Sale_Packing_List`,
+  `Sale_PDF_Bulk`, `Sale_Shipping_Label_Bulk`, `Sale_PDF_Inline`,
+  `Print_Invoice_POS`, `Direct_Network_Print_POS`; upload validation
+  hardened in `uploadDocuments()`.
+- `app/Http/Controllers/PurchasesController.php`,
+  `PurchaseOrderController.php`, `ExpensesController.php` — upload
+  validation hardened.
+- `app/Http/Controllers/QuotationsController.php`,
+  `SalesReturnController.php`, `PurchasesReturnController.php`,
+  `PaymentPurchasesController.php`, `PaymentSaleReturnsController.php`,
+  `PaymentPurchaseReturnsController.php`, `PaymentSalesController.php`,
+  `TransferController.php`, `AdjustmentController.php`,
+  `DamageController.php` — `view`-policy check added to the relevant
+  PDF/print method.
+- `app/Console/Commands/DatabaseBackUp.php` — new private backup path,
+  safe retention, CLI-password fix, legacy-path migration.
+- `app/Http/Controllers/BackupController.php`,
+  `SystemHealthController.php`, `AutoUpdateController.php` — updated to
+  the new backup path.
+- `app/Services/Updater/UpdaterPaths.php` — excludes the new backup
+  path from the updater's own application-file backup ZIP.
+- `resources/src/pages/settings/UpdateSettings.vue` — one line of
+  documentation text updated to the new path.
+- `routes/api.php` — 23 document/PDF/print routes moved inside
+  `auth:api` + `Is_Active`.
+- New: `tests/Regression/build_n1_security_hardening.php`.
+
+**Verification:** a real, DB-backed test (a) submits the audit's exact
+tampered-total shape (price 100/subtotal 1, GrandTotal 987,654.321,
+TaxNet 777.777) through the real `SalesController::store()` and
+confirms HTTP 422 + no Sale row created, AND separately confirms a
+normal sale with a genuine 10% line discount and 5% tax is still
+accepted (so the new guard doesn't break real checkouts); (b) creates a
+brand-new warehouse with zero stock rows, completes a sale against it
+through the real controller, and confirms a `product_warehouse` row now
+exists with the correct deducted quantity (previously: no row, ever);
+(c) validates a `.php` and a double-extension `invoice.pdf.php` file
+both fail the new upload rule while a genuine `.pdf` still passes; (d)
+confirms the backup directory is no longer under `storage/app/public`,
+that a file left at the old path gets migrated, and that retention
+keeps the newest N and never deletes the just-written file; (e)
+confirms `sale_pdf/{id}` and `transfer_pdf/{id}` now require
+`auth:api` while the public token-based invoice route remains
+unauthenticated by design. Full cumulative regression suite (all 41
+prior build test files) re-run afterward — no new failures (3
+pre-existing failures — `build_e1_pos_recent`, `build_po_grn`,
+`build_po_phase1_3` — are unrelated compiled-frontend-asset/UI-label
+checks that already fail on a pristine checkout with no `npm run
+build` run yet, confirmed by running them against the last-committed
+state before this build's changes).
+
+**Known gaps — intentionally out of scope for this build (documented,
+not silently skipped):**
+- The audit's High-severity findings (H-01 overpayment cap, H-02 DB
+  row-locking/unique constraints beyond the Sales call sites this build
+  touched, H-06 `Ref` unique constraint, H-07 Purchase Order FLOAT
+  columns, H-08 npm dependency upgrades, H-09 audit-trail/soft-delete
+  history) are **not** part of this build.
+- C-01 (total-consistency guard) and C-02 (stock lock-or-create) were
+  applied to the **Sales** module only — the exact flow the audit's
+  runtime tests reproduced against. The same two bug patterns exist in
+  `PurchasesController` (11 more `product_warehouse` call sites) and
+  likely `TransferController`/`AdjustmentController`/`DamageController`
+  as well. Recommended as a follow-up build (N2) rather than rushed
+  into this one, given how much of the app's pricing/stock logic each
+  module touches.

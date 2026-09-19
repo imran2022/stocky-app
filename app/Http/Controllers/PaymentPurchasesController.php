@@ -443,6 +443,9 @@ class PaymentPurchasesController extends BaseController
 
     public function Payment_purchase_pdf(Request $request, $id)
     {
+        // Security fix (Build N1 / audit C-05)
+        $this->authorizeForUser($request->user('api'), 'view', PaymentPurchase::class);
+
         $payment = PaymentPurchase::with('purchase', 'purchase.provider')->findOrFail($id);
 
         $payment_data['purchase_Ref'] = $payment['purchase']->Ref;

@@ -1338,6 +1338,8 @@ class PurchasesReturnController extends BaseController
 
     public function Return_pdf(Request $request, $id)
     {
+        // Security fix (Build N1 / audit C-05)
+        $this->authorizeForUser($request->user('api'), 'view', PurchaseReturn::class);
 
         $details = [];
         $PurchaseReturn = PurchaseReturn::with('purchase', 'details.product.unitPurchase')

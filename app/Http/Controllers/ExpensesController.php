@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Models\UserWarehouse;
 use App\Models\Warehouse;
 use App\utils\helpers;
+use App\Support\SafeDocumentUpload;
 use Carbon\Carbon;
 use DB;
 use Illuminate\Http\Request;
@@ -214,7 +215,9 @@ class ExpensesController extends BaseController
         $expense = Expense::findOrFail($expenseId);
 
         $request->validate([
-            'documents.*' => 'required|file|max:10240', // Max 10MB per file
+            // Security fix (Build N1 / audit C-03): allow-list of safe
+            // document types only.
+            'documents.*' => SafeDocumentUpload::validationRule(),
         ]);
 
         $uploadedDocuments = [];
@@ -232,7 +235,10 @@ class ExpensesController extends BaseController
                 $size = $file->getSize();
                 $mimeType = $file->getMimeType();
 
-                $filename = time() . '_' . Str::random(10) . '_' . $originalName;
+                // Security fix (Build N1 / audit C-03): filename built from
+                // the VALIDATED extension only, never the client's original
+                // filename.
+                $filename = SafeDocumentUpload::safeFilename($file, 'expense');
 
                 // Move file to public/images/expense_documents
                 $file->move($uploadPath, $filename);

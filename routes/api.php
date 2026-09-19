@@ -1887,31 +1887,42 @@ Route::get('kitchen/ready-screen/data', [\App\Http\Controllers\KitchenOrderContr
 
 // -------------------------------  Print & PDF ------------------------\\
 // ------------------------------------------------------------------\\
-
-Route::get('sale_pdf/{id}', 'SalesController@Sale_PDF');
-Route::get('sale_shipping_label/{id}', 'SalesController@Sale_Shipping_Label');
-Route::get('sale_packing_list/{id}', 'SalesController@Sale_Packing_List');
-Route::get('sale_pdf_bulk', 'SalesController@Sale_PDF_Bulk');
-Route::get('sale_shipping_label_bulk', 'SalesController@Sale_Shipping_Label_Bulk');
-Route::get('sale_print_html/{id}', 'SalesController@Sale_PDF_Inline');
-Route::get('quote_pdf/{id}', 'QuotationsController@Quotation_pdf');
-Route::get('quote_print_html/{id}', 'QuotationsController@Quotation_PDF_Inline');
-Route::get('booking_pdf/{id}', 'BookingController@booking_pdf');
-Route::get('service_job_pdf/{id}', 'ServiceJobController@service_job_pdf');
-Route::get('service_quote_pdf/{id}', 'ServiceJobController@service_quote_pdf');
-Route::get('purchase_pdf/{id}', 'PurchasesController@Purchase_pdf');
-Route::get('purchase_print_html/{id}', 'PurchasesController@Purchase_PDF_Inline');
-Route::get('return_sale_pdf/{id}', 'SalesReturnController@Return_pdf');
-Route::get('return_purchase_pdf/{id}', 'PurchasesReturnController@Return_pdf');
-Route::get('payment_purchase_pdf/{id}', 'PaymentPurchasesController@Payment_purchase_pdf');
-Route::get('payment_return_sale_pdf/{id}', 'PaymentSaleReturnsController@payment_return');
-Route::get('payment_return_purchase_pdf/{id}', 'PaymentPurchaseReturnsController@payment_return');
-Route::get('payment_sale_pdf/{id}', 'PaymentSalesController@payment_sale');
-Route::get('sales_print_invoice/{id}', 'SalesController@Print_Invoice_POS');
-Route::post('direct_network_print/{id}', 'SalesController@Direct_Network_Print_POS');
-Route::get('transfer_pdf/{id}', 'TransferController@transfer_pdf');
-Route::get('adjustment_pdf/{id}', 'AdjustmentController@adjustment_pdf');
-Route::get('damage_pdf/{id}', 'DamageController@damage_pdf');
+// Security fix (Build N1 / audit C-05): these routes render customer/
+// provider contact and financial document data by a plain sequential ID.
+// They used to sit OUTSIDE any auth middleware group, so an unauthenticated
+// request could view/guess any invoice, PO, transfer, payment receipt, etc.
+// Now behind auth:api + Is_Active, same as the rest of the authenticated
+// API; each controller method additionally calls the model's own 'view'
+// policy (added in this build where it was missing) so a logged-in user
+// still needs the matching permission, not just any valid login.
+// Public, intentionally-shareable invoice links continue to use the
+// separate token-based public/invoice/{token} routes above, not these.
+Route::middleware(['auth:api', 'Is_Active'])->group(function () {
+    Route::get('sale_pdf/{id}', 'SalesController@Sale_PDF');
+    Route::get('sale_shipping_label/{id}', 'SalesController@Sale_Shipping_Label');
+    Route::get('sale_packing_list/{id}', 'SalesController@Sale_Packing_List');
+    Route::get('sale_pdf_bulk', 'SalesController@Sale_PDF_Bulk');
+    Route::get('sale_shipping_label_bulk', 'SalesController@Sale_Shipping_Label_Bulk');
+    Route::get('sale_print_html/{id}', 'SalesController@Sale_PDF_Inline');
+    Route::get('quote_pdf/{id}', 'QuotationsController@Quotation_pdf');
+    Route::get('quote_print_html/{id}', 'QuotationsController@Quotation_PDF_Inline');
+    Route::get('booking_pdf/{id}', 'BookingController@booking_pdf');
+    Route::get('service_job_pdf/{id}', 'ServiceJobController@service_job_pdf');
+    Route::get('service_quote_pdf/{id}', 'ServiceJobController@service_quote_pdf');
+    Route::get('purchase_pdf/{id}', 'PurchasesController@Purchase_pdf');
+    Route::get('purchase_print_html/{id}', 'PurchasesController@Purchase_PDF_Inline');
+    Route::get('return_sale_pdf/{id}', 'SalesReturnController@Return_pdf');
+    Route::get('return_purchase_pdf/{id}', 'PurchasesReturnController@Return_pdf');
+    Route::get('payment_purchase_pdf/{id}', 'PaymentPurchasesController@Payment_purchase_pdf');
+    Route::get('payment_return_sale_pdf/{id}', 'PaymentSaleReturnsController@payment_return');
+    Route::get('payment_return_purchase_pdf/{id}', 'PaymentPurchaseReturnsController@payment_return');
+    Route::get('payment_sale_pdf/{id}', 'PaymentSalesController@payment_sale');
+    Route::get('sales_print_invoice/{id}', 'SalesController@Print_Invoice_POS');
+    Route::post('direct_network_print/{id}', 'SalesController@Direct_Network_Print_POS');
+    Route::get('transfer_pdf/{id}', 'TransferController@transfer_pdf');
+    Route::get('adjustment_pdf/{id}', 'AdjustmentController@adjustment_pdf');
+    Route::get('damage_pdf/{id}', 'DamageController@damage_pdf');
+});
 
 // Route::get('/available-modules', 'ModuleSettingsController@get_modules_enabled');
 

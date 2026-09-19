@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Console\Commands\DatabaseBackUp;
 use App\Models\Setting;
 use App\Services\CloudBackupUploader;
 use App\Models\User;
@@ -19,7 +20,9 @@ class BackupController extends Controller
 
         $data = [];
         $id = 0;
-        foreach (glob(storage_path().'/app/public/backup/*') as $filename) {
+        // Security fix (Build N1 / audit C-04): read from the new, private
+        // backup directory (storage/app/backups), not the old public one.
+        foreach (glob(DatabaseBackUp::backupDir().'/*') as $filename) {
             $item['id'] = $id += 1;
             $item['date'] = basename($filename);
             $size = $this->formatSizeUnits(filesize($filename));
@@ -81,7 +84,7 @@ class BackupController extends Controller
         // Local backup remains the primary destination; cloud upload is optional and additive.
         $cloud = null;
         try {
-            $dir = storage_path().'/app/public/backup';
+            $dir = DatabaseBackUp::backupDir();
             
             // Ensure directory exists
             if (!is_dir($dir)) {
@@ -172,11 +175,13 @@ class BackupController extends Controller
 
         $this->authorizeForUser($request->user('api'), 'backup', User::class);
 
-        foreach (glob(storage_path().'/app/public/backup/*') as $filename) {
-            $path = storage_path().'/app/public/backup/'.basename($name);
-            if (file_exists($path)) {
-                @unlink($path);
-            }
+        // Security fix (Build N1 / audit C-04) + path-traversal hardening:
+        // basename() the incoming name and only ever touch a path inside
+        // the private backup directory.
+        $dir = DatabaseBackUp::backupDir();
+        $path = $dir.'/'.basename($name);
+        if (file_exists($path)) {
+            @unlink($path);
         }
     }
 

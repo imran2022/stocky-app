@@ -39,6 +39,7 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Infobip\Api\SendSmsApi;
 use Infobip\Configuration;
+use App\Support\SafeDocumentUpload;
 use Infobip\Model\SmsAdvancedTextualRequest;
 use Infobip\Model\SmsDestination;
 use Infobip\Model\SmsTextualMessage;
@@ -1250,6 +1251,9 @@ class PurchasesController extends BaseController
 
     public function Purchase_pdf(Request $request, $id)
     {
+        // Security fix (Build N1 / audit C-05)
+        $this->authorizeForUser($request->user('api'), 'view', Purchase::class);
+
         $details = [];
         $Purchase_data = Purchase::with('details.product.unitPurchase')
             ->where('deleted_at', '=', null)
@@ -1376,6 +1380,9 @@ class PurchasesController extends BaseController
      */
     public function Purchase_PDF_Inline(Request $request, $id)
     {
+        // Security fix (Build N1 / audit C-05)
+        $this->authorizeForUser($request->user('api'), 'view', Purchase::class);
+
         $details = [];
         $Purchase_data = Purchase::with('details.product.unitPurchase')
             ->where('deleted_at', '=', null)
@@ -2569,7 +2576,9 @@ class PurchasesController extends BaseController
         $purchase = Purchase::findOrFail($purchaseId);
 
         $request->validate([
-            'documents.*' => 'required|file|max:10240', // Max 10MB per file
+            // Security fix (Build N1 / audit C-03): allow-list of safe
+            // document types only.
+            'documents.*' => SafeDocumentUpload::validationRule(),
         ]);
 
         $uploadedDocuments = [];
@@ -2587,8 +2596,11 @@ class PurchasesController extends BaseController
                 $size = $file->getSize();
                 $mimeType = $file->getMimeType();
 
-                $filename = time() . '_' . Str::random(10) . '_' . $originalName;
-                
+                // Security fix (Build N1 / audit C-03): filename built from
+                // the VALIDATED extension only, never the client's original
+                // filename.
+                $filename = SafeDocumentUpload::safeFilename($file, 'purchase');
+
                 // Move file to public/images/purchase_documents
                 $file->move($uploadPath, $filename);
                 

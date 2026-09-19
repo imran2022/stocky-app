@@ -515,6 +515,9 @@ class PaymentSalesController extends BaseController
 
     public function payment_sale(Request $request, $id)
     {
+        // Security fix (Build N1 / audit C-05)
+        $this->authorizeForUser($request->user('api'), 'view', PaymentSale::class);
+
         $payment = PaymentSale::with('sale', 'sale.client')->findOrFail($id);
 
         $payment_data['sale_Ref'] = $payment['sale']->Ref;

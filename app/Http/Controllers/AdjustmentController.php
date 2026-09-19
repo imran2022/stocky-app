@@ -1189,6 +1189,9 @@ class AdjustmentController extends BaseController
 
     public function adjustment_pdf(Request $request, $id)
     {
+        // Security fix (Build N1 / audit C-05)
+        $this->authorizeForUser($request->user('api'), 'view', Adjustment::class);
+
         $details = [];
         $helpers = new helpers;
         $adjustment_data = Adjustment::with('details.product.unit')
