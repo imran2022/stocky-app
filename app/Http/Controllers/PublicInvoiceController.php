@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Client;
+use App\Models\PdfTemplate;
 use App\Models\ProductVariant;
 use App\Models\Sale;
 use App\Models\ServiceJob;
@@ -101,6 +102,10 @@ class PublicInvoiceController extends BaseController
         $due = (float) $sale->GrandTotal - $paid;
         $previousDues = $this->clientPreviousDues($sale->client_id, $sale->id);
 
+        // Same Settings → Invoice PDF → Sections switches the Sale PDF and
+        // Sale Detail page use, so all three surfaces agree.
+        $pdfSettings = PdfTemplate::settingsFor('sale');
+
         return response()->json([
             'company' => [
                 'name' => $setting->CompanyName ?? '',
@@ -177,6 +182,8 @@ class PublicInvoiceController extends BaseController
                 'due' => $due,
                 'previous_dues' => (float) $previousDues,
                 'net_balance' => (float) $previousDues + $due,
+                'show_previous_dues' => (bool) $pdfSettings['show_previous_dues'],
+                'show_net_balance' => (bool) $pdfSettings['show_net_balance'],
             ],
             'pdf_url' => $this->publicPdfUrl($token),
         ]);

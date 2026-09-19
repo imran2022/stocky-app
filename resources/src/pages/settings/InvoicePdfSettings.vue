@@ -82,8 +82,11 @@
             </a-collapse-panel>
 
             <a-collapse-panel key="sections" header="Sections">
-              <div v-for="sct in sectionFields" :key="sct.key" class="pdfc-row">
-                <span>{{ sct.label }}</span>
+              <div v-for="sct in sectionFields" :key="sct.key" class="pdfc-row" :class="{ 'pdfc-row--desc': sct.desc }">
+                <span>
+                  {{ sct.label }}
+                  <div v-if="sct.desc" class="pdfc-row-desc">{{ sct.desc }}</div>
+                </span>
                 <a-switch v-model:checked="form[sct.key]" />
               </div>
             </a-collapse-panel>
@@ -171,6 +174,12 @@
                   <tr :style="{ color: form.text_color }"><td>Subtotal</td><td>1,760.00</td></tr>
                   <tr :style="{ color: form.text_color }"><td>Tax</td><td>176.00</td></tr>
                   <tr class="pv-grand" :style="{ background: form.primary_color }"><td>TOTAL</td><td>1,936.00</td></tr>
+                  <tr v-if="docType === 'sale' && form.show_previous_dues" style="background: #fef3c7; color: #92400e; font-weight: bold">
+                    <td>Previous Dues</td><td>540.00</td>
+                  </tr>
+                  <tr v-if="docType === 'sale' && form.show_net_balance" style="background: #fef3c7; color: #92400e; font-weight: bold">
+                    <td>Net Balance</td><td>540.00</td>
+                  </tr>
                 </table>
               </div>
 
@@ -246,6 +255,11 @@ const sectionFields = computed(() => [
   { key: 'show_notes', label: 'Notes' },
   { key: 'show_footer_text', label: 'Footer text' },
   { key: 'show_thank_you', label: 'Thank-you line' },
+  // Sale-only — no "previous dues" concept on a quotation or purchase order.
+  ...(docType.value === 'sale' ? [
+    { key: 'show_previous_dues', label: 'Previous Dues line', desc: 'The client’s outstanding balance before this sale. Printed only when it is greater than zero.' },
+    { key: 'show_net_balance', label: 'Net Balance line', desc: 'Previous dues plus what is still due on this sale. Printed only when previous dues are greater than zero.' },
+  ] : []),
 ]);
 
 const previewRows = [
@@ -336,6 +350,17 @@ onMounted(load);
 .pdfc-row--off {
   opacity: 0.45;
   pointer-events: none;
+}
+.pdfc-row--desc {
+  align-items: flex-start;
+}
+.pdfc-row-desc {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.45);
+  font-weight: 400;
+  margin-top: 2px;
+  max-width: 320px;
+  white-space: normal;
 }
 .pdfc-color {
   width: 44px;

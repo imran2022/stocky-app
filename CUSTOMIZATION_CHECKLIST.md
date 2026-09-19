@@ -1507,3 +1507,36 @@ reference, consignment ID, sales agent name, zone, courier — internal
 routing/ops fields shown on the authenticated page but not typically
 meant for a customer-facing document. Say the word if you want any of
 these on the public page too.
+
+---
+
+## 18. Build L2 — Previous Dues / Net Balance show/hide toggle
+
+**What it does:** Previous Dues and Net Balance used to always print (when
+a client had a balance) on Sale Detail, the Sale PDF, and the public
+invoice page, with no way to turn them off. Now they're two independent
+switches in Settings → Invoice PDF → Sales Invoice → Sections, defaulting
+to on (no behavior change unless you touch them). Reuses the app's
+existing Invoice PDF customizer rather than a new settings mechanism.
+
+**Files touched:**
+- `app/Models/PdfTemplate.php`, `app/Http/Controllers/PdfTemplateController.php`
+- `resources/views/pdf/sale_pdf.blade.php`
+- `app/Http/Controllers/SalesController.php`, `app/Http/Controllers/PublicInvoiceController.php`
+- `resources/src/pages/sales/SaleDetails.vue`, `resources/src/pages/public/PublicInvoice.vue`
+- `resources/src/pages/settings/InvoicePdfSettings.vue`
+
+**How to verify:**
+- [ ] Settings → Invoice PDF → Sales Invoice → Sections must show
+      "Previous Dues line" and "Net Balance line" toggles (only for Sales
+      Invoice, not Quotation/Purchase).
+- [ ] Pick a client with an outstanding balance, turn "Previous Dues
+      line" off, save. Open Sale Detail, the Sale PDF, and the public
+      invoice link for a new sale to that client — Previous Dues must not
+      appear on any of the three.
+- [ ] Turn "Net Balance line" off (Previous Dues back on) — Net Balance
+      must disappear from all three while Previous Dues still shows.
+- [ ] Turn both back on — both must reappear on all three, matching
+      numbers.
+
+**Regression test:** `tests/Regression/build_l2_previous_dues_toggle.php`.

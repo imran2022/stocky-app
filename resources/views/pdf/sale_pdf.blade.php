@@ -331,11 +331,13 @@
                         <td style="padding: 6px 10px; font-size: 9pt; font-weight: bold; color: #92400e; text-align: left; direction: ltr;">{{$symbol}} {{formatPrice((float)$sale['due'], $priceDecimals, $priceFormat)}}</td>
                         <td style="padding: 6px 10px; font-size: 8.5pt; font-weight: bold; color: #92400e; text-align: right; direction: rtl;">{{ __('pdf.amount_due') }}{!! $rtlLabelSuffix !!}</td>
                     </tr>
-                    @if(isset($sale['previous_dues']) && (float)$sale['previous_dues'] > 0)
+                    @if(isset($sale['previous_dues']) && (float)$sale['previous_dues'] > 0 && !empty($pdfT['show_previous_dues']))
                     <tr style="background: #fef3c7;">
                         <td style="padding: 6px 10px; font-size: 9pt; font-weight: bold; color: #92400e; text-align: left; direction: ltr;">{{$symbol}} {{formatPrice((float)$sale['previous_dues'], $priceDecimals, $priceFormat)}}</td>
                         <td style="padding: 6px 10px; font-size: 8.5pt; font-weight: bold; color: #92400e; text-align: right; direction: rtl;">{{ __('pdf.previous_dues') }}{!! $rtlLabelSuffix !!}</td>
                     </tr>
+                    @endif
+                    @if(isset($sale['previous_dues']) && (float)$sale['previous_dues'] > 0 && !empty($pdfT['show_net_balance']))
                     <tr style="background: #fef3c7;">
                         <td style="padding: 6px 10px; font-size: 9pt; font-weight: bold; color: #92400e; text-align: left; direction: ltr;">{{$symbol}} {{formatPrice((float)$sale['previous_dues'] + (float)$sale['due'], $priceDecimals, $priceFormat)}}</td>
                         <td style="padding: 6px 10px; font-size: 8.5pt; font-weight: bold; color: #92400e; text-align: right; direction: rtl;">{{ __('pdf.net_balance') }}{!! $rtlLabelSuffix !!}</td>
@@ -383,11 +385,13 @@
                         <td style="padding: 6px 10px; font-size: 8.5pt; font-weight: bold; color: #92400e;">{{ __('pdf.amount_due') }}</td>
                         <td style="padding: 6px 10px; font-size: 9pt; font-weight: bold; color: #92400e; text-align: right;">{{$symbol}} {{formatPrice((float)$sale['due'], $priceDecimals, $priceFormat)}}</td>
                     </tr>
-                    @if(isset($sale['previous_dues']) && (float)$sale['previous_dues'] > 0)
+                    @if(isset($sale['previous_dues']) && (float)$sale['previous_dues'] > 0 && !empty($pdfT['show_previous_dues']))
                     <tr style="background: #fef3c7;">
                         <td style="padding: 6px 10px; font-size: 8.5pt; font-weight: bold; color: #92400e;">{{ __('pdf.previous_dues') }}</td>
                         <td style="padding: 6px 10px; font-size: 9pt; font-weight: bold; color: #92400e; text-align: right;">{{$symbol}} {{formatPrice((float)$sale['previous_dues'], $priceDecimals, $priceFormat)}}</td>
                     </tr>
+                    @endif
+                    @if(isset($sale['previous_dues']) && (float)$sale['previous_dues'] > 0 && !empty($pdfT['show_net_balance']))
                     <tr style="background: #fef3c7;">
                         <td style="padding: 6px 10px; font-size: 8.5pt; font-weight: bold; color: #92400e;">{{ __('pdf.net_balance') }}</td>
                         <td style="padding: 6px 10px; font-size: 9pt; font-weight: bold; color: #92400e; text-align: right;">{{$symbol}} {{formatPrice((float)$sale['previous_dues'] + (float)$sale['due'], $priceDecimals, $priceFormat)}}</td>

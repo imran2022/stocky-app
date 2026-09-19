@@ -40,6 +40,12 @@ class PdfTemplate extends Model
         'show_notes' => true,
         'show_footer_text' => true,
         'show_thank_you' => true,
+        // Sale-only: the client's outstanding balance from other sales, and
+        // that balance plus this sale's own due. No effect on quotation/
+        // purchase PDFs (they have no "previous dues" concept) — harmless
+        // to carry on every doc type's settings row for schema simplicity.
+        'show_previous_dues' => true,
+        'show_net_balance' => true,
         // Text overrides ('' = keep the translated default)
         'labels' => [
             'title' => '',

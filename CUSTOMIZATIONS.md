@@ -2928,3 +2928,48 @@ decide, not built without asking):** tracking reference, consignment ID,
 sales agent name, zone, and courier — these are internal routing/ops
 details shown on the authenticated Sale Detail page but not typically
 meant for a customer-facing document; can be added the same way if wanted.
+
+## Build L2 — Previous Dues / Net Balance: independent show/hide toggle (2026-09-19)
+
+**Why:** Previous Dues and Net Balance (the client's outstanding balance
+from other sales, and that balance plus this sale's own due) always
+printed automatically whenever a client had a balance — on the Sale
+Detail page, the Sale PDF, and the new public invoice page — with no way
+to turn them off, unlike almost every other line item on these documents.
+
+**What changed:** Reused the app's existing "Invoice PDF" customizer
+(Settings → Invoice PDF, backed by `PdfTemplate`) rather than inventing a
+new settings mechanism — this feature already had a generic on/off
+"Sections" panel wired straight into `sale_pdf.blade.php`; this build just
+added two more keys to it: `show_previous_dues`, `show_net_balance`
+(both default **on**, matching the previous always-on behavior — nothing
+changes for anyone who doesn't touch the new toggles).
+- `app/Models/PdfTemplate.php` — two new keys in `DEFAULTS`.
+- `app/Http/Controllers/PdfTemplateController.php` — validates them.
+- `resources/views/pdf/sale_pdf.blade.php` — the Previous Dues and Net
+  Balance rows (both the RTL and LTR layout variants) now each check
+  their own flag, independently of each other, in addition to the
+  existing "only if greater than zero" condition.
+- `app/Http/Controllers/SalesController.php@show`,
+  `app/Http/Controllers/PublicInvoiceController.php@show` — both now read
+  `PdfTemplate::settingsFor('sale')` and pass the two flags through.
+- `resources/src/pages/sales/SaleDetails.vue`,
+  `resources/src/pages/public/PublicInvoice.vue` — gate their rows on the
+  flags (defaulting to shown if a flag is ever absent from an API
+  response, so nothing regresses if an old cached response is replayed).
+- `resources/src/pages/settings/InvoicePdfSettings.vue` — two new toggles
+  in the Sections panel, shown only for the Sales Invoice doc type
+  (quotations/purchase orders have no previous-dues concept), each with a
+  short description, plus a live-preview reflection.
+- New: `tests/Regression/build_l2_previous_dues_toggle.php`.
+
+**Verification:** real runtime check, in separate PHP process invocations
+per case (`PdfTemplate::settingsFor()` caches per-process — a single
+script re-reading after an update sees stale data, which is not a real
+concern for a normal one-request-per-process PHP-FPM deployment, but does
+mean a real check needs fresh processes each time): confirmed
+`SalesController::show()`, `PublicInvoiceController::show()`, and the
+actual **rendered PDF bytes** (text extracted with `pdftotext`) all agree
+for three combinations — both lines on, both off, and Previous Dues on
+with Net Balance off. The new regression test and the full existing suite
+(including L1) pass.

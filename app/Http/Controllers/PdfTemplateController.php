@@ -46,6 +46,8 @@ class PdfTemplateController extends Controller
             'show_notes' => 'required|boolean',
             'show_footer_text' => 'required|boolean',
             'show_thank_you' => 'required|boolean',
+            'show_previous_dues' => 'required|boolean',
+            'show_net_balance' => 'required|boolean',
             'labels' => 'nullable|array',
             'labels.title' => 'nullable|string|max:120',
             'labels.thank_you' => 'nullable|string|max:190',

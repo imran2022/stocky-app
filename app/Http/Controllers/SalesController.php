@@ -25,6 +25,7 @@ use App\Models\SaleCourier;
 use App\Models\SaleDetail;
 use App\Models\SaleReturn;
 use App\Models\SaleZone;
+use App\Models\PdfTemplate;
 use App\Models\Setting;
 use App\Models\Shipment;
 use App\Models\sms_gateway;
@@ -1677,6 +1678,13 @@ class SalesController extends BaseController
 
         // Previous dues = client's outstanding balance before this sale.
         $sale_details['previous_dues'] = number_format($this->clientPreviousDues($sale_data->client_id, $id) * $docCurrency['rate'], helpers::price_decimals(), '.', '');
+
+        // Same on/off switches as the Sale PDF (Settings → Invoice PDF →
+        // Sections) — one place controls whether these two lines print on
+        // Sale Detail, the PDF, and the public invoice page.
+        $pdfSettings = PdfTemplate::settingsFor('sale');
+        $sale_details['show_previous_dues'] = (bool) $pdfSettings['show_previous_dues'];
+        $sale_details['show_net_balance'] = (bool) $pdfSettings['show_net_balance'];
 
         if (SaleReturn::where('sale_id', $id)->where('deleted_at', '=', null)->exists()) {
             $sellReturn = SaleReturn::where('sale_id', $id)->where('deleted_at', '=', null)->first();

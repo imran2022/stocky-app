@@ -191,10 +191,10 @@
           <tr class="grand"><td>{{ $t('Total') }}:</td><td>{{ docMoney(sale.GrandTotal) }}</td></tr>
           <tr><td>{{ $t('Paid') }}:</td><td style="color: #52c41a">{{ docMoney(sale.paid_amount) }}</td></tr>
           <tr><td>{{ $t('Due') }}:</td><td style="color: #ff4d4f">{{ docMoney(sale.due) }}</td></tr>
-          <tr v-if="Number(sale.previous_dues) > 0">
+          <tr v-if="Number(sale.previous_dues) > 0 && sale.show_previous_dues !== false">
             <td>{{ $t('Previous_Dues') }}:</td><td>{{ docMoney(sale.previous_dues) }}</td>
           </tr>
-          <tr v-if="Number(sale.previous_dues) > 0">
+          <tr v-if="Number(sale.previous_dues) > 0 && sale.show_net_balance !== false">
             <td>{{ $t('Net_Balance') }}:</td>
             <td>{{ docMoney(Number(sale.previous_dues) + Number(sale.due)) }}</td>
           </tr>
