@@ -352,6 +352,7 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     Route::get('report/provider_payments', 'ReportController@Payments_Provider');
     Route::get('report/provider_returns', 'ReportController@Returns_Provider');
     Route::get('report/sales', 'ReportController@Report_Sales');
+    Route::get('report/invoice_receivables', 'ReportController@Report_InvoiceReceivables');
     Route::get('report/zone_wise', 'ReportController@zoneWiseReport');
     Route::get('report/purchases', 'ReportController@Report_Purchases');
     Route::get('report/get_last_sales', 'ReportController@Get_last_Sales');

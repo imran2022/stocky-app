@@ -749,6 +749,10 @@ export const PERMISSION_GROUPS = [
                 "l": "SalesReport"
             },
             {
+                "v": "invoice_receivables_report",
+                "l": "Invoice_Receivables_Report"
+            },
+            {
                 "v": "Reports_purchase",
                 "l": "PurchasesReport"
             },

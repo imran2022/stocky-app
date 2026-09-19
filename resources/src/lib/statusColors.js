@@ -23,3 +23,17 @@ export function payStatusColor(status) {
     if (s.includes('unpaid')) return 'error';
     return 'default';
 }
+
+/**
+ * Receivables status (Invoice Receivables Report): the 4-state derived
+ * value from ReportController::Report_InvoiceReceivables — paid, partial,
+ * due, overdue. Separate from payStatusColor() above since "due" and
+ * "overdue" don't exist in the plain 3-state payment_statut vocabulary.
+ */
+export function receivableStatusColor(status) {
+    const s = String(status || '').toLowerCase();
+    if (s === 'paid') return 'success';
+    if (s === 'partial') return 'warning';
+    if (s === 'overdue') return 'error';
+    return 'default'; // 'due'
+}

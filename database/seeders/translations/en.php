@@ -317,6 +317,7 @@ return [
 'ProfitandLoss' => 'Profit and Loss',
 'WarehouseStockChart' => 'Warehouse Stock Chart',
 'SalesReport' => 'Sales Report',
+'Invoice_Receivables_Report' => 'Invoice Receivables Report',
 'AI_Reports' => 'AI Reports',
 'PurchasesReport' => 'Purchases Report',
 'CustomersReport' => 'Customers Report',

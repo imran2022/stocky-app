@@ -51,6 +51,8 @@ use App\Models\ProductBatch;
 use App\Models\UserWarehouse;
 use App\Models\Warehouse;
 use App\Models\Staff;
+use App\Support\PaymentTerms;
+use App\Support\SaleDocumentMath;
 use App\Traits\CalculatesCogsAndAverageCost;
 use App\utils\helpers;
 use ArPHP\I18N\Arabic;
@@ -1122,6 +1124,174 @@ class ReportController extends BaseController
         'couriers' => SaleCourier::whereNull('deleted_at')->orderBy('name')->get(['id', 'name']),
     ]);
 }
+
+    /**
+     * Invoice Receivables Report (2026-09-19) — one row per Sale ("invoice"),
+     * showing the full receivables picture: Original Invoice Amount, Sales
+     * Return Amount, Net Invoice Amount, Paid Amount, Remaining Receivable,
+     * Due Date, Overdue Days and a 4-state Payment Status (Paid / Partial /
+     * Due / Overdue) — so accounting/collection staff can see at a glance
+     * what's outstanding and how late it is.
+     *
+     * Reuses the existing Payment Terms system (app/Support/PaymentTerms.php,
+     * Build M1) for due-date/overdue logic rather than reimplementing it —
+     * sales.due_date is already snapshotted per-invoice at create/edit time,
+     * so this report never re-resolves the hierarchy itself.
+     *
+     * Net/Remaining math:
+     *   Net Invoice Amount = Invoice Total (GrandTotal) - Return Amount
+     *   Remaining Receivable = Net Invoice Amount - Paid Amount (floored at 0
+     *   via SaleDocumentMath::outstanding(), same helper already used for
+     *   invoice "outstanding" math elsewhere in this app).
+     *
+     * Return Amount only counts `sale_returns` rows with statut='received'
+     * (a pending/not-yet-processed return hasn't actually reduced what's
+     * owed yet) — same rule already established for Return Rate in Build D2
+     * and reused as-is by ClientStatementService for the Customer Statement.
+     *
+     * payment_statut on `sales` is only 3-valued (paid/partial/unpaid) and
+     * doesn't know about due dates, so Payment Status here is a DERIVED
+     * 4-state value, not a stored column:
+     *   remaining <= 0                       -> paid
+     *   remaining > 0 AND overdue             -> overdue
+     *   remaining > 0 AND some amount paid    -> partial
+     *   remaining > 0 AND nothing paid yet    -> due
+     *
+     * Because that status (and Overdue Days) depends on "today" and on the
+     * return-adjusted Net/Remaining figures, not on a single indexed column,
+     * filtering/sorting/paginating happens in PHP over the already
+     * date/customer/warehouse-scoped row set, exactly like every other
+     * per-row computed field in this codebase (e.g. `due` in Report_Sales
+     * above) — simplest-correct given this app's per-tenant invoice volume.
+     */
+    public function Report_InvoiceReceivables(Request $request)
+    {
+        $this->authorizeForUser($request->user('api'), 'invoice_receivables_report', Sale::class);
+
+        $user = Auth::user();
+        $is_all_warehouses = $user->is_all_warehouses;
+        $allowedWarehouseIds = [];
+        if (! $is_all_warehouses) {
+            $allowedWarehouseIds = UserWarehouse::where('user_id', $user->id)->pluck('warehouse_id')->toArray();
+        }
+        $helpers = new helpers;
+
+        $Sales = Sale::select('sales.*')
+            ->with('client')
+            ->whereNull('sales.deleted_at')
+            // Only real, finalized invoices are "receivables" — a draft/
+            // pending/cancelled document was never actually owed.
+            ->where('sales.statut', 'completed')
+            ->when(! $is_all_warehouses, function ($q) use ($allowedWarehouseIds) {
+                $q->whereIn('sales.warehouse_id', $allowedWarehouseIds);
+            })
+            ->when($request->filled('client_id'), function ($q) use ($request) {
+                $q->where('sales.client_id', $request->client_id);
+            });
+
+        if ($request->filled('from')) {
+            $Sales->where('sales.date', '>=', $request->from);
+        }
+        if ($request->filled('to')) {
+            $Sales->where('sales.date', '<=', $request->to);
+        }
+
+        $Sales = $helpers->Show_Records($Sales);
+
+        // Return Amount per sale (statut='received' only — see docblock).
+        $returnsBySale = DB::table('sale_returns')
+            ->whereNull('deleted_at')
+            ->where('statut', 'received')
+            ->groupBy('sale_id')
+            ->select('sale_id', DB::raw('SUM(GrandTotal) as total_return'))
+            ->pluck('total_return', 'sale_id');
+
+        $today = Carbon::today();
+        $rows = $Sales->get()->map(function ($sale) use ($returnsBySale, $today) {
+            $invoiceTotal = (float) $sale->GrandTotal;
+            $returnAmount = (float) ($returnsBySale[$sale->id] ?? 0);
+            $netInvoice = $invoiceTotal - $returnAmount;
+            $paidAmount = (float) $sale->paid_amount;
+            $remaining = SaleDocumentMath::outstanding($netInvoice, $paidAmount);
+
+            $isOverdue = PaymentTerms::isOverdue($sale->due_date, $remaining);
+            $overdueDays = $isOverdue ? (int) Carbon::parse($sale->due_date)->diffInDays($today) : 0;
+
+            if ($remaining <= 0.0001) {
+                $status = 'paid';
+            } elseif ($isOverdue) {
+                $status = 'overdue';
+            } elseif ($paidAmount > 0) {
+                $status = 'partial';
+            } else {
+                $status = 'due';
+            }
+
+            return [
+                'id' => $sale->id,
+                'date' => $sale->date,
+                'Ref' => $sale->Ref,
+                'client_id' => $sale->client_id,
+                'client_name' => optional($sale->client)->name,
+                'invoice_total' => round($invoiceTotal, 2),
+                'return_amount' => round($returnAmount, 2),
+                'net_invoice' => round($netInvoice, 2),
+                'paid_amount' => round($paidAmount, 2),
+                'remaining' => round($remaining, 2),
+                'due_date' => $sale->due_date,
+                'overdue_days' => $overdueDays,
+                'is_overdue' => $isOverdue,
+                'status' => $status,
+            ];
+        });
+
+        // Status filter (derived value — see docblock).
+        if ($request->filled('status') && $request->status !== 'all') {
+            $wanted = $request->status;
+            $rows = $rows->filter(fn ($r) => $r['status'] === $wanted);
+        }
+        // "Show Outstanding Only" — anything not fully paid.
+        if ($request->boolean('outstanding_only')) {
+            $rows = $rows->filter(fn ($r) => $r['remaining'] > 0.0001);
+        }
+        $rows = $rows->values();
+
+        $totalRows = $rows->count();
+
+        $summary = [
+            'count' => $totalRows,
+            'total_invoice' => round($rows->sum('invoice_total'), 2),
+            'total_return' => round($rows->sum('return_amount'), 2),
+            'net_invoice' => round($rows->sum('net_invoice'), 2),
+            'total_paid' => round($rows->sum('paid_amount'), 2),
+            'total_remaining' => round($rows->sum('remaining'), 2),
+            'total_overdue' => round($rows->where('status', 'overdue')->sum('remaining'), 2),
+        ];
+
+        // Sort (default: date desc — most recent invoices first).
+        $order = $request->SortField ?: 'date';
+        $dir = strtolower($request->SortType ?: 'desc');
+        $sorted = $rows->sortBy($order, SORT_REGULAR, $dir === 'desc')->values();
+
+        // Paginate the already-filtered/sorted collection.
+        $perPage = $request->limit;
+        $pageStart = (int) $request->get('page', 1);
+        if ($perPage == '-1' || empty($perPage)) {
+            $paged = $sorted;
+        } else {
+            $offset = ($pageStart * $perPage) - $perPage;
+            $paged = $sorted->slice($offset, $perPage)->values();
+        }
+
+        $customers = Client::whereNull('deleted_at')->orderBy('name')->get(['id', 'name']);
+
+        return response()->json([
+            'totalRows' => $totalRows,
+            'invoices' => $paged,
+            'summary' => $summary,
+            'customers' => $customers,
+        ]);
+    }
 
     /**
      * Zone / Courier Report: sales totals grouped by delivery Zone and,

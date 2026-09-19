@@ -3744,3 +3744,109 @@ warehouses) with their `time` column forced to known hours (02:15 and
 4. The Dashboard's `sales_by_warehouse` shows +1 invoice on each of
    the two warehouses used.
 Re-ran L3–L6, M3, M4, M5 and M6 regression gates — all still pass.
+
+## Build M8 — Invoice Receivables Report (2026-09-19)
+
+**Request:** a new, dedicated report — one row per invoice (Sale) —
+showing Original Invoice Amount, Sales Return Amount, Net Invoice
+Amount, Paid Amount, Remaining Receivable, Due Date, Overdue Days and
+Payment Status, with summary cards and Date/Customer/Status/"Show
+Outstanding Only" filters, so management/accounting/collection staff
+can see at a glance what's fully paid, partially paid, due, or overdue
+— per the user's own written spec.
+
+**What shipped:** a new report page, **Reports → Invoice Receivables
+Report**, one row per completed Sale:
+- **Invoice Total** — `sales.GrandTotal`.
+- **Sales Return Amount** — sum of `sale_returns.GrandTotal` for that
+  sale, **only** rows with `statut = 'received'` (a still-pending
+  return hasn't actually reduced what's owed yet — same rule already
+  established for Return Rate in Build D2 and reused as-is by
+  `ClientStatementService` for the Customer Statement).
+- **Net Invoice Amount** = Invoice Total − Return Amount.
+- **Paid Amount** — `sales.paid_amount` (the same denormalized field
+  every other Sales report already reads).
+- **Remaining Receivable** = Net Invoice Amount − Paid Amount, floored
+  at 0 via the existing `SaleDocumentMath::outstanding()` helper.
+- **Due Date** / **Overdue Days** — reuses the existing Payment Terms
+  system (`app/Support/PaymentTerms.php`, Build M1) rather than
+  reimplementing due-date logic; `sales.due_date` is already
+  snapshotted per-invoice at create/edit time, so this report never
+  re-resolves the hierarchy itself. Overdue Days is a new day-count
+  calculation (the existing `PaymentTerms::isOverdue()` is boolean
+  only) added alongside it.
+- **Payment Status** — a new, **derived** 4-state value (Paid /
+  Partial / Due / Overdue). The existing `sales.payment_statut` column
+  is only 3-valued (paid/partial/unpaid) and knows nothing about due
+  dates, so this report computes its own status per row:
+  `remaining <= 0` → Paid; `remaining > 0` and overdue → Overdue;
+  `remaining > 0` and something's been paid → Partial; otherwise →
+  Due.
+
+**Summary cards:** Total Invoice, Total Return, Net Invoice, Total
+Paid, Total Remaining, Total Overdue — computed over the whole
+filtered set (not just the page on screen), same convention as every
+other report's KPI tiles in this app.
+
+**Filters:** Date From/To, Customer, Status (All/Paid/Partial/Due/
+Overdue), and a "Show Outstanding Only" checkbox (hides fully-paid
+invoices) — exactly the filter set from the user's spec, no more.
+
+**Files touched:**
+- `app/Http/Controllers/ReportController.php` — new
+  `Report_InvoiceReceivables()` method.
+- `routes/api.php` — new `report/invoice_receivables` route.
+- `database/migrations/2026_09_19_000001_add_invoice_receivables_report_permission.php`
+  (NEW) — adds the `invoice_receivables_report` permission, auto-granted
+  to whichever role(s) currently hold `Reports_sales` (same
+  reserved-id-migration pattern already used for `purchase_orders` and
+  `activity_log_report`).
+- `database/seeders/InvoiceReceivablesPermissionSeeder.php` (NEW) +
+  `database/seeders/DatabaseSeeder.php` — the matching fresh-install
+  seeder call, registered *after* `PermissionRoleSeeder`, per the
+  standing rule from Build K.4 (a migration's own grant logic finds
+  zero roles on a fresh `migrate:fresh --seed`, since migrations run
+  before seeders).
+- `app/Policies/SalePolicy.php` — new `invoice_receivables_report()`
+  method. **A real gotcha caught before shipping**: this app's
+  authorization requires an *explicit PHP method per permission* on
+  the relevant Policy class — a `permissions` table row alone is not
+  enough (documented once already for `SettingPolicy` in Build I1).
+  Without this method, every request came back 403 even though the
+  permission was correctly granted to the role; confirmed via the
+  regression test below, which failed with exactly that
+  `AuthorizationException` on the first run, before this method was
+  added.
+- `resources/src/pages/reports/InvoiceReceivablesReport.vue` (NEW) —
+  built from the same `ReportPage`/`DataTable`/`useCrudTable` pattern
+  as `SalesReport.vue`.
+- `resources/src/lib/statusColors.js` — new `receivableStatusColor()`
+  helper (the existing `payStatusColor()` only knows the 3-state
+  paid/partial/unpaid vocabulary, not Due/Overdue).
+- `resources/src/router/index.js` — new lazy route
+  `reports/invoice-receivables`.
+- `resources/src/config/menu.js` — new sidebar entry under Reports,
+  plus the matching `MIGRATED_ROUTES` mapping and permission added to
+  the Reports group's own permission list (so the group stays visible
+  to roles that only hold this one report permission).
+- `resources/src/config/permissions.js` — new entry so the permission
+  is selectable from Roles & Permissions.
+- `database/seeders/translations/en.php` — new
+  `Invoice_Receivables_Report` key (used by the sidebar/permissions
+  label, which both route through `$t()`; all other on-page text
+  follows the standing "plain-English UI text" rule since it's brand
+  new and wasn't seeded anywhere else).
+- New: `tests/Regression/build_m8_invoice_receivables_report.php`.
+
+**Verification:** a real, DB-backed test creates 5 real sales (via the
+actual `SalesController::store()` flow) on one dedicated test
+customer, force-sets `paid_amount`/`due_date` and creates real
+`SaleReturn` rows (one `received`, one `pending`) to hit all 4 status
+states plus the pending-return-exclusion rule, then calls
+`Report_InvoiceReceivables()` directly (scoped to that one customer,
+so it can't be polluted by the sandbox's other fixture sales) and
+asserts every computed field — Net Invoice, Remaining, Overdue Days,
+Payment Status — against hand-worked expected values, plus the
+summary-card totals and the Status/"Show Outstanding Only" filters.
+Re-ran L1–L6, A, A.1, B, C, D1, D2 and M1, M3–M7 regression gates —
+all still pass.

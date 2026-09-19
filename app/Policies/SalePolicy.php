@@ -118,6 +118,21 @@ class SalePolicy
         return $user->hasRole($permission->roles);
     }
 
+    // Invoice Receivables Report (Build M8) — see the
+    // add_invoice_receivables_report_permission migration for how this
+    // permission is granted.
+    public function invoice_receivables_report(User $user)
+    {
+        $permission = Permission::where('name', 'invoice_receivables_report')->first();
+
+        // New permission: installs that have not run the updater yet get a clean 403, not a 500.
+        if (! $permission) {
+            return false;
+        }
+
+        return $user->hasRole($permission->roles);
+    }
+
     public function draft_invoices_report(User $user)
     {
         $permission = Permission::where('name', 'draft_invoices_report')->first();

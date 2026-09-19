@@ -1944,3 +1944,31 @@ optional; the line just doesn't render when empty).
 
 **Regression test:**
 `tests/Regression/build_m7_dashboard_hourly_warehouse_and_realtime_fixes.php`.
+
+---
+
+## Build M8 — Invoice Receivables Report
+
+**How to verify:**
+- [ ] Reports → Invoice Receivables Report opens and lists one row per
+      completed sale (Invoice Total, Return Amount, Net Invoice, Paid,
+      Remaining, Due Date, Overdue Days, Status).
+- [ ] Summary cards at the top (Total Invoice, Total Return, Net
+      Invoice, Total Paid, Total Remaining, Total Overdue) match the
+      sum of the rows shown for the current filter.
+- [ ] A fully-paid invoice shows Status "Paid" and Remaining ৳0.
+- [ ] A partially-paid invoice not yet past its due date shows
+      "Partial".
+- [ ] An invoice past its due date with something still owed shows
+      "Overdue" (red tag) with a positive Overdue Days count.
+- [ ] An untouched invoice not yet due shows "Due".
+- [ ] A sale return still in "pending" status does NOT reduce that
+      invoice's Net Invoice Amount; only a "received" return does.
+- [ ] Date From/To, Customer and Status filters narrow the list
+      correctly; "Show Outstanding Only" hides fully-paid invoices.
+- [ ] A role that doesn't have the new "Invoice Receivables Report"
+      permission (Roles & Permissions → find it under Reports) can't
+      see the menu item or open the report directly.
+
+**Regression test:**
+`tests/Regression/build_m8_invoice_receivables_report.php`.

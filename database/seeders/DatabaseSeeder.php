@@ -35,6 +35,11 @@ class DatabaseSeeder extends Seeder
             // role(s) hold 'report_device_management'. See
             // ActivityLogPermissionSeeder's own docblock.
             ActivityLogPermissionSeeder::class,
+            // Same fresh-install fix, same reasoning, for
+            // 'invoice_receivables_report' (added by a later migration too)
+            // — grants it to whichever role(s) hold 'Reports_sales'. See
+            // InvoiceReceivablesPermissionSeeder's own docblock.
+            InvoiceReceivablesPermissionSeeder::class,
             Warehouse::class,
             StoreSettingSeeder::class,
         ]);
