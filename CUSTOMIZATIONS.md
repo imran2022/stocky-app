@@ -3031,3 +3031,69 @@ the full existing suite pass.
 automatically — no other changes needed unless the new template needs its
 own extra data beyond what `$sale`/`$details`/`$setting`/`$symbol`
 already carry (the Modern layout needed none).
+
+## Build L4 — Modern Sale Invoice: bug fix, Box Qty, and matching shipping label (2026-09-19)
+
+**Why:** The user asked for a review of their own uploaded Modern
+template (added as-is in Build L3): "did you find any issues, does Box
+Qty work here, and can this layout be customized too like Classic?" They
+also asked for the standalone Shipping Label PDF to be restyled to match
+the invoice's own embedded shipping-label section.
+
+**What changed:**
+- `resources/views/pdf/sale_pdf_modern.blade.php`:
+  - **Bug fix (real calculation bug):** the template computed the order
+    discount as `(float) $sale['discount']` directly. When the discount
+    is percent-based (`discount_Method === '1'`), `$sale['discount']`
+    holds the raw percent number (e.g. `10` for 10%), not a dollar
+    amount — so a 10% discount on a $350 subtotal was shown as a flat
+    "$10.00" instead of the correct "$35.00", and the backward-derived
+    Subtotal was wrong too. Fixed using the same percent-vs-fixed
+    branching the Classic layout already uses (see the code comment in
+    the file for the derivation), and the Discount row now shows
+    "- 10.00% (USD 35.00)" the same way Classic does.
+  - **Box Qty added:** was completely absent. Added a "Box" column,
+    shown only when the `enable_box_qty` company setting is on AND at
+    least one line item actually has a box quantity — matching the
+    dynamic-column approach the template's own author already used for
+    the Disc/VAT columns, and the description column still widens to
+    fill the space when it's hidden.
+  - **Discount from Points added:** was computed (needed for the fixed
+    subtotal math) but never shown. Added a "Discount from Points" row,
+    shown only when it's greater than zero.
+  - **Customization parity with Classic:** the Sections and Text & labels
+    panels of the Invoice PDF customizer were always shown for this
+    layout too, but only Previous Dues/Net Balance (Build L2) actually
+    did anything — the rest of those toggles were silently ignored. Wired
+    in the remaining ones: Customer block, Sales Status line, Notes,
+    Thank-you line (+ its text override), Footer text override, and the
+    Document title override. The Colors/Typography/Layout & logo/Items
+    table panels are still Classic-only (self-styled by design), exactly
+    as the settings page already tells you.
+- `resources/views/pdf/shipping_label.blade.php` — restyled from its
+  previous unrelated card design to match the visual language of the
+  Modern invoice's own "DELIVERY INFORMATION" section (uppercase
+  micro-labels, sender/shipment-ref/receiver blocks, dashed COD-vs-PAID
+  badge), so a shop using the Modern invoice gets a matching shipping
+  label. Same `$sale`/`$company`/`$symbol` inputs as before — no
+  controller change needed.
+- New: `tests/Regression/build_l4_modern_invoice_fixes_and_shipping_label.php`.
+
+**Verification:** real PDF render tests against seeded sales — a 10%
+percent-discount sale with a $5 points discount, $15 shipping, one line
+with a box quantity and one without: confirmed via `pdftotext` that
+Subtotal/Discount/Discount from Points/Shipping/GRAND TOTAL are all
+internally consistent and the Box column shows correctly per line.
+Re-rendered with `enable_box_qty` off (column disappears). Re-rendered a
+flat-dollar-discount sale (regression: still shows a plain dollar amount,
+no stray percent text). Re-rendered with every Sections toggle switched
+off plus a title/thank-you/footer override (all honored correctly) and
+with everything back to defaults. Rendered the standalone Shipping Label
+for a COD sale and a fully-paid sale (both badge states correct).
+Re-rendered Sale Invoice with `layout = 'classic'` throughout to confirm
+none of this touched Classic's own (already-correct) behavior. Full
+existing regression suite (L1-L3) re-run with no new failures.
+
+**Not covered:** the Colors/Typography/Layout & logo/Items table panels
+still don't apply to Modern — it remains self-styled by design, per the
+user's own request to use their design as-is.

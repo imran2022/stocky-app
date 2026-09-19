@@ -1578,3 +1578,56 @@ invoice page's Download button.
 **How to add another template later:** drop a new Blade file, add it to
 `PdfTemplate::LAYOUTS['sale']` — no other code changes needed unless the
 new design needs data the current templates don't already receive.
+
+---
+
+## 20. Build L4 — Modern Sale Invoice: bug fix, Box Qty, customization parity, matching shipping label
+
+**What it does:**
+- Fixes a real bug in the user-supplied Modern Sale Invoice template
+  (Build L3): percent-based order discounts were treated as flat dollar
+  amounts, understating both the Discount line and the Subtotal.
+- Adds a "Box" column to the Modern template (same on/off logic as
+  Classic: only shows when the `enable_box_qty` setting is on and at
+  least one line item has a box quantity).
+- Adds a "Discount from Points" row to the Modern template's totals.
+- Wires the rest of the Sections / Text & labels customizer panels into
+  Modern (Customer block, Sales Status, Notes, Thank-you line + text
+  override, Footer text override, Document title override) — previously
+  only Previous Dues/Net Balance (Build L2) worked there even though the
+  settings page always showed all these controls.
+- Restyles the separate standalone Shipping Label PDF to match the
+  Modern invoice's own "DELIVERY INFORMATION" shipping-label section.
+
+**Files touched:**
+- `resources/views/pdf/sale_pdf_modern.blade.php`
+- `resources/views/pdf/shipping_label.blade.php`
+
+**How to verify:**
+- [ ] Settings → Invoice PDF → Sales Invoice → Template = Modern, save.
+      Create/open a sale with a **percentage** discount — the invoice PDF
+      must show "Discount: - X.00% (currency amount)" with the correct
+      dollar amount, and the Subtotal above it must equal the true
+      pre-discount total (sum of line totals).
+- [ ] A sale with a **fixed-amount** discount must still show a plain
+      dollar amount (no stray "%" text) — unchanged from before.
+- [ ] A sale that used loyalty points for part of the discount must show
+      a separate "Discount from Points" line.
+- [ ] With the box-qty feature enabled and a sale that has box quantities
+      on some line items: the PDF must show a "Box" column, with a dash
+      for any line that has no box quantity. With the feature disabled,
+      the column must not appear at all.
+- [ ] In Settings → Invoice PDF → Sales Invoice, with Modern selected,
+      toggle off Customer / Sales Status / Notes / Thank-you, add a
+      custom Footer text, and set a custom Document title — save, then
+      download a PDF and confirm all of these are honored the same way
+      they already are for Classic.
+- [ ] Download the standalone "Shipping Label" for a sale with a balance
+      due — it must show the "DELIVERY INFORMATION" card style (matching
+      the invoice's own shipping section) with a red "CASH ON DELIVERY
+      (COD)" badge and the correct amount. For a fully paid sale, it must
+      show a green "PAID" badge instead.
+- [ ] Switch back to Classic — its own discount display, Box Qty, and all
+      customizer panels must be completely unaffected by this build.
+
+**Regression test:** `tests/Regression/build_l4_modern_invoice_fixes_and_shipping_label.php`.

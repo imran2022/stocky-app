@@ -1,13 +1,18 @@
 {{--
-    "Modern" Sale Invoice layout — Build L3 (2026-09-19). One of two
-    selectable layouts for the Sales Invoice PDF (Settings → Invoice PDF →
-    Sales Invoice → Template). Supplied as a ready-made design; the only
-    change made to it here is wiring in the Previous Dues / Net Balance
-    toggle (Build L2) below, so both layouts stay in sync with that
-    setting. Unlike the Classic layout, this one does not read the
-    Colors/Typography/Layout/Items-table panels of the Invoice PDF
-    customizer — its colors and spacing are fixed in its own <style>
-    block, by design (it was supplied fully styled).
+    "Modern" Sale Invoice layout — Build L3 (2026-09-19), extended in
+    Build L4 (2026-09-19). One of two selectable layouts for the Sales
+    Invoice PDF (Settings → Invoice PDF → Sales Invoice → Template).
+    Supplied as a ready-made design.
+
+    What IS customizable here, same as Classic (Sections / Text & labels
+    panels in the customizer): Previous Dues / Net Balance, Customer block,
+    Sales Status line, Notes, Thank-you line + its text override, Footer
+    text, Document title override.
+
+    What is NOT customizable here (self-styled by design): the
+    Colors/Typography/Layout & logo/Items table panels — its colors, fonts
+    and spacing are fixed in its own <style> block. The settings page shows
+    a note about this when this layout is selected.
 --}}
 @php
     $pdfLocale = app()->getLocale();
@@ -42,13 +47,32 @@
         }
         
         $taxAmount = (float)($sale['TaxNet'] ?? 0);
-        $discountAmount = (float)($sale['discount'] ?? 0);
         $shippingAmount = (float)($sale['shipping'] ?? 0);
-        $subtotal = $sale['GrandTotal'] - $shippingAmount - $taxAmount + $discountAmount;
+        $discountFromPoints = (float)($sale['discount_from_points'] ?? 0);
+
+        // Order discount: when discount_Method is '1' (percent), $sale['discount']
+        // holds the PERCENT NUMBER itself (e.g. 10, meaning 10%), not a dollar
+        // amount — it must be converted before use in totals/subtotal math, the
+        // same way the Classic layout's $manualDiscountAmount does. Using the raw
+        // value directly here (as an earlier version of this file did) understated
+        // both the discount and the subtotal for every percent-based order
+        // discount. $subtotal is derived from GrandTotal backwards, so it must use
+        // this corrected dollar amount too.
+        $discountMethod = $sale['discount_Method'] ?? '2';
+        $discountRaw = (float)($sale['discount'] ?? 0);
+        // GrandTotal already reflects the real discount either way, so the
+        // subtotal-derivation below only needs a provisional amount to solve for
+        // subtotal when the discount is a percent of that same subtotal.
+        $provisionalSubtotal = $sale['GrandTotal'] - $shippingAmount - $taxAmount + $discountFromPoints;
+        $discountAmount = $discountMethod === '1'
+            ? round($provisionalSubtotal * ($discountRaw / (100 - $discountRaw)), 2) // solve: sub - sub*(pct/100) = provisional
+            : min($discountRaw, $provisionalSubtotal);
+        $subtotal = $provisionalSubtotal + $discountAmount;
 
         // Dynamic Column Checkers
         $hasLineDiscount = false;
         $hasLineTax = false;
+        $anyLineHasBoxQty = false;
         foreach ($details as $detail) {
             if ((float)($detail['DiscountNet'] ?? 0) > 0) {
                 $hasLineDiscount = true;
@@ -56,12 +80,19 @@
             if ((float)($detail['taxe'] ?? 0) > 0) {
                 $hasLineTax = true;
             }
+            if (($detail['box_qty'] ?? null) !== null) {
+                $anyLineHasBoxQty = true;
+            }
         }
+        // enable_box_qty is a Settings-level company flag (System Settings →
+        // Features), same one the Classic layout and Sale Detail page read.
+        $hasBoxQty = $anyLineHasBoxQty && (bool) ($setting['enable_box_qty'] ?? true);
 
         // Dynamic Width Adjustment
-        $descWidth = 37; 
+        $descWidth = 37;
         if (!$hasLineDiscount) $descWidth += 10;
         if (!$hasLineTax) $descWidth += 10;
+        if (!$hasBoxQty) $descWidth += 6;
     @endphp
     <style>
         @page { 
@@ -210,7 +241,7 @@
                 </table>
             </td>
             <td style="width: 40%; text-align: right; vertical-align: top;">
-                <div style="font-size: 20pt; font-weight: 800; color: #0f172a; line-height: 1;">INVOICE</div>
+                <div style="font-size: 20pt; font-weight: 800; color: #0f172a; line-height: 1;">{{ !empty($pdfT['labels']['title']) ? $pdfT['labels']['title'] : 'INVOICE' }}</div>
                 <div style="font-size: 10pt; font-weight: bold; color: #475569; margin-top: 2px;">Invoice No: {{$sale['Ref']}}</div>
                 <div style="margin-top: 4px;">
                     <span style="color: #10b981; font-weight: bold; font-size: 8.5pt;">Paid: {{$symbol}} {{formatPrice($sale['paid_amount'], 2, $priceFormat)}}</span>
@@ -224,7 +255,7 @@
 
     <table style="margin-bottom: 15px;">
         <tr>
-            <td style="width: 45%; vertical-align: top;">
+            <td style="width: 45%; vertical-align: top; {{ !empty($pdfT['show_customer']) ? '' : 'display:none;' }}">
                 <span class="label">Customer</span>
                 <div style="font-size: 9.5pt; font-weight: bold; color: #1e293b;">{{$sale['client_name']}}</div>
                 <div style="font-size: 8.5pt; color: #64748b; margin-top: 2px;">{{$sale['client_adr']}}</div>
@@ -233,7 +264,7 @@
             <td style="width: 55%; vertical-align: top; text-align: right;">
                 <span class="label">Date & Status</span>
                 <div style="font-size: 9.5pt; font-weight: bold; color: #1e293b; margin-bottom: 3px;">{{$sale['date']}}</div>
-                <div style="margin-bottom: 3px;">
+                <div style="margin-bottom: 3px; {{ !empty($pdfT['show_status']) ? '' : 'display:none;' }}">
                     <span style="font-size: 8.5pt; font-weight: bold; color: #64748b; margin-right: 5px;">Sales Status:</span>
                     <span class="status-badge">{{$sale['statut']}}</span>
                 </div>
@@ -249,6 +280,7 @@
             <tr>
                 <th style="width: 6%; text-align: center;">#</th>
                 <th style="width: {{ $descWidth }}%;">Description</th>
+                @if($hasBoxQty) <th style="width: 8%; text-align: center;">Box</th> @endif
                 <th style="width: 8%; text-align: center;">Qty</th>
                 <th style="width: 12%; text-align: right;">Price</th>
                 @if($hasLineDiscount) <th style="width: 10%; text-align: right;">Disc</th> @endif
@@ -266,6 +298,7 @@
                     <div class="product-name" style="font-weight: normal; color: #1e293b;">{{$detail['name']}}</div>
                     <div style="font-size: 7.5pt; color: #94a3b8; margin-top: 1px;">Code: {{$detail['code']}}</div>
                 </td>
+                @if($hasBoxQty) <td class="col-normal" style="text-align: center; color: #1e293b;">{{ $detail['box_qty'] ?? '—' }}</td> @endif
                 <td class="col-normal" style="text-align: center; color: #1e293b;">{{$detail['quantity']}}</td>
                 <td class="col-normal" style="text-align: right; color: #1e293b;">{{formatPrice($detail['price'], 2, $priceFormat)}}</td>
                 @if($hasLineDiscount) <td class="col-normal" style="text-align: right; color: #1e293b;">{{formatPrice($detail['DiscountNet'], 2, $priceFormat)}}</td> @endif
@@ -279,7 +312,7 @@
     <table style="margin-bottom: 15px;">
         <tr>
             <td style="width: 50%; vertical-align: top; padding-right: 30px;">
-                @if(!empty($sale['notes']) || !empty($sale['note']) || !empty($sale['sale_note']))
+                @if(!empty($pdfT['show_notes']) && (!empty($sale['notes']) || !empty($sale['note']) || !empty($sale['sale_note'])))
                 <div style="margin-top: 3px;">
                     <span class="label" style="color: #2563eb;">Special Notes</span>
                     <div style="font-size: 8pt; color: #64748b; line-height: 1.3;">
@@ -304,7 +337,19 @@
                         @if($discountAmount > 0)
                         <tr>
                             <td style="font-size: 8.5pt; color: #64748b;">Discount</td>
-                            <td style="font-weight: bold; text-align: right; color: #e11d48;">- {{$symbol}} {{formatPrice($discountAmount, 2, $priceFormat)}}</td>
+                            <td style="font-weight: bold; text-align: right; color: #e11d48;">
+                                @if($discountMethod === '1')
+                                    - {{number_format($discountRaw, 2)}}% ({{$symbol}} {{formatPrice($discountAmount, 2, $priceFormat)}})
+                                @else
+                                    - {{$symbol}} {{formatPrice($discountAmount, 2, $priceFormat)}}
+                                @endif
+                            </td>
+                        </tr>
+                        @endif
+                        @if($discountFromPoints > 0)
+                        <tr>
+                            <td style="font-size: 8.5pt; color: #64748b;">Discount from Points</td>
+                            <td style="font-weight: bold; text-align: right; color: #e11d48;">- {{$symbol}} {{formatPrice($discountFromPoints, 2, $priceFormat)}}</td>
                         </tr>
                         @endif
                         @if($shippingAmount > 0)
@@ -345,11 +390,16 @@
 
     <div style="margin-top: 10px; page-break-inside: avoid; break-inside: avoid;">
         <div style="height: 1px; background: #e2e8f0; width: 100%; margin-bottom: 6px;"></div>
-        <div style="text-align: center;">
-            <div style="font-size: 9.5pt; font-weight: bold; color: #0f172a; text-transform: uppercase; letter-spacing: 0.5px;">Thank you for your business</div>
+        <div style="text-align: center; {{ !empty($pdfT['show_thank_you']) ? '' : 'display:none;' }}">
+            <div style="font-size: 9.5pt; font-weight: bold; color: #0f172a; text-transform: uppercase; letter-spacing: 0.5px;">{{ !empty($pdfT['labels']['thank_you']) ? $pdfT['labels']['thank_you'] : 'Thank you for your business' }}</div>
             <div style="font-size: 7.5pt; color: #94a3b8; margin-top: 2px;">This is a computer generated invoice.</div>
             <div style="font-size: 7.5pt; color: #94a3b8; margin-top: 1px;">Generated on: {{ date('M d, Y h:i A') }}</div>
         </div>
+        @if(!empty($pdfT['show_footer_text']) && ($pdfT['footer_text'] !== '' || (!empty($setting['is_invoice_footer']) && !empty($setting['invoice_footer']))))
+        <div style="text-align: center; margin-top: 6px;">
+            <p style="font-size: 7.5pt; color: #6b7280; line-height: 1.5; margin: 0;">{{ $pdfT['footer_text'] !== '' ? $pdfT['footer_text'] : $setting['invoice_footer'] }}</p>
+        </div>
+        @endif
     </div>
 
 

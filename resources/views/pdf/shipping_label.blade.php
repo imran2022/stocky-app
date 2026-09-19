@@ -1,59 +1,130 @@
+<!--
+    Standalone Shipping Label PDF (Build L4, 2026-09-19). Restyled to match
+    the "DELIVERY INFORMATION" shipping-label section embedded at the
+    bottom of the Modern Sale Invoice (sale_pdf_modern.blade.php) — same
+    card look, uppercase micro-labels, sender/receiver block layout, and
+    COD vs PAID badge — so both feel like one consistent design language.
+    Inputs ($sale, $company, $symbol) are unchanged from
+    SalesController::Sale_Shipping_Label(); no controller change needed.
+-->
 <!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
 <style>
-    @page { margin: 18px; }
-    body { font-family: DejaVu Sans, sans-serif; color: #111827; font-size: 11pt; }
-    .box { border: 2px solid #111827; border-radius: 8px; padding: 16px; }
-    .row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
-    .ref-badge {
-        display: inline-block; background: #6d28d9; color: #fff; font-weight: bold;
-        padding: 6px 16px; border-radius: 6px; font-size: 13pt;
+    @page { margin: 12px; }
+    body { font-family: DejaVu Sans, sans-serif; color: #0f172a; font-size: 9pt; margin: 0; }
+
+    .cut-line {
+        border-top: 2px dashed #94a3b8;
+        text-align: center;
+        height: 12px;
+        margin-bottom: 10px;
+        position: relative;
     }
-    .meta { text-align: right; font-size: 10pt; color: #374151; }
-    .meta div { margin-bottom: 2px; }
-    .section-title {
-        font-size: 8pt; text-transform: uppercase; letter-spacing: 0.05em; color: #6b7280;
-        margin-bottom: 4px; margin-top: 14px;
+    .cut-line span {
+        position: absolute;
+        top: -10px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #fff;
+        padding: 0 10px;
+        font-size: 7pt;
+        font-weight: bold;
+        color: #64748b;
+        text-transform: uppercase;
+        letter-spacing: 1.2px;
     }
-    .party-name { font-size: 13pt; font-weight: bold; margin-bottom: 4px; }
-    .party-line { font-size: 10.5pt; color: #374151; margin-bottom: 2px; }
-    .divider { border-top: 2px dashed #9ca3af; margin: 16px 0; }
-    .cod {
-        margin-top: 16px; text-align: center; border: 2px solid #ef4444; border-radius: 8px;
-        padding: 10px; font-size: 15pt; font-weight: bold; color: #b91c1c;
+
+    .hub-label-box {
+        border: 1px solid #cbd5e1;
+        border-radius: 10px;
+        background: #ffffff;
+        overflow: hidden;
+    }
+    .hub-title-bar {
+        background: #ffffff;
+        color: #0f172a;
+        border-bottom: 1px solid #cbd5e1;
+        padding: 8px 12px;
+        font-size: 9.5pt;
+        font-weight: 800;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+    }
+    .hub-cell { padding: 10px 12px; vertical-align: top; }
+    .hub-title-tag {
+        font-size: 7pt;
+        font-weight: bold;
+        color: #64748b;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 4px;
     }
 </style>
 </head>
 <body>
-    <div class="box">
-        <div class="row">
-            <div class="ref-badge">{{ $sale['Ref'] }}</div>
-            <div class="meta">
-                <div><strong>{{ __('pdf.date') }}:</strong> {{ $sale['date'] }}</div>
-            </div>
-        </div>
 
-        <div class="section-title">From</div>
-        <div class="party-name">{{ $company['CompanyName'] }}</div>
-        @if(!empty($company['CompanyPhone']))<div class="party-line">{{ __('pdf.phone') }}: {{ $company['CompanyPhone'] }}</div>@endif
-        @if(!empty($company['CompanyAdress']))<div class="party-line">{{ $company['CompanyAdress'] }}</div>@endif
-        @if(!empty($company['vat_number']))<div class="party-line">VAT/BIN: {{ $company['vat_number'] }}</div>@endif
-        @if(!empty($company['website']))<div class="party-line">{{ $company['website'] }}</div>@endif
+    <div class="cut-line"><span>Shipping Label</span></div>
 
-        <div class="divider"></div>
+    <div class="hub-label-box">
+        <div class="hub-title-bar">Delivery Information</div>
 
-        <div class="section-title">To</div>
-        <div class="party-name">{{ $sale['client_name'] }}</div>
-        @if(!empty($sale['client_phone']))<div class="party-line">{{ __('pdf.phone') }}: {{ $sale['client_phone'] }}</div>@endif
-        @if(!empty($sale['client_adr']))<div class="party-line">{{ $sale['client_adr'] }}</div>@endif
+        <table style="width: 100%; border-bottom: 1px solid #e2e8f0;">
+            <tr>
+                <td class="hub-cell">
+                    <div class="hub-title-tag">Sender (From):</div>
+                    <div style="font-size: 9pt; font-weight: bold; color: #0f172a;">{{ $company['CompanyName'] }}</div>
+                    @if(!empty($company['CompanyAdress']))<div style="font-size: 7.5pt; color: #475569; margin-top: 2px;">{{ $company['CompanyAdress'] }}</div>@endif
+                    @if(!empty($company['CompanyPhone']))<div style="font-size: 7.5pt; color: #475569; font-weight: bold; margin-top: 2px;">Phone: {{ $company['CompanyPhone'] }}</div>@endif
+                    @if(!empty($company['vat_number']))<div style="font-size: 7pt; color: #64748b; margin-top: 1px;">VAT/BIN: {{ $company['vat_number'] }}</div>@endif
+                </td>
+            </tr>
+        </table>
 
-        @if((float) ($sale['cod_amount'] ?? 0) > 0)
-        <div class="cod">
-            Cash on Delivery: {{ $symbol }}{{ $sale['cod_amount'] }}
-        </div>
-        @endif
+        <table style="width: 100%; border-bottom: 1px solid #e2e8f0;">
+            <tr>
+                <td class="hub-cell">
+                    <div class="hub-title-tag">Shipment Ref:</div>
+                    <div style="font-size: 8pt; color: #1e293b; line-height: 1.4;">
+                        <strong>Invoice No:</strong> {{ $sale['Ref'] }}<br>
+                        <strong>Date:</strong> {{ $sale['date'] }}
+                        <div style="font-size: 8.5pt; font-weight: bold; color: #0f172a; margin-top: 4px; border-top: 1px dashed #cbd5e1; padding-top: 3px;">
+                            Order Total: {{ $symbol }} {{ $sale['GrandTotal'] }}
+                        </div>
+                    </div>
+                </td>
+            </tr>
+        </table>
+
+        <table style="width: 100%;">
+            <tr>
+                <td class="hub-cell">
+                    <div class="hub-title-tag" style="color: #2563eb; font-weight: bold;">Ship To (Receiver):</div>
+                    <div style="font-size: 11pt; font-weight: bold; color: #0f172a; line-height: 1.2;">{{ $sale['client_name'] }}</div>
+                    @if(!empty($sale['client_adr']))<div style="font-size: 8.5pt; color: #334155; font-weight: 500; margin-top: 4px; line-height: 1.4;">{{ $sale['client_adr'] }}</div>@endif
+                    @if(!empty($sale['client_phone']))<div style="font-size: 9.5pt; font-weight: bold; color: #0f172a; margin-top: 6px;">Phone: {{ $sale['client_phone'] }}</div>@endif
+                </td>
+            </tr>
+        </table>
+
+        <table style="width: 100%;">
+            <tr>
+                <td class="hub-cell" style="text-align: center;">
+                    @if((float) ($sale['cod_amount'] ?? 0) > 0)
+                        <div style="background: #fff5f5; border: 1px dashed #e11d48; border-radius: 6px; padding: 10px 6px;">
+                            <span style="font-size: 7.5pt; font-weight: bold; color: #991b1b; text-transform: uppercase; display: block; letter-spacing: 0.5px; margin-bottom: 2px;">Cash On Delivery (COD)</span>
+                            <span style="font-size: 13pt; font-weight: 900; color: #e11d48;">{{ $symbol }}{{ $sale['cod_amount'] }}</span>
+                        </div>
+                    @else
+                        <div style="background: #f0fdf4; border: 1px dashed #166534; border-radius: 6px; padding: 12px 6px;">
+                            <span style="font-size: 11pt; font-weight: 900; color: #166534; text-transform: uppercase; letter-spacing: 2px; display: block;">Paid</span>
+                        </div>
+                    @endif
+                </td>
+            </tr>
+        </table>
     </div>
+
 </body>
 </html>
