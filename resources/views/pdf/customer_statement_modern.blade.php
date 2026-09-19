@@ -129,15 +129,12 @@
             <td style="width: 55%; vertical-align: top;">
                 <span class="label">Customer</span>
                 <div style="font-size: 10.5pt; font-weight: bold; color: #1e293b;">{{ $client['name'] ?? '-' }}</div>
-                @if(!empty($client['code']))
-                    <div style="font-size: 8pt; color: #94a3b8;">Code: {{ $client['code'] }}</div>
-                @endif
                 @if(!empty($client['adresse']))
                     <div style="font-size: 8.5pt; color: #64748b; margin-top: 2px;">{{ $client['adresse'] }}</div>
                 @endif
-                <div style="font-size: 8.5pt; color: #64748b;">
-                    {{ $client['phone'] ?? '' }}{{ !empty($client['phone']) && !empty($client['email']) ? ' | ' : '' }}{{ $client['email'] ?? '' }}
-                </div>
+                @if(!empty($client['phone']))
+                    <div style="font-size: 8.5pt; color: #64748b;">{{ $client['phone'] }}</div>
+                @endif
             </td>
             <td style="width: 45%; vertical-align: top;">
                 <table>

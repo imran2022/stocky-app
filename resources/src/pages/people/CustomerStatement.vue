@@ -32,6 +32,8 @@
             </div>
             <div class="hero-meta">
               <span v-if="client.email" class="meta-chip"><MailOutlined /> {{ client.email }}</span>
+              <span v-if="client.phone" class="meta-chip"><PhoneOutlined /> {{ client.phone }}</span>
+              <span v-if="clientAddress" class="meta-chip"><EnvironmentOutlined /> {{ clientAddress }}</span>
             </div>
           </div>
         </div>
@@ -39,7 +41,7 @@
 
       <!-- KPI cards -->
       <a-row :gutter="[16, 16]" style="margin-bottom: 16px">
-        <a-col :xs="24" :sm="8">
+        <a-col :xs="12" :sm="6">
           <a-card :bordered="false" class="kpi-card">
             <a-statistic
               :title="$t('Opening_Balance')" :value="money(data.opening_balance)"
@@ -47,7 +49,7 @@
             />
           </a-card>
         </a-col>
-        <a-col :xs="24" :sm="8">
+        <a-col :xs="12" :sm="6">
           <a-card :bordered="false" class="kpi-card">
             <a-statistic
               :title="$t('Total_Debit')" :value="money(totalDebit)"
@@ -55,7 +57,15 @@
             />
           </a-card>
         </a-col>
-        <a-col :xs="24" :sm="8">
+        <a-col :xs="12" :sm="6">
+          <a-card :bordered="false" class="kpi-card">
+            <a-statistic
+              :title="$t('Total_Credit')" :value="money(totalCredit)"
+              :value-style="{ color: '#166534' }"
+            />
+          </a-card>
+        </a-col>
+        <a-col :xs="12" :sm="6">
           <a-card :bordered="false" class="kpi-card">
             <a-statistic
               :title="$t('Closing_Balance')" :value="money(data.closing_balance)"
@@ -99,6 +109,13 @@
             <a-empty :description="$t('No_transactions_in_this_period')" style="padding: 24px 0" />
           </template>
         </a-table>
+
+        <div v-if="data.entries.length" class="closing-summary">
+          {{ $t('Closing_Balance') }}:
+          <strong :style="{ color: Number(data.closing_balance) > 0 ? '#e11d48' : '#166534' }">
+            {{ money(data.closing_balance) }}
+          </strong>
+        </div>
       </a-card>
     </template>
   </div>
@@ -125,7 +142,7 @@ import { message } from 'ant-design-vue';
 import { useI18n } from 'vue-i18n';
 import dayjs from 'dayjs';
 import {
-  LeftOutlined, MailOutlined, FilePdfOutlined, FileExcelOutlined,
+  LeftOutlined, MailOutlined, PhoneOutlined, EnvironmentOutlined, FilePdfOutlined, FileExcelOutlined,
 } from '@ant-design/icons-vue';
 import PageHeader from '../../components/PageHeader.vue';
 import { useFormat } from '../../composables/useFormat';
@@ -149,8 +166,16 @@ const initials = computed(() =>
     .split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?'
 );
 
+const clientAddress = computed(() =>
+  [client.value.adresse, [client.value.city, client.value.country].filter(Boolean).join(', ')]
+    .filter(Boolean).join(' — ')
+);
+
 const totalDebit = computed(() =>
   (data.entries || []).reduce((acc, e) => acc + (Number(e.debit) || 0), 0)
+);
+const totalCredit = computed(() =>
+  (data.entries || []).reduce((acc, e) => acc + (Number(e.credit) || 0), 0)
 );
 
 const TYPE_COLORS = {
@@ -302,4 +327,16 @@ onMounted(async () => {
 .muted { color: rgba(0, 0, 0, 0.45); }
 .amt-debit { color: #e11d48; font-weight: 600; }
 .amt-credit { color: #166534; font-weight: 600; }
+.closing-summary {
+  margin-top: 14px;
+  text-align: right;
+  font-size: 15px;
+  font-weight: 600;
+  padding-top: 10px;
+  border-top: 1px solid #f0f0f0;
+}
+.closing-summary strong {
+  font-size: 17px;
+  margin-left: 6px;
+}
 </style>

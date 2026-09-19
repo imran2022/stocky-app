@@ -67,6 +67,7 @@ $client = Client::create([
     'opening_balance' => 500, // customer owes 500 to start
     'adresse' => '221B Baker Street, Test City',
     'phone' => '+1-555-0100',
+    'email' => 'm4stmt@example.test',
 ]);
 
 // ==================== 1. ClientController::show() returns `adresse` ====================
@@ -171,6 +172,8 @@ $assert(str_contains($pdfHtml, 'Build M4 Statement Client'), 'Test 4a: the rende
 $assert(str_contains($pdfHtml, 'ACCOUNT STATEMENT'), 'Test 4b: the rendered statement PDF must show the "ACCOUNT STATEMENT" title.');
 $assert(str_contains($pdfHtml, '700.00'), 'Test 4c: the rendered statement PDF must show the correct closing balance (700.00).');
 $assert(str_contains($pdfHtml, '221B Baker Street'), 'Test 4d: the rendered statement PDF must show the client\'s address.');
+$assert(! str_contains($pdfHtml, (string) $client->code), 'Test 4e: the rendered statement PDF must NOT show the customer code (removed per feedback).');
+$assert(! str_contains($pdfHtml, 'm4stmt@example.test'), 'Test 4f: the rendered statement PDF must NOT show the customer\'s email (removed per feedback).');
 
 // ==================== 5. Excel export row mapping ====================
 $export = new ClientStatementExport($built['entries'], [
@@ -185,6 +188,41 @@ $invoiceEntry = collect($built['entries'])->firstWhere('type', 'invoice');
 $mappedInvoice = $export->map($invoiceEntry);
 $assert($mappedInvoice[1] === 'Invoice', 'Test 5b: the Excel export must render a human label ("Invoice") for the invoice row type, not the raw "invoice" key.');
 $assert($mappedInvoice[4] === '300.00', "Test 5c: the Excel export's Debit column must show the invoice amount, got '{$mappedInvoice[4]}'.");
+
+// ==================== 6. Real generated .xlsx has the bold Closing Balance total row ====================
+$xlsxTmpBase = tempnam(sys_get_temp_dir(), 'm4_stmt_');
+unlink($xlsxTmpBase); // tempnam() already creates this bare (extension-less) file — not the one we write to.
+$xlsxPath = $xlsxTmpBase.'.xlsx';
+\Maatwebsite\Excel\Facades\Excel::store($export, basename($xlsxPath), null, null, ['path' => sys_get_temp_dir()]);
+// Maatwebsite\Excel::store() writes relative to the configured local disk root
+// (usually storage/app); resolve wherever it actually landed before reading it back.
+$storedRelative = basename($xlsxPath);
+$possiblePaths = [
+    $xlsxPath,
+    storage_path('app/'.$storedRelative),
+    storage_path('app/public/'.$storedRelative),
+];
+$actualPath = null;
+foreach ($possiblePaths as $candidate) {
+    if (file_exists($candidate)) {
+        $actualPath = $candidate;
+        break;
+    }
+}
+if ($actualPath) {
+    $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($actualPath);
+    $sheet = $spreadsheet->getActiveSheet();
+    $lastDataRow = 7 + count($built['entries']);
+    $totalRow = $lastDataRow + 1;
+    $assert($sheet->getCell("A{$totalRow}")->getValue() === 'Closing Balance', "Test 6a: the generated .xlsx must have a 'Closing Balance' label on row {$totalRow}, got '".$sheet->getCell("A{$totalRow}")->getValue()."'.");
+    $assert($sheet->getCell("A{$totalRow}")->getStyle()->getFont()->getBold() === true, 'Test 6b: the Closing Balance total row must be bold.');
+    $totalCellValue = $sheet->getCell("G{$totalRow}")->getValue();
+    $assert(abs((float) $totalCellValue - (float) $built['closing_balance']) < 0.01, "Test 6c: the total row's balance figure must equal the computed closing balance (700), got '{$totalCellValue}'.");
+    @unlink($actualPath);
+} else {
+    $assert(false, 'Test 6: could not locate the generated .xlsx file to verify the total row (checked: '.implode(', ', $possiblePaths).').');
+}
+@unlink($xlsxPath);
 
 // ==================== Cleanup ====================
 \Illuminate\Support\Facades\DB::table('payment_sales')->where('Ref', 'M4-PMT-TEST')->delete();

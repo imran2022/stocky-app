@@ -4,9 +4,12 @@ namespace App\Exports;
 
 use Maatwebsite\Excel\Concerns\FromCollection;
 use Maatwebsite\Excel\Concerns\ShouldAutoSize;
+use Maatwebsite\Excel\Concerns\WithEvents;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithMapping;
 use Maatwebsite\Excel\Concerns\WithStyles;
+use Maatwebsite\Excel\Events\AfterSheet;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
 /**
@@ -15,9 +18,12 @@ use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
  * $meta carries the header block (customer name/code, opening/closing
  * balance, date range) printed above the ledger table, matching what the
  * PDF export shows. $entries is the ledger produced by
- * App\Services\ClientStatementService::build()['entries'].
+ * App\Services\ClientStatementService::build()['entries']. A bold
+ * "Closing Balance" total row is appended after the last data row via
+ * AfterSheet — the same figure shown in the header block and on the
+ * Customer Statement screen, so it's easy to spot without scrolling back up.
  */
-class ClientStatementExport implements FromCollection, ShouldAutoSize, WithHeadings, WithMapping, WithStyles
+class ClientStatementExport implements FromCollection, ShouldAutoSize, WithEvents, WithHeadings, WithMapping, WithStyles
 {
     protected array $entries;
 
@@ -86,8 +92,29 @@ class ClientStatementExport implements FromCollection, ShouldAutoSize, WithHeadi
         $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
         $sheet->getStyle('A2:A5')->getFont()->setBold(true);
         $sheet->getStyle('A7:G7')->getFont()->setBold(true);
-        $sheet->getStyle('A7:G7')->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setRGB('F1F5F9');
+        $sheet->getStyle('A7:G7')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('F1F5F9');
 
         return [];
+    }
+
+    public function registerEvents(): array
+    {
+        return [
+            AfterSheet::class => function (AfterSheet $event) {
+                $sheet = $event->sheet->getDelegate();
+                // 7 header/meta rows + one row per entry = the last data row.
+                $lastDataRow = 7 + count($this->entries);
+                $totalRow = $lastDataRow + 1;
+
+                $sheet->setCellValue("A{$totalRow}", 'Closing Balance');
+                $sheet->mergeCells("A{$totalRow}:F{$totalRow}");
+                $sheet->setCellValue("G{$totalRow}", $this->meta['closing_balance'] ?? '');
+
+                $sheet->getStyle("A{$totalRow}:G{$totalRow}")->getFont()->setBold(true)->setSize(11);
+                $sheet->getStyle("A{$totalRow}:G{$totalRow}")->getFill()
+                    ->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('EFF6FF');
+                $sheet->getStyle("G{$totalRow}")->getAlignment()->setHorizontal('right');
+            },
+        ];
     }
 }

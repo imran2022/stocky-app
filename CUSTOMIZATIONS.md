@@ -3454,3 +3454,68 @@ failures; DB confirmed back to its 7-client/16-sale baseline after the
 test run (test cleans up after itself; a first run that failed on a
 missing `user_id` on the payment fixture left one orphan client, fixed
 in the test and cleaned up by hand before the final passing run).
+
+## Build M4.1 — Customer Statement fixes/polish (2026-09-19)
+
+Follow-up to Build M4, from feedback after seeing the live page:
+
+1. **Untranslated labels ("Customer_Statement", "Download_Excel", etc.)**
+   — root cause: this app's admin frontend does NOT read
+   `resources/lang/*/messages.php` (that's the Laravel/Blade side only,
+   used correctly for the PDF templates). The Vue admin's `$t()` is
+   served by `GET /api/translations/{locale}`, backed by a `translations`
+   DB table that's seeded from `database/seeders/translations/{locale}.php`
+   via `TranslationSeeder`. Build M4 mistakenly added the new label keys
+   to `resources/lang/en/messages.php` (harmless but useless for the
+   frontend — reverted). The actual fix: added the missing keys
+   (`Customer_Statement`, `View_Statement`, `Closing_Balance`,
+   `From_Date`, `To_Date`, `Download_Excel`,
+   `No_transactions_in_this_period`, `Failed_to_load_statement`,
+   `Opening_Balance_Payment`, `Sale_Return`, `Service_Payment`) to
+   `database/seeders/translations/en.php`. Several keys the page already
+   used (`Ref`, `Debit`, `Credit`, `Type`, `Opening_Balance`, `Apply`,
+   `Reset`, `Back`, `Description`, `Download_PDF`, `Total_Credit`, …)
+   already existed and needed no change — only genuinely new labels
+   were missing. **Apply step added:** re-run
+   `php artisan db:seed --class=Database\Seeders\TranslationSeeder`
+   after deploying this build (safe to re-run — it upserts by
+   locale+key and explicitly preserves any translation the client has
+   customized through the Translations UI).
+2. **Hero section** now shows phone and address too (not just email),
+   matching what the existing "Customer Ledger" page's hero shows.
+3. **4th KPI card**: added "Total Credit" (total paid/credited across
+   the period) alongside Opening Balance, Total Debit, Closing Balance.
+   Reused the already-existing `Total_Credit` translation key (from the
+   Accounting module) rather than adding a new one.
+4. **Closing Balance now also shown boldly below the table** (both on
+   the screen and, as a highlighted total row, at the bottom of the
+   Excel export) — not just in the KPI card and the header meta block.
+5. **PDF template**: removed the customer code and email from the
+   customer block, per feedback — only name, address, and phone remain.
+
+**Files touched (in addition to Build M4's):**
+- `app/Services/ClientStatementService.php` — `client` array now
+  includes `phone`, `adresse`, `city`, `country`, `code`.
+- `app/Exports/ClientStatementExport.php` — new `WithEvents`/
+  `AfterSheet` bold "Closing Balance" total row after the data.
+- `resources/views/pdf/customer_statement_modern.blade.php` — removed
+  code/email from the customer block.
+- `resources/src/pages/people/CustomerStatement.vue` — hero phone/
+  address, 4th KPI card, bold closing-balance line under the table.
+- `database/seeders/translations/en.php` — new keys (see above).
+- `resources/lang/en/messages.php` — reverted (Build M4's addition
+  there was a mistake; see point 1).
+- `tests/Regression/build_m4_customer_statement.php` — extended: PDF
+  no longer shows code/email; the REAL generated `.xlsx` file (not
+  just the export class's in-memory row mapping) is loaded back with
+  PhpSpreadsheet and checked for the bold Closing Balance total row.
+
+**Verification:** re-ran the extended `build_m4_customer_statement.php`
+— all 6 scenarios pass, including loading the actual generated `.xlsx`
+binary back with PhpSpreadsheet to confirm the total row's label, bold
+style, and figure. Seeded the new translation keys into this sandbox's
+`translations` table and confirmed all resolve to the intended English
+text via the same case-insensitive lookup logic the frontend uses (no
+browser available in this sandbox to screenshot, so verified at the
+data layer instead). DB confirmed back to its 7-client/16-sale baseline
+with no leftover temp files after the run.

@@ -1831,3 +1831,35 @@ Invoice PDF customizer (mirrors "Previous Dues").
 **Regression test:**
 `tests/Regression/build_m4_customer_statement.php` (real DB; also
 cross-checks the portal and admin statements are identical).
+
+## Build M4.1 — Customer Statement fixes/polish
+
+**Files (in addition to Build M4's):**
+- `app/Services/ClientStatementService.php`, `app/Exports/ClientStatementExport.php`
+- `resources/views/pdf/customer_statement_modern.blade.php`
+- `resources/src/pages/people/CustomerStatement.vue`
+- `database/seeders/translations/en.php`
+- `resources/lang/en/messages.php` (reverted — see CUSTOMIZATIONS.md)
+
+**Extra apply step:** after replacing files, run:
+```
+php artisan db:seed --class=Database\Seeders\TranslationSeeder
+```
+(Safe to re-run — preserves any translation already customized through
+the Translations UI; only adds/updates the defaults.)
+
+**How to verify:**
+- [ ] Page title, buttons, KPI labels, and table headers all show
+      proper human text (no raw "Some_Key"-style text anywhere).
+- [ ] Hero section shows email, phone, AND address (when the customer
+      has them).
+- [ ] 4 KPI cards: Opening Balance, Total Debit, Total Credit, Closing
+      Balance.
+- [ ] Below the table, a bold "Closing Balance: $X" line.
+- [ ] Downloaded Excel file has the same bold Closing Balance total row
+      at the bottom.
+- [ ] Downloaded PDF no longer shows the customer's code or email —
+      just name, address, phone.
+
+**Regression test:** `tests/Regression/build_m4_customer_statement.php`
+(extended — now also opens the real generated `.xlsx` with PhpSpreadsheet).

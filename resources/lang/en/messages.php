@@ -846,21 +846,4 @@ return [
     'EndsSunday' => 'Ends Sunday',
     'BuyAgain' => 'Buy it again',
     'Add' => 'Add',
-
-    // Build M4 — Customer Statement (admin)
-    'Customer_Statement' => 'Customer Statement',
-    'View_Statement' => 'View Statement',
-    'Closing_Balance' => 'Closing Balance',
-    'Total_Debit' => 'Total Debit',
-    'Debit' => 'Debit',
-    'Credit' => 'Credit',
-    'Type' => 'Type',
-    'From_Date' => 'From Date',
-    'To_Date' => 'To Date',
-    'Download_Excel' => 'Download Excel',
-    'No_transactions_in_this_period' => 'No transactions in this period',
-    'Failed_to_load_statement' => 'Failed to load the statement',
-    'Opening_Balance_Payment' => 'Opening Balance Payment',
-    'Sale_Return' => 'Sale Return',
-    'Service_Payment' => 'Service Payment',
 ];
