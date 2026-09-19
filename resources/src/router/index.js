@@ -21,6 +21,7 @@ const lazy = (name, loader) => () =>
     });
 
 const Ping = lazy('Ping', () => import('../pages/Ping.vue'));
+const PublicInvoice = lazy('PublicInvoice', () => import('../pages/public/PublicInvoice.vue'));
 const PosPage = lazy('PosPage', () => import('../pages/pos/PosPage.vue'));
 const Dashboard = lazy('Dashboard', () => import('../pages/Dashboard.vue'));
 const Brands = lazy('Brands', () => import('../pages/Brands.vue'));
@@ -63,6 +64,7 @@ const ChecklistCompletionReport = lazy('ChecklistCompletionReport', () => import
 const MaintenanceHistoryReport = lazy('MaintenanceHistoryReport', () => import('../pages/reports/MaintenanceHistoryReport.vue'));
 const UsersReport = lazy('UsersReport', () => import('../pages/reports/UsersReport.vue'));
 const LoginActivityReport = lazy('LoginActivityReport', () => import('../pages/reports/LoginActivityReport.vue'));
+const ActivityLogReport = lazy('ActivityLogReport', () => import('../pages/reports/ActivityLogReport.vue'));
 const ErrorLogsReport = lazy('ErrorLogsReport', () => import('../pages/reports/ErrorLogsReport.vue'));
 const TopSellingProductsReport = lazy('TopSellingProductsReport', () => import('../pages/reports/TopSellingProductsReport.vue'));
 const TopCustomersReport = lazy('TopCustomersReport', () => import('../pages/reports/TopCustomersReport.vue'));
@@ -393,6 +395,9 @@ const MarketingSettings = lazy('MarketingSettings', () => import('../pages/marke
 const routes = [
     // Diagnostic page — outside AdminLayout, no auth, no data, no charts.
     { path: '/ping', name: 'ping', component: Ping, meta: { skipAuth: true, title: 'Ping' } },
+    // Public Invoice URL — branded, no-login invoice view. Outside
+    // AdminLayout and the auth guard, same as /ping above.
+    { path: '/invoice/:token', name: 'public-invoice', component: PublicInvoice, meta: { skipAuth: true, title: 'Invoice' } },
     // POS 1:1 port — fullscreen, outside AdminLayout. Deliberately absent
     // from the sidebar until the parity pass signs off (legacy stays live).
     { path: '/pos', name: 'pos', component: PosPage, meta: { title: 'POS', permission: 'Pos_view' } },
@@ -442,6 +447,7 @@ const routes = [
             { path: 'reports/maintenance-history', name: 'maintenance-history-report', component: MaintenanceHistoryReport, meta: { title: 'Customer Maintenance History', permission: 'customer_maintenance_history_report' } },
             { path: 'reports/users', name: 'users-report', component: UsersReport, meta: { title: 'Users Report', permission: 'users_report' } },
             { path: 'reports/login-activity', name: 'login-activity-report', component: LoginActivityReport, meta: { title: 'Login Activity', permission: 'report_device_management' } },
+            { path: 'reports/activity-log', name: 'activity-log-report', component: ActivityLogReport, meta: { title: 'Activity Log', permission: 'activity_log_report' } },
             { path: 'reports/error-logs', name: 'error-logs-report', component: ErrorLogsReport, meta: { title: 'Error Logs', permission: 'report_error_logs' } },
             { path: 'reports/top-selling-products', name: 'top-selling-products-report', component: TopSellingProductsReport, meta: { title: 'Top Selling Products', permission: 'Top_products' } },
             { path: 'reports/top-customers', name: 'top-customers-report', component: TopCustomersReport, meta: { title: 'Top Customers', permission: 'Top_customers' } },

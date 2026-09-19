@@ -384,6 +384,15 @@ if ($installed === false) {
     });
 }
 
+// Public Invoice URL: the /next/{any?} catch-all just below is wrapped in
+// auth:web, which would otherwise serve a login redirect for this path
+// too, before the Vue app (and its own client-side skipAuth route) ever
+// gets a chance to load. Registered here, before that group, so Laravel's
+// route matching (first-registered-wins) picks this one for this exact
+// path instead. Serves the identical 'next' view — same JS bundle, same
+// app — just without the session gate.
+Route::view('/next/invoice/{token}', 'next')->name('next.public-invoice');
+
 Route::group(['middleware' => ['web', 'auth:web', 'Is_Active']], function () {
 
     // Vue 3 + Ant Design app ("Stocky Next") — catch-all under /next/, registered

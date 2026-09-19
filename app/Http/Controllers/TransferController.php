@@ -179,13 +179,9 @@ class TransferController extends BaseController
                     if ($value['product_variant_id'] !== null) {
 
                         // --------- eliminate the quantity ''from_warehouse''--------------\\
-                        $product_warehouse_from = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $request->transfer['from_warehouse'])
-                            ->where('product_id', $value['product_id'])
-                            ->where('product_variant_id', $value['product_variant_id'])
-                            ->first();
+                        $product_warehouse_from = $this->resolveProductWarehouseRow($request->transfer['from_warehouse'], $value['product_id'], $value['product_variant_id']);
 
-                        if ($unit && $product_warehouse_from) {
+                        if ($unit) {
                             if ($unit->operator == '/') {
                                 $product_warehouse_from->qte -= $value['quantity'] / $unit->operator_value;
                             } else {
@@ -195,13 +191,9 @@ class TransferController extends BaseController
                         }
 
                         // --------- ADD the quantity ''TO_warehouse''------------------\\
-                        $product_warehouse_to = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $request->transfer['to_warehouse'])
-                            ->where('product_id', $value['product_id'])
-                            ->where('product_variant_id', $value['product_variant_id'])
-                            ->first();
+                        $product_warehouse_to = $this->resolveProductWarehouseRow($request->transfer['to_warehouse'], $value['product_id'], $value['product_variant_id']);
 
-                        if ($unit && $product_warehouse_to) {
+                        if ($unit) {
                             if ($unit->operator == '/') {
                                 $product_warehouse_to->qte += $value['quantity'] / $unit->operator_value;
                             } else {
@@ -213,11 +205,9 @@ class TransferController extends BaseController
                     } else {
 
                         // --------- eliminate the quantity ''from_warehouse''--------------\\
-                        $product_warehouse_from = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $request->transfer['from_warehouse'])
-                            ->where('product_id', $value['product_id'])->first();
+                        $product_warehouse_from = $this->resolveProductWarehouseRow($request->transfer['from_warehouse'], $value['product_id'], null);
 
-                        if ($unit && $product_warehouse_from) {
+                        if ($unit) {
                             if ($unit->operator == '/') {
                                 $product_warehouse_from->qte -= $value['quantity'] / $unit->operator_value;
                             } else {
@@ -227,11 +217,9 @@ class TransferController extends BaseController
                         }
 
                         // --------- ADD the quantity ''TO_warehouse''------------------\\
-                        $product_warehouse_to = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $request->transfer['to_warehouse'])
-                            ->where('product_id', $value['product_id'])->first();
+                        $product_warehouse_to = $this->resolveProductWarehouseRow($request->transfer['to_warehouse'], $value['product_id'], null);
 
-                        if ($unit && $product_warehouse_to) {
+                        if ($unit) {
                             if ($unit->operator == '/') {
                                 $product_warehouse_to->qte += $value['quantity'] / $unit->operator_value;
                             } else {
@@ -245,13 +233,9 @@ class TransferController extends BaseController
 
                     if ($value['product_variant_id'] !== null) {
 
-                        $product_warehouse_from = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $request->transfer['from_warehouse'])
-                            ->where('product_id', $value['product_id'])
-                            ->where('product_variant_id', $value['product_variant_id'])
-                            ->first();
+                        $product_warehouse_from = $this->resolveProductWarehouseRow($request->transfer['from_warehouse'], $value['product_id'], $value['product_variant_id']);
 
-                        if ($unit && $product_warehouse_from) {
+                        if ($unit) {
                             if ($unit->operator == '/') {
                                 $product_warehouse_from->qte -= $value['quantity'] / $unit->operator_value;
                             } else {
@@ -262,11 +246,9 @@ class TransferController extends BaseController
 
                     } else {
 
-                        $product_warehouse_from = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $request->transfer['from_warehouse'])
-                            ->where('product_id', $value['product_id'])->first();
+                        $product_warehouse_from = $this->resolveProductWarehouseRow($request->transfer['from_warehouse'], $value['product_id'], null);
 
-                        if ($unit && $product_warehouse_from) {
+                        if ($unit) {
                             if ($unit->operator == '/') {
                                 $product_warehouse_from->qte -= $value['quantity'] / $unit->operator_value;
                             } else {
@@ -385,13 +367,9 @@ class TransferController extends BaseController
                     if ($isApproved && $current_Transfer->statut == 'completed') {
                         if ($value['product_variant_id'] !== null) {
 
-                            $warehouse_from_variant = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $current_Transfer->from_warehouse_id)
-                                ->where('product_id', $value['product_id'])
-                                ->where('product_variant_id', $value['product_variant_id'])
-                                ->first();
+                            $warehouse_from_variant = $this->resolveProductWarehouseRow($current_Transfer->from_warehouse_id, $value['product_id'], $value['product_variant_id']);
 
-                            if ($unit && $warehouse_from_variant) {
+                            if ($unit) {
                                 if ($unit->operator == '/') {
                                     $warehouse_from_variant->qte += $value['quantity'] / $unit->operator_value;
                                 } else {
@@ -400,13 +378,9 @@ class TransferController extends BaseController
                                 $warehouse_from_variant->save();
                             }
 
-                            $warehouse_To_variant = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $current_Transfer->to_warehouse_id)
-                                ->where('product_id', $value['product_id'])
-                                ->where('product_variant_id', $value['product_variant_id'])
-                                ->first();
+                            $warehouse_To_variant = $this->resolveProductWarehouseRow($current_Transfer->to_warehouse_id, $value['product_id'], $value['product_variant_id']);
 
-                            if ($unit && $warehouse_To_variant) {
+                            if ($unit) {
                                 if ($unit->operator == '/') {
                                     $warehouse_To_variant->qte -= $value['quantity'] / $unit->operator_value;
                                 } else {
@@ -416,11 +390,9 @@ class TransferController extends BaseController
                             }
 
                         } else {
-                            $warehouse_from = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $current_Transfer->from_warehouse_id)
-                                ->where('product_id', $value['product_id'])->first();
+                            $warehouse_from = $this->resolveProductWarehouseRow($current_Transfer->from_warehouse_id, $value['product_id'], null);
 
-                            if ($unit && $warehouse_from) {
+                            if ($unit) {
                                 if ($unit->operator == '/') {
                                     $warehouse_from->qte += $value['quantity'] / $unit->operator_value;
                                 } else {
@@ -429,11 +401,9 @@ class TransferController extends BaseController
                                 $warehouse_from->save();
                             }
 
-                            $warehouse_To = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $current_Transfer->to_warehouse_id)
-                                ->where('product_id', $value['product_id'])->first();
+                            $warehouse_To = $this->resolveProductWarehouseRow($current_Transfer->to_warehouse_id, $value['product_id'], null);
 
-                            if ($unit && $warehouse_To) {
+                            if ($unit) {
                                 if ($unit->operator == '/') {
                                     $warehouse_To->qte -= $value['quantity'] / $unit->operator_value;
                                 } else {
@@ -446,13 +416,9 @@ class TransferController extends BaseController
                     } elseif ($isApproved && $current_Transfer->statut == 'sent') {
                         if ($value['product_variant_id'] !== null) {
 
-                            $Sent_variant_To = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $current_Transfer->from_warehouse_id)
-                                ->where('product_id', $value['product_id'])
-                                ->where('product_variant_id', $value['product_variant_id'])
-                                ->first();
+                            $Sent_variant_To = $this->resolveProductWarehouseRow($current_Transfer->from_warehouse_id, $value['product_id'], $value['product_variant_id']);
 
-                            if ($unit && $Sent_variant_To) {
+                            if ($unit) {
                                 if ($unit->operator == '/') {
                                     $Sent_variant_To->qte += $value['quantity'] / $unit->operator_value;
                                 } else {
@@ -461,11 +427,9 @@ class TransferController extends BaseController
                                 $Sent_variant_To->save();
                             }
                         } else {
-                            $Sent_variant_From = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $current_Transfer->from_warehouse_id)
-                                ->where('product_id', $value['product_id'])->first();
+                            $Sent_variant_From = $this->resolveProductWarehouseRow($current_Transfer->from_warehouse_id, $value['product_id'], null);
 
-                            if ($unit && $Sent_variant_From) {
+                            if ($unit) {
                                 if ($unit->operator == '/') {
                                     $Sent_variant_From->qte += $value['quantity'] / $unit->operator_value;
                                 } else {
@@ -497,13 +461,9 @@ class TransferController extends BaseController
                         if ($product_detail['product_variant_id'] !== null) {
 
                             // --------- eliminate the quantity ''from_warehouse''--------------\\
-                            $product_warehouse_from = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $Trans['from_warehouse'])
-                                ->where('product_id', $product_detail['product_id'])
-                                ->where('product_variant_id', $product_detail['product_variant_id'])
-                                ->first();
+                            $product_warehouse_from = $this->resolveProductWarehouseRow($Trans['from_warehouse'], $product_detail['product_id'], $product_detail['product_variant_id']);
 
-                            if ($unit && $product_warehouse_from) {
+                            if ($unit) {
                                 if ($unit->operator == '/') {
                                     $product_warehouse_from->qte -= $product_detail['quantity'] / $unit->operator_value;
                                 } else {
@@ -513,13 +473,9 @@ class TransferController extends BaseController
                             }
 
                             // --------- ADD the quantity ''TO_warehouse''------------------\\
-                            $product_warehouse_to = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $Trans['to_warehouse'])
-                                ->where('product_id', $product_detail['product_id'])
-                                ->where('product_variant_id', $product_detail['product_variant_id'])
-                                ->first();
+                            $product_warehouse_to = $this->resolveProductWarehouseRow($Trans['to_warehouse'], $product_detail['product_id'], $product_detail['product_variant_id']);
 
-                            if ($unit && $product_warehouse_to) {
+                            if ($unit) {
                                 if ($unit->operator == '/') {
                                     $product_warehouse_to->qte += $product_detail['quantity'] / $unit->operator_value;
                                 } else {
@@ -531,11 +487,9 @@ class TransferController extends BaseController
                         } else {
 
                             // --------- eliminate the quantity ''from_warehouse''--------------\\
-                            $product_warehouse_from = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $Trans['from_warehouse'])
-                                ->where('product_id', $product_detail['product_id'])->first();
+                            $product_warehouse_from = $this->resolveProductWarehouseRow($Trans['from_warehouse'], $product_detail['product_id'], null);
 
-                            if ($unit && $product_warehouse_from) {
+                            if ($unit) {
                                 if ($unit->operator == '/') {
                                     $product_warehouse_from->qte -= $product_detail['quantity'] / $unit->operator_value;
                                 } else {
@@ -545,11 +499,9 @@ class TransferController extends BaseController
                             }
 
                             // --------- ADD the quantity ''TO_warehouse''------------------\\
-                            $product_warehouse_to = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $Trans['to_warehouse'])
-                                ->where('product_id', $product_detail['product_id'])->first();
+                            $product_warehouse_to = $this->resolveProductWarehouseRow($Trans['to_warehouse'], $product_detail['product_id'], null);
 
-                            if ($unit && $product_warehouse_to) {
+                            if ($unit) {
                                 if ($unit->operator == '/') {
                                     $product_warehouse_to->qte += $product_detail['quantity'] / $unit->operator_value;
                                 } else {
@@ -563,13 +515,9 @@ class TransferController extends BaseController
 
                         if ($product_detail['product_variant_id'] !== null) {
 
-                            $product_warehouse_from = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $Trans['from_warehouse'])
-                                ->where('product_id', $product_detail['product_id'])
-                                ->where('product_variant_id', $product_detail['product_variant_id'])
-                                ->first();
+                            $product_warehouse_from = $this->resolveProductWarehouseRow($Trans['from_warehouse'], $product_detail['product_id'], $product_detail['product_variant_id']);
 
-                            if ($unit && $product_warehouse_from) {
+                            if ($unit) {
                                 if ($unit->operator == '/') {
                                     $product_warehouse_from->qte -= $product_detail['quantity'] / $unit->operator_value;
                                 } else {
@@ -580,11 +528,9 @@ class TransferController extends BaseController
 
                         } else {
 
-                            $product_warehouse_from = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $Trans['from_warehouse'])
-                                ->where('product_id', $product_detail['product_id'])->first();
+                            $product_warehouse_from = $this->resolveProductWarehouseRow($Trans['from_warehouse'], $product_detail['product_id'], null);
 
-                            if ($unit && $product_warehouse_from) {
+                            if ($unit) {
                                 if ($unit->operator == '/') {
                                     $product_warehouse_from->qte -= $product_detail['quantity'] / $unit->operator_value;
                                 } else {
@@ -708,13 +654,9 @@ class TransferController extends BaseController
                 if ($isApproved && $current_Transfer->statut == 'completed') {
                     if ($value['product_variant_id'] !== null) {
 
-                        $warehouse_from_variant = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $current_Transfer->from_warehouse_id)
-                            ->where('product_id', $value['product_id'])
-                            ->where('product_variant_id', $value['product_variant_id'])
-                            ->first();
+                        $warehouse_from_variant = $this->resolveProductWarehouseRow($current_Transfer->from_warehouse_id, $value['product_id'], $value['product_variant_id']);
 
-                        if ($unit && $warehouse_from_variant) {
+                        if ($unit) {
                             if ($unit->operator == '/') {
                                 $warehouse_from_variant->qte += $value['quantity'] / $unit->operator_value;
                             } else {
@@ -723,13 +665,9 @@ class TransferController extends BaseController
                             $warehouse_from_variant->save();
                         }
 
-                        $warehouse_To_variant = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $current_Transfer->to_warehouse_id)
-                            ->where('product_id', $value['product_id'])
-                            ->where('product_variant_id', $value['product_variant_id'])
-                            ->first();
+                        $warehouse_To_variant = $this->resolveProductWarehouseRow($current_Transfer->to_warehouse_id, $value['product_id'], $value['product_variant_id']);
 
-                        if ($unit && $warehouse_To_variant) {
+                        if ($unit) {
                             if ($unit->operator == '/') {
                                 $warehouse_To_variant->qte -= $value['quantity'] / $unit->operator_value;
                             } else {
@@ -739,11 +677,9 @@ class TransferController extends BaseController
                         }
 
                     } else {
-                        $warehouse_from = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $current_Transfer->from_warehouse_id)
-                            ->where('product_id', $value['product_id'])->first();
+                        $warehouse_from = $this->resolveProductWarehouseRow($current_Transfer->from_warehouse_id, $value['product_id'], null);
 
-                        if ($unit && $warehouse_from) {
+                        if ($unit) {
                             if ($unit->operator == '/') {
                                 $warehouse_from->qte += $value['quantity'] / $unit->operator_value;
                             } else {
@@ -752,11 +688,9 @@ class TransferController extends BaseController
                             $warehouse_from->save();
                         }
 
-                        $warehouse_To = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $current_Transfer->to_warehouse_id)
-                            ->where('product_id', $value['product_id'])->first();
+                        $warehouse_To = $this->resolveProductWarehouseRow($current_Transfer->to_warehouse_id, $value['product_id'], null);
 
-                        if ($unit && $warehouse_To) {
+                        if ($unit) {
                             if ($unit->operator == '/') {
                                 $warehouse_To->qte -= $value['quantity'] / $unit->operator_value;
                             } else {
@@ -769,13 +703,9 @@ class TransferController extends BaseController
                 } elseif ($isApproved && $current_Transfer->statut == 'sent') {
                     if ($value['product_variant_id'] !== null) {
 
-                        $Sent_variant_To = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $current_Transfer->from_warehouse_id)
-                            ->where('product_id', $value['product_id'])
-                            ->where('product_variant_id', $value['product_variant_id'])
-                            ->first();
+                        $Sent_variant_To = $this->resolveProductWarehouseRow($current_Transfer->from_warehouse_id, $value['product_id'], $value['product_variant_id']);
 
-                        if ($unit && $Sent_variant_To) {
+                        if ($unit) {
                             if ($unit->operator == '/') {
                                 $Sent_variant_To->qte += $value['quantity'] / $unit->operator_value;
                             } else {
@@ -784,11 +714,9 @@ class TransferController extends BaseController
                             $Sent_variant_To->save();
                         }
                     } else {
-                        $Sent_variant_From = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $current_Transfer->from_warehouse_id)
-                            ->where('product_id', $value['product_id'])->first();
+                        $Sent_variant_From = $this->resolveProductWarehouseRow($current_Transfer->from_warehouse_id, $value['product_id'], null);
 
-                        if ($unit && $Sent_variant_From) {
+                        if ($unit) {
                             if ($unit->operator == '/') {
                                 $Sent_variant_From->qte += $value['quantity'] / $unit->operator_value;
                             } else {
@@ -867,13 +795,9 @@ class TransferController extends BaseController
                     if ($isApproved && $current_Transfer->statut == 'completed') {
                         if ($value['product_variant_id'] !== null) {
 
-                            $warehouse_from_variant = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $current_Transfer->from_warehouse_id)
-                                ->where('product_id', $value['product_id'])
-                                ->where('product_variant_id', $value['product_variant_id'])
-                                ->first();
+                            $warehouse_from_variant = $this->resolveProductWarehouseRow($current_Transfer->from_warehouse_id, $value['product_id'], $value['product_variant_id']);
 
-                            if ($unit && $warehouse_from_variant) {
+                            if ($unit) {
                                 if ($unit->operator == '/') {
                                     $warehouse_from_variant->qte += $value['quantity'] / $unit->operator_value;
                                 } else {
@@ -882,13 +806,9 @@ class TransferController extends BaseController
                                 $warehouse_from_variant->save();
                             }
 
-                            $warehouse_To_variant = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $current_Transfer->to_warehouse_id)
-                                ->where('product_id', $value['product_id'])
-                                ->where('product_variant_id', $value['product_variant_id'])
-                                ->first();
+                            $warehouse_To_variant = $this->resolveProductWarehouseRow($current_Transfer->to_warehouse_id, $value['product_id'], $value['product_variant_id']);
 
-                            if ($unit && $warehouse_To_variant) {
+                            if ($unit) {
                                 if ($unit->operator == '/') {
                                     $warehouse_To_variant->qte -= $value['quantity'] / $unit->operator_value;
                                 } else {
@@ -898,11 +818,9 @@ class TransferController extends BaseController
                             }
 
                         } else {
-                            $warehouse_from = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $current_Transfer->from_warehouse_id)
-                                ->where('product_id', $value['product_id'])->first();
+                            $warehouse_from = $this->resolveProductWarehouseRow($current_Transfer->from_warehouse_id, $value['product_id'], null);
 
-                            if ($unit && $warehouse_from) {
+                            if ($unit) {
                                 if ($unit->operator == '/') {
                                     $warehouse_from->qte += $value['quantity'] / $unit->operator_value;
                                 } else {
@@ -911,11 +829,9 @@ class TransferController extends BaseController
                                 $warehouse_from->save();
                             }
 
-                            $warehouse_To = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $current_Transfer->to_warehouse_id)
-                                ->where('product_id', $value['product_id'])->first();
+                            $warehouse_To = $this->resolveProductWarehouseRow($current_Transfer->to_warehouse_id, $value['product_id'], null);
 
-                            if ($unit && $warehouse_To) {
+                            if ($unit) {
                                 if ($unit->operator == '/') {
                                     $warehouse_To->qte -= $value['quantity'] / $unit->operator_value;
                                 } else {
@@ -928,13 +844,9 @@ class TransferController extends BaseController
                     } elseif ($isApproved && $current_Transfer->statut == 'sent') {
                         if ($value['product_variant_id'] !== null) {
 
-                            $Sent_variant_To = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $current_Transfer->from_warehouse_id)
-                                ->where('product_id', $value['product_id'])
-                                ->where('product_variant_id', $value['product_variant_id'])
-                                ->first();
+                            $Sent_variant_To = $this->resolveProductWarehouseRow($current_Transfer->from_warehouse_id, $value['product_id'], $value['product_variant_id']);
 
-                            if ($unit && $Sent_variant_To) {
+                            if ($unit) {
                                 if ($unit->operator == '/') {
                                     $Sent_variant_To->qte += $value['quantity'] / $unit->operator_value;
                                 } else {
@@ -943,11 +855,9 @@ class TransferController extends BaseController
                                 $Sent_variant_To->save();
                             }
                         } else {
-                            $Sent_variant_From = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $current_Transfer->from_warehouse_id)
-                                ->where('product_id', $value['product_id'])->first();
+                            $Sent_variant_From = $this->resolveProductWarehouseRow($current_Transfer->from_warehouse_id, $value['product_id'], null);
 
-                            if ($unit && $Sent_variant_From) {
+                            if ($unit) {
                                 if ($unit->operator == '/') {
                                     $Sent_variant_From->qte += $value['quantity'] / $unit->operator_value;
                                 } else {
@@ -1522,6 +1432,51 @@ class TransferController extends BaseController
      * This mirrors the existing logic in store(), but is executed only once,
      * at approval time, and only for transfers that weren't touching stock yet.
      */
+    /**
+     * Find the product_warehouse row for this product (and optional variant)
+     * in this warehouse, creating it with qte=0 if it doesn't exist yet.
+     *
+     * Fixes a long-standing bug: every stock-moving action in this
+     * controller used to look up the row and silently do nothing when it
+     * was missing (e.g. a product's first-ever stock movement into a
+     * warehouse it had never been stocked in) — the "from" side would
+     * still be decremented (or, if that row was also missing, nothing
+     * would happen at all) while the "to" side's increase vanished
+     * entirely, with no error. See CUSTOMIZATIONS.md, "Known unresolved
+     * issues" for the original write-up and Build (stock-integrity fix)
+     * for this fix.
+     *
+     * In normal operation this row already exists for every product ×
+     * warehouse combination (creating a product or a warehouse backfills
+     * the full grid), so this only ever creates a fresh row for the rare
+     * cases where that backfill was bypassed (a variant added after the
+     * fact, legacy data, etc.) — the common path is unchanged.
+     */
+    protected function resolveProductWarehouseRow(int $warehouseId, int $productId, $variantId = null): product_warehouse
+    {
+        $query = product_warehouse::where('deleted_at', '=', null)
+            ->where('warehouse_id', $warehouseId)
+            ->where('product_id', $productId);
+
+        if ($variantId !== null) {
+            $query->where('product_variant_id', $variantId);
+        }
+
+        $row = $query->first();
+
+        if (! $row) {
+            $row = new product_warehouse;
+            $row->warehouse_id = $warehouseId;
+            $row->product_id = $productId;
+            $row->product_variant_id = $variantId;
+            $row->qte = 0;
+            $row->manage_stock = 1;
+            $row->save();
+        }
+
+        return $row;
+    }
+
     protected function applyInitialStockMovement(Transfer $transfer)
     {
         $details = TransferDetail::where('transfer_id', $transfer->id)->get();
@@ -1548,11 +1503,7 @@ class TransferController extends BaseController
             if ($transfer->statut == 'completed') {
                 if ($detail->product_variant_id !== null) {
                     // FROM warehouse (variant)
-                    $product_warehouse_from = product_warehouse::where('deleted_at', '=', null)
-                        ->where('warehouse_id', $transfer->from_warehouse_id)
-                        ->where('product_id', $detail->product_id)
-                        ->where('product_variant_id', $detail->product_variant_id)
-                        ->first();
+                    $product_warehouse_from = $this->resolveProductWarehouseRow($transfer->from_warehouse_id, $detail->product_id, $detail->product_variant_id);
 
                     if ($product_warehouse_from) {
                         if ($unit->operator == '/') {
@@ -1564,11 +1515,7 @@ class TransferController extends BaseController
                     }
 
                     // TO warehouse (variant)
-                    $product_warehouse_to = product_warehouse::where('deleted_at', '=', null)
-                        ->where('warehouse_id', $transfer->to_warehouse_id)
-                        ->where('product_id', $detail->product_id)
-                        ->where('product_variant_id', $detail->product_variant_id)
-                        ->first();
+                    $product_warehouse_to = $this->resolveProductWarehouseRow($transfer->to_warehouse_id, $detail->product_id, $detail->product_variant_id);
 
                     if ($product_warehouse_to) {
                         if ($unit->operator == '/') {
@@ -1580,10 +1527,7 @@ class TransferController extends BaseController
                     }
                 } else {
                     // FROM warehouse (simple product)
-                    $product_warehouse_from = product_warehouse::where('deleted_at', '=', null)
-                        ->where('warehouse_id', $transfer->from_warehouse_id)
-                        ->where('product_id', $detail->product_id)
-                        ->first();
+                    $product_warehouse_from = $this->resolveProductWarehouseRow($transfer->from_warehouse_id, $detail->product_id, null);
 
                     if ($product_warehouse_from) {
                         if ($unit->operator == '/') {
@@ -1595,10 +1539,7 @@ class TransferController extends BaseController
                     }
 
                     // TO warehouse (simple product)
-                    $product_warehouse_to = product_warehouse::where('deleted_at', '=', null)
-                        ->where('warehouse_id', $transfer->to_warehouse_id)
-                        ->where('product_id', $detail->product_id)
-                        ->first();
+                    $product_warehouse_to = $this->resolveProductWarehouseRow($transfer->to_warehouse_id, $detail->product_id, null);
 
                     if ($product_warehouse_to) {
                         if ($unit->operator == '/') {
@@ -1612,11 +1553,7 @@ class TransferController extends BaseController
             } elseif ($transfer->statut == 'sent') {
                 // Mirror "sent" behaviour from store(): move stock out of FROM only.
                 if ($detail->product_variant_id !== null) {
-                    $product_warehouse_from = product_warehouse::where('deleted_at', '=', null)
-                        ->where('warehouse_id', $transfer->from_warehouse_id)
-                        ->where('product_id', $detail->product_id)
-                        ->where('product_variant_id', $detail->product_variant_id)
-                        ->first();
+                    $product_warehouse_from = $this->resolveProductWarehouseRow($transfer->from_warehouse_id, $detail->product_id, $detail->product_variant_id);
 
                     if ($product_warehouse_from) {
                         if ($unit->operator == '/') {
@@ -1627,10 +1564,7 @@ class TransferController extends BaseController
                         $product_warehouse_from->save();
                     }
                 } else {
-                    $product_warehouse_from = product_warehouse::where('deleted_at', '=', null)
-                        ->where('warehouse_id', $transfer->from_warehouse_id)
-                        ->where('product_id', $detail->product_id)
-                        ->first();
+                    $product_warehouse_from = $this->resolveProductWarehouseRow($transfer->from_warehouse_id, $detail->product_id, null);
 
                     if ($product_warehouse_from) {
                         if ($unit->operator == '/') {

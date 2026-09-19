@@ -145,6 +145,12 @@
                             <div><strong style="color: #1f2937;">{{ __('pdf.phone') }}{{ $isRtl ? '' : ':' }}</strong> {{$setting['CompanyPhone']}}</div>
                             <div><strong style="color: #1f2937;">{{ __('pdf.email') }}{{ $isRtl ? '' : ':' }}</strong> {{$setting['email']}}</div>
                             <div><strong style="color: #1f2937;">{{ __('pdf.address') }}{{ $isRtl ? '' : ':' }}</strong> {{$setting['CompanyAdress']}}</div>
+                            @if(!empty($setting['vat_number']))
+                            <div><strong style="color: #1f2937;">{{ __('pdf.vat_number') }}{{ $isRtl ? '' : ':' }}</strong> {{$setting['vat_number']}}</div>
+                            @endif
+                            @if(!empty($setting['website']))
+                            <div><strong style="color: #1f2937;">{{ __('pdf.website') }}{{ $isRtl ? '' : ':' }}</strong> {{$setting['website']}}</div>
+                            @endif
                         </div>
                     </div>
                 </div>

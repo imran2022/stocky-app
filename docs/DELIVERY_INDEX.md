@@ -1,56 +1,73 @@
-# Delivery Index (current as of the PO+GRN / Reports / post-release-fixes era)
+# Latest Delivery Index
 
-## Two delivery artifacts per release, always paired
+## Current: PO+GRN Phase 1.4 — supplier match, over-receipt lock, unsafe-edit block
 
-Every release since "Sync: actual production state through Build G1" ships as:
+Applied directly to source (no new overlay zip was packaged for this pass).
+Full description, verification performed, and known remaining limitations are
+in `CUSTOMIZATIONS.md`'s "PO+GRN Phase 1.4" section and
+`docs/CLAUDE_PO_GRN_LIFECYCLE_AUDIT_AND_PHASE1_4_HANDOFF.md`. Static
+regression gate: `tests/Regression/build_po_grn_phase1_4.php`. Real-database
+verification steps (not yet run in this engineering environment — see that
+handoff doc's environment note): `tests/Regression/PHASE1_4_MANUAL_VERIFICATION.md`.
 
-1. **A ZIP** (`STOCKY_<NAME>.zip` or `STOCKY_<NAME>_SAFE_OVERLAY.zip`) — for
-   deploying to the live application. Contains only the changed/new runtime
-   files for that release, a `*_FILE_MANIFEST.txt` listing exact
-   inclusions/exclusions, and a `*_README.md` with apply steps, what was
-   verified, and rollback instructions. A release touching genuine new Vue
-   logic ships a full pre-built `public/js/`; a release with no frontend
-   logic change (pure PHP, e.g. a migration or a backend-only bugfix) does
-   not touch `public/js` at all.
+## Earlier: PO+GRN Phase 1.2 / Phase 1.3
 
-2. **A git bundle** (`stocky-repo-<name>.bundle`) — for keeping the actual
-   version-control history in sync with what's deployed. This is the
-   **canonical continuity record going forward**, superseding the
-   file-manifest-only approach this project used before a real Git
-   repository existed for it (see `BASELINE_AUDIT_2026-09-12.md`'s
-   "Source-control limitation" note — that limitation no longer applies).
-   Each bundle contains the full commit history up to and including that
-   release; cloning it or fetching it into the existing local repo and
-   force-pushing to the remote keeps GitHub as the single source of truth.
+Phase 1.2 (real English labels, actionable list errors) and Phase 1.3 (real
+read-only PO view, PO columns/attachments, transactional cumulative GRN
+deletion safety) are described in `PO_GRN_PHASE1_2_UI_ERROR_FIX_SAFE_OVERLAY_README.md`,
+`PO_GRN_PHASE1_3_SAFE_OVERLAY_README.md`, `PO_GRN_PHASE1_3_FILE_MANIFEST.txt`,
+and `CLAUDE_PO_GRN_ZIP_AUDIT.md`, and are already reflected in the live
+codebase.
 
-**Large, shared routing/config files** (`routes/api.php`,
-`resources/src/router/index.js`, `resources/src/config/menu.js`) are
-delivered as an exact, minimal diff/patch in the release README rather than
-a full-file copy in the ZIP, specifically to avoid a full-file overwrite
-silently discarding some other change made to those files since the last
-sync — unless a specific release's README says otherwise (e.g., when the
-git history confirms only one party has ever touched those exact files,
-a full-file copy may be offered as a lower-friction alternative on request).
+## Earlier: PO+GRN Registration Hotfix
 
-## Canonical continuity files (read in this order for a new session/handoff)
+## Deployment file
 
-1. `docs/AI_HUMAN_DEVELOPER_HANDOFF.md` — start here; active release chain,
-   non-negotiable contracts, verification discipline, working areas.
-2. `docs/ARCHITECTURE_AND_CHANGE_CONTROL.md` — system shape, repository map,
-   data/authorization conventions, customization domains, **the "Hard
-   lessons from real incidents" section — read this before touching stock,
-   money, permissions, migrations, or any `useCrudTable`-based Vue page.**
-3. `CUSTOMIZATIONS.md` — the full chronological, numbered log of every
-   customization: what changed, why, and what was verified. This is the
-   single most detailed record; when in doubt about whether something is
-   original-vendor or custom behavior, check here first.
-4. `docs/RELEASE_AND_ROLLBACK_RUNBOOK.md` — deployment and rollback
-   procedure, plus release-specific smoke-test checklists.
-5. The latest release's own `*_README.md` and `*_FILE_MANIFEST.txt`.
-6. `README_VENDOR_UPDATE_BN.md` — deployment history and Bangla operator
-   notes (pre-existing, from earlier vendor-update work).
-7. Relevant `tests/Regression/build_*.php` files for the area being changed.
+`PO_GRN_REGISTRATION_HOTFIX_SAFE_OVERLAY.zip` is the latest patch. Apply it only
+after the PO+GRN feature overlay. It packages the API, SPA router, and sidebar
+menu registrations that the first package left as manual instructions. It has
+no migration or compiled asset replacement.
 
-`README.md` is the vendor's own changelog, not a record of this project's
-customizations. `documentation.zip` (if present) is the vendor's end-user
-documentation, not a developer reference.
+The exact content and exclusions are in
+`PO_GRN_REGISTRATION_HOTFIX_FILE_MANIFEST.txt`; checksums are in
+`PO_GRN_REGISTRATION_HOTFIX_SHA256SUMS.txt`.
+
+## Earlier Build F artifacts
+
+## 1. STOCKY_BUILD_F_SAFE_OVERLAY.zip
+
+Use this file for deployment. It contains only Build F runtime/source changes,
+cumulative test maintenance, and release/handoff documentation. Extract it into
+the existing active Stocky application root and overwrite matching files. Do not
+delete the application first.
+
+The exact contents and exclusions are in `BUILD_F_FILE_MANIFEST.txt`; runtime
+checksums are in `BUILD_F_SHA256SUMS.txt`.
+
+## 2. STOCKY_5.8_BUILD_F_DEVELOPER_SOURCE_SANITIZED.zip
+
+Use this file for future AI/human development and code review. It is a complete
+sanitized source snapshot of the uploaded active application after Build F. It is
+not a production replacement package.
+
+Excluded for security or reproducibility:
+
+- `.env` and Git metadata
+- OAuth/private keys
+- session, cache, log, and updater runtime files
+- live/local database files
+- `vendor/` and `node_modules/`
+
+Dependencies are reproducible from `composer.lock` and `package-lock.json`.
+Vendor end-user documentation remains available in `documentation.zip`.
+
+## Canonical continuity files
+
+- `docs/AI_HUMAN_DEVELOPER_HANDOFF.md`
+- `docs/ARCHITECTURE_AND_CHANGE_CONTROL.md`
+- `docs/RELEASE_AND_ROLLBACK_RUNBOOK.md`
+- `docs/BASELINE_AUDIT_2026-09-12.md`
+- `docs/CLAUDE_PO_GRN_LIFECYCLE_AUDIT_AND_PHASE1_4_HANDOFF.md`
+- `CUSTOMIZATIONS.md`
+- `README_VENDOR_UPDATE_BN.md`
+- latest `BUILD_*_SAFE_OVERLAY_README.md` and `BUILD_*_FILE_MANIFEST.txt`

@@ -381,6 +381,18 @@ class PaymentPurchaseReturnsController extends BaseController
                 'deleted_at' => Carbon::now(),
             ]);
 
+            try {
+                \App\Services\Custom\ActivityLogger::log(
+                    'Payment (Purchase Return)',
+                    'deleted',
+                    'Payment '.($payment->Ref ?: '#'.$payment->id).' deleted',
+                    PaymentPurchaseReturns::class,
+                    $id
+                );
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('[ActivityLog] Payment (Purchase Return) deleted log failed: '.$e->getMessage());
+            }
+
             $account = Account::where('id', $payment->account_id)->exists();
 
             if ($account) {

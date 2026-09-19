@@ -443,6 +443,18 @@ class PaymentSalesController extends BaseController
                 'deleted_at' => Carbon::now(),
             ]);
 
+            try {
+                \App\Services\Custom\ActivityLogger::log(
+                    'Payment (Sale)',
+                    'deleted',
+                    'Payment '.($payment->Ref ?: '#'.$payment->id).' deleted',
+                    PaymentSale::class,
+                    $id
+                );
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('[ActivityLog] Payment (Sale) deleted log failed: '.$e->getMessage());
+            }
+
             $account = Account::where('id', $payment->account_id)->exists();
 
             if ($account) {

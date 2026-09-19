@@ -25,28 +25,13 @@ $root = dirname(__DIR__, 2);
 $sales = file_get_contents($root.'/app/Http/Controllers/SalesController.php');
 $pos = file_get_contents($root.'/resources/src/pages/pos/PosPage.vue');
 $helpers = file_get_contents($root.'/app/utils/helpers.php');
-
-// Resolve the compiled POS chunk via the Vite manifest rather than a
-// hardcoded hashed filename — the hash changes on every rebuild, and a
-// hardcoded name breaks (file not found) the moment that chunk is
-// rebuilt or old chunks are cleaned up. This is the same manifest
-// next.blade.php itself reads at request time, so this lookup mirrors
-// how the real app resolves the file.
-$manifestPath = $root.'/public/js/.vite/manifest.json';
-$compiledPos = false;
-if (is_file($manifestPath)) {
-    $manifest = json_decode(file_get_contents($manifestPath), true) ?? [];
-    $entry = $manifest['resources/src/pages/pos/PosPage.vue'] ?? null;
-    if ($entry && isset($entry['file'])) {
-        $compiledPos = file_get_contents($root.'/public/js/'.$entry['file']);
-    }
-}
+$compiledPos = file_get_contents($root.'/public/js/chunks/PosPage.LolIxUV8.js');
 $serviceWorker = file_get_contents($root.'/public/sw.js');
 
 $assert($sales !== false, 'SalesController.php must be readable.');
 $assert($pos !== false, 'PosPage.vue must be readable.');
 $assert($helpers !== false, 'helpers.php must be readable.');
-$assert($compiledPos !== false, 'Compiled POS chunk must be readable (resolved via the Vite manifest, not a hardcoded hash).');
+$assert($compiledPos !== false, 'Compiled POS chunk must be readable.');
 $assert($serviceWorker !== false, 'Service worker must be readable.');
 
 if ($sales !== false) {

@@ -9,14 +9,14 @@ return new class extends Migration
     public function up(): void
     {
         if (Schema::hasColumn('service_jobs', 'scheduled_date')) {
-            DB::statement('ALTER TABLE service_jobs MODIFY scheduled_date DATETIME NULL');
+            if (DB::connection()->getDriverName() !== 'sqlite') { DB::statement('ALTER TABLE service_jobs MODIFY scheduled_date DATETIME NULL'); }
         }
     }
 
     public function down(): void
     {
         if (Schema::hasColumn('service_jobs', 'scheduled_date')) {
-            DB::statement('ALTER TABLE service_jobs MODIFY scheduled_date DATE NULL');
+            if (DB::connection()->getDriverName() !== 'sqlite') { DB::statement('ALTER TABLE service_jobs MODIFY scheduled_date DATE NULL'); }
         }
     }
 };

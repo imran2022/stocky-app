@@ -347,6 +347,41 @@ class UserController extends BaseController
             $user_saved = User::where('deleted_at', '=', null)->findOrFail($id);
             $user_saved->assignedWarehouses()->sync($request['assigned_to']);
 
+            // --- Build I1/I2 (Activity Log): log the update with an old/new
+            // diff. `User::whereId()->update()` above doesn't fire Eloquent
+            // events (see ActivityLogServiceProvider's docblock), so this is
+            // logged explicitly here. ActivityLogger::diff()'s ignored-keys
+            // list excludes 'password' unconditionally — never diffed even
+            // though it's one of the updated columns above.
+            try {
+                $activityLogOld = $user->getAttributes();
+                $activityLogNew = $user_saved->fresh()->getAttributes();
+                $old = [];
+                $new = [];
+                foreach ($activityLogNew as $key => $value) {
+                    if (in_array($key, ['updated_at', 'created_at', 'deleted_at', 'password', 'remember_token'], true)) {
+                        continue;
+                    }
+                    if (($activityLogOld[$key] ?? null) != $value) {
+                        $old[$key] = $activityLogOld[$key] ?? null;
+                        $new[$key] = $value;
+                    }
+                }
+                if (! empty($new)) {
+                    \App\Services\Custom\ActivityLogger::log(
+                        'User',
+                        'updated',
+                        'User "'.trim(($activityLogNew['firstname'] ?? '').' '.($activityLogNew['lastname'] ?? '')).'" updated',
+                        \App\Models\User::class,
+                        $id,
+                        $old,
+                        $new
+                    );
+                }
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('[ActivityLog] User updated log failed: '.$e->getMessage());
+            }
+
         }, 10);
 
         return response()->json(['success' => true]);

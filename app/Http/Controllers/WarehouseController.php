@@ -6,6 +6,7 @@ use App\Models\Product;
 use App\Models\product_warehouse;
 use App\Models\ProductVariant;
 use App\Models\Warehouse;
+use App\Services\Custom\ActivityLogger;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 
@@ -129,6 +130,10 @@ class WarehouseController extends Controller
             'name' => 'required',
         ]);
 
+        // Build I3: bulk update, not observable by ActivityLogServiceProvider
+        // (see its registerModelObservers() comment) — logged explicitly.
+        $before = Warehouse::whereId($id)->first();
+
         Warehouse::whereId($id)->update([
             'name' => $request['name'],
             'mobile' => $request['mobile'],
@@ -137,6 +142,34 @@ class WarehouseController extends Controller
             'zip' => $request['zip'],
             'email' => $request['email'],
         ]);
+
+        try {
+            if ($before) {
+                $old = ActivityLogger::sanitize($before->getAttributes());
+                $new = ActivityLogger::sanitize(Warehouse::whereId($id)->first()?->getAttributes() ?? []);
+                $changedOld = [];
+                $changedNew = [];
+                foreach ($new as $key => $value) {
+                    if (($old[$key] ?? null) != $value) {
+                        $changedOld[$key] = $old[$key] ?? null;
+                        $changedNew[$key] = $value;
+                    }
+                }
+                if (! empty($changedNew)) {
+                    ActivityLogger::log(
+                        'Warehouse',
+                        'updated',
+                        'Warehouse "'.($before->name ?? $id).'" updated',
+                        Warehouse::class,
+                        $id,
+                        $changedOld,
+                        $changedNew
+                    );
+                }
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('[ActivityLog] Warehouse updated log failed: '.$e->getMessage());
+        }
 
         return response()->json(['success' => true]);
     }
@@ -149,6 +182,8 @@ class WarehouseController extends Controller
 
         \DB::transaction(function () use ($id) {
 
+            $warehouse = Warehouse::whereId($id)->first();
+
             Warehouse::whereId($id)->update([
                 'deleted_at' => Carbon::now(),
             ]);
@@ -156,6 +191,18 @@ class WarehouseController extends Controller
             product_warehouse::where('warehouse_id', $id)->update([
                 'deleted_at' => Carbon::now(),
             ]);
+
+            try {
+                ActivityLogger::log(
+                    'Warehouse',
+                    'deleted',
+                    'Warehouse "'.($warehouse->name ?? $id).'" deleted',
+                    Warehouse::class,
+                    $id
+                );
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('[ActivityLog] Warehouse deleted log failed: '.$e->getMessage());
+            }
 
         }, 10);
 
@@ -171,6 +218,7 @@ class WarehouseController extends Controller
 
         \DB::transaction(function () use ($request) {
             $selectedIds = $request->selectedIds;
+            $namesById = Warehouse::whereIn('id', $selectedIds)->pluck('name', 'id');
             foreach ($selectedIds as $warehouse_id) {
                 Warehouse::whereId($warehouse_id)->update([
                     'deleted_at' => Carbon::now(),
@@ -179,6 +227,18 @@ class WarehouseController extends Controller
                 product_warehouse::where('warehouse_id', $warehouse_id)->update([
                     'deleted_at' => Carbon::now(),
                 ]);
+
+                try {
+                    ActivityLogger::log(
+                        'Warehouse',
+                        'deleted',
+                        'Warehouse "'.($namesById[$warehouse_id] ?? $warehouse_id).'" deleted',
+                        Warehouse::class,
+                        $warehouse_id
+                    );
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning('[ActivityLog] Warehouse bulk-deleted log failed: '.$e->getMessage());
+                }
             }
 
         }, 10);

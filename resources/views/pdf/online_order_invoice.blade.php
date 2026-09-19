@@ -28,6 +28,8 @@
     $companyEmail = $settings->email ?? ($store->contact_email ?? '');
     $companyPhone = $settings->phone ?? '';
     $companyAddr = $settings->adress ?? '';
+    $companyVat = $settings->vat_number ?? '';
+    $companyWebsite = $settings->website ?? '';
     $sym = $symbol;
     $money = fn ($v) => $sym . number_format((float) $v, 2);
   @endphp
@@ -39,6 +41,8 @@
         @if($companyAddr)<div class="muted">{{ $companyAddr }}</div>@endif
         @if($companyPhone)<div class="muted">{{ $companyPhone }}</div>@endif
         @if($companyEmail)<div class="muted">{{ $companyEmail }}</div>@endif
+        @if($companyVat)<div class="muted">VAT/BIN: {{ $companyVat }}</div>@endif
+        @if($companyWebsite)<div class="muted">{{ $companyWebsite }}</div>@endif
       </td>
       <td>
         <div class="title">{{ __('messages.Invoice') }}</div>

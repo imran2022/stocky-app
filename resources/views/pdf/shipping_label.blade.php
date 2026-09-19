@@ -39,6 +39,8 @@
         <div class="party-name">{{ $company['CompanyName'] }}</div>
         @if(!empty($company['CompanyPhone']))<div class="party-line">{{ __('pdf.phone') }}: {{ $company['CompanyPhone'] }}</div>@endif
         @if(!empty($company['CompanyAdress']))<div class="party-line">{{ $company['CompanyAdress'] }}</div>@endif
+        @if(!empty($company['vat_number']))<div class="party-line">VAT/BIN: {{ $company['vat_number'] }}</div>@endif
+        @if(!empty($company['website']))<div class="party-line">{{ $company['website'] }}</div>@endif
 
         <div class="divider"></div>
 

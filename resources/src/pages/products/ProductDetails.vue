@@ -274,6 +274,13 @@
           </template>
         </a-table>
       </a-card>
+
+      <!-- Movement History (Build H2) -->
+      <MovementHistoryCard
+        v-if="product.id"
+        :product-id="product.id"
+      />
+
       <!-- Customer questions ("Ask About This Item") -->
       <a-card size="small" style="margin-top: 16px">
         <template #title>
@@ -360,6 +367,7 @@ import {
 } from '@ant-design/icons-vue';
 import PageHeader from '../../components/PageHeader.vue';
 import BarcodeSvg from '../../components/BarcodeSvg.vue';
+import MovementHistoryCard from './MovementHistoryCard.vue';
 import { useAuthStore } from '../../stores/auth';
 import { useFormat } from '../../composables/useFormat';
 import http from '../../lib/http';

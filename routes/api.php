@@ -1124,6 +1124,7 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     Route::get('show_product_data/{id}/{variant_id}/{warehouse_id}', 'ProductsController@show_product_data');
     // Typeahead for the Related products picker (any visible product).
     Route::get('products/search-basic', 'ProductsController@search_products_basic');
+    Route::get('products/movement-ledger', 'ProductsController@movement_ledger');
     Route::get('get_products_materiels', 'ProductsController@get_products_materiels')->name('get_products_materiels');
 
     Route::get('opening-stock/import/meta', 'ProductsController@opening_stock_meta');
@@ -1258,6 +1259,11 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     Route::post('sales/{id}/documents', 'SalesController@uploadDocuments');
     Route::get('sales/documents/{id}/download', 'SalesController@downloadDocument');
     Route::delete('sales/documents/{id}', 'SalesController@deleteDocument');
+    // Public Invoice URL: get/regenerate the shareable no-login link (the
+    // link itself, GET public/invoice/{token}/pdf below, is intentionally
+    // outside this authenticated group).
+    Route::get('sales/{id}/public-link', 'PublicInvoiceController@link');
+    Route::post('sales/{id}/public-link/regenerate', 'PublicInvoiceController@regenerate');
     Route::post('sales_send_whatsapp', 'SalesController@sales_send_whatsapp');
     Route::get('get_today_sales', 'SalesController@get_today_sales');
 
@@ -1476,6 +1482,7 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     Route::delete('security/sessions/{tokenId}', 'SecuritySettingsController@logoutSession');
     Route::post('security/sessions/logout-other', 'SecuritySettingsController@logoutAllOtherDevices');
     Route::get('security/login-activity-report', 'SecuritySettingsController@loginActivityReport');
+    Route::get('reports/activity-log', 'ActivityLogController@index');
 
     // ------------------------------- appearance_settings ------------------------\\
     // ------------------------------------------------------------------\\
@@ -1863,6 +1870,10 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety'])->group(function (
 // Public minimal endpoints for customer display (no auth)
 Route::post('pos/customer-display/broadcast', [CustomerDisplayController::class, 'broadcastCart']);
 Route::get('pos/customer-display/last-cart', [CustomerDisplayController::class, 'lastCart']);
+// Public Invoice URL: no auth, looked up by an unguessable token rather
+// than the sale's own id — see PublicInvoiceController's own docblock.
+Route::get('public/invoice/{token}', 'PublicInvoiceController@show');
+Route::get('public/invoice/{token}/pdf', 'PublicInvoiceController@pdf');
 // Order Ready screen polling (no auth; token-guarded inside the controller)
 Route::get('kitchen/ready-screen/data', [\App\Http\Controllers\KitchenOrderController::class, 'readyScreenData']);
 

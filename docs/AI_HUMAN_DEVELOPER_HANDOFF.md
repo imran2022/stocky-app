@@ -3,8 +3,9 @@
 ## Start here
 
 This codebase is a customized Stocky 5.8 application. The received active
-baseline already contained safe overlays A through E3. Build F is the current
-latest layer. Do not restart from a clean vendor ZIP and do not replace the
+baseline already contained safe overlays A through E3. Builds F, G1, Phase 0,
+and PO+GRN continue that chain; the PO+GRN registration hotfix is the latest
+layer. Do not restart from a clean vendor ZIP and do not replace the
 application with an older cumulative archive.
 
 Read in this order before changing code:
@@ -31,58 +32,10 @@ custom behavior.
 | E2 Option B | Metadata validation; authorized operational inline Zone/Courier creation | Active |
 | E3 | Sales/POS Seller/Currency parity; Currency default-hidden | Active |
 | F | Stock Lookup unit, active-variant, and variant-price cleanup | Active |
-| G1 | Unit/Multi-Pack base-unit normalization for Product Insights | Active |
-| Phase 0 | Purchase form: Last Purchase hint, inline cost edit, Sell Price/Profit Margin % | Active |
-| PO+GRN | Purchase Order lifecycle, GRN linkage, receipt tracking, security hardening | Active |
-| PO Documents+Columns | PO attachment UI, Created By/Last GRN Date/Age/Attachment list columns | Active |
-| PO Reports | Fulfillment stats (Open/Overdue), Price Variance Report | Active |
-| Post-release fixes | Fresh-install migration/seeder ordering, Zone-Wise Report ambiguous column, `useCrudTable` params contract | Latest |
-
-See `CUSTOMIZATIONS.md` entries 25–32+ for the detailed contract of everything
-from G1 onward, including the "Hard lessons" callout in
-`ARCHITECTURE_AND_CHANGE_CONTROL.md` for the specific incidents that produced
-the "Post-release fixes" row above.
-
-## Verification discipline — what "tested" means here
-
-A change is not considered verified by any ONE of the following alone; all
-that apply to the change must pass before it's called done:
-
-- **Static/source regression** (`tests/Regression/build_*.php`) — fast,
-  no database required, catches drift in the specific contracts each build
-  established. Necessary but not sufficient on its own: these check that
-  code *contains* the right patterns, not that the patterns *execute*
-  correctly at runtime.
-- **PHPUnit** (`php artisan test`) — for anything with a database-backed
-  contract test.
-- **Live data verification** — for backend changes, actually create the
-  records, call the real endpoint (or the real controller method), and
-  check the actual returned values match hand-computed expected values, not
-  just "no exception was thrown." A query returning zero rows without error
-  is not the same as a query returning the correct rows.
-- **Frontend build success is a syntax check, not a correctness check.**
-  Vite/esbuild verify the code is well-formed JavaScript; they do not verify
-  that a composable is called with the shape it expects. A `computed()` ref
-  passed where a plain function is expected builds cleanly and fails only at
-  runtime, the first time that code path actually executes in a browser.
-  When a real browser isn't available (a genuine, disclosed limitation of
-  the environment this work was done in), the fallback is: (a) find and
-  compare against an existing, already-working caller of the same
-  composable/pattern in this codebase, and (b) when in doubt, reproduce the
-  exact suspect call pattern in a minimal standalone script (Node.js shares
-  the V8 engine with Chrome) rather than asserting confidence without
-  either check.
-- **Adversarial/security re-review for anything touching money, stock, or
-  authorization** — a second pass specifically looking for what a
-  malformed or malicious request could do, not just the happy path. This is
-  what caught the PO/warehouse cross-linking gaps before deployment; it
-  should be standard for any new write endpoint in these domains, not an
-  occasional extra.
-
-None of this replaces a human smoke-testing the actual feature in a real
-browser against real data before considering a release fully done — the
-regression suite and live-data checks reduce the chance of a defect, they
-don't eliminate the value of that final human pass.
+| G1 | Product Insight base-quantity readiness | Active |
+| Phase 0 | Purchase Form quick wins | Active |
+| PO+GRN | Purchase Order workflow linked to GRN receipts | Active |
+| PO+GRN registration hotfix | API/router/menu registrations packaged, not manual | Latest |
 
 ## Non-negotiable business/technical contracts
 
@@ -102,10 +55,9 @@ don't eliminate the value of that final human pass.
   the business explicitly approves a new design.
 - Stock Lookup reports existing base-stock quantities; Build F changes labels,
   active-variant filtering, and display pricing only.
-- PO status `partially_received`/`received` is computed only — never accept a
-  client-supplied value for these two states (see
-  `PurchaseOrderReceiptService`). GRN deletion must be checked for negative-
-  stock safety BEFORE the delete's transaction opens, not inside it.
+- PO+GRN schema and business rules are documented in
+  `PO_GRN_SAFE_OVERLAY_README.md`. The registration hotfix changes only
+  API/router/menu wiring; it does not alter received quantities or stock.
 
 ## Working areas
 
@@ -152,3 +104,18 @@ be verified from this package. The detailed append-only customization log and
 build manifests are therefore the available continuity record. If an external
 Git repository exists, keep it as the canonical versioned source and commit each
 overlay there with the matching release name.
+
+## Current PO/GRN state (read before touching PurchasesController.php or PurchaseOrderController.php)
+
+As of PO+GRN Phase 1.4, the full lifecycle audit and required next steps are in
+`docs/CLAUDE_PO_GRN_LIFECYCLE_AUDIT_AND_PHASE1_4_HANDOFF.md`. In short: Phase
+1.4 added supplier-match validation, a row-locked over-receipt check inside
+`PurchasesController::store()`'s transaction, and an explicit block on editing
+a received PO-linked GRN (see `CUSTOMIZATIONS.md`'s "PO+GRN Phase 1.4"
+section for exactly what changed and why). Full linked-GRN edit
+*reconciliation* (letting such an edit succeed safely) is still not built —
+edit remains blocked, not fixed. The engineering pass that made these changes
+had no `vendor/` directory and no network access to Composer/Packagist, so
+only static source-contract checks (`tests/Regression/build_po_grn_phase1_4.php`)
+were run; `tests/Regression/PHASE1_4_MANUAL_VERIFICATION.md` lists the
+real-database scenarios that must still be run before this is production-verified.

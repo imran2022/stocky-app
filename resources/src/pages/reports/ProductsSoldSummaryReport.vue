@@ -383,6 +383,8 @@ function printReceipt() {
     <div class="center">${esc(company.value.address)}</div>
     <div class="center">${esc(company.value.email)}</div>
     <div class="center">${esc(company.value.phone)}</div>
+    ${company.value.vat_number ? `<div class="center">VAT/BIN: ${esc(company.value.vat_number)}</div>` : ''}
+    ${company.value.website ? `<div class="center">${esc(company.value.website)}</div>` : ''}
 
     <div class="title">${esc(tf('Day_Report', 'Day Report'))}</div>
 

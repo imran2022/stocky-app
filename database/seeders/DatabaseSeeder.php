@@ -30,6 +30,11 @@ class DatabaseSeeder extends Seeder
             // before. See PurchaseOrdersPermissionSeeder's own docblock for
             // why this can't just live in the migration alone.
             PurchaseOrdersPermissionSeeder::class,
+            // Same fresh-install fix, same reasoning, for 'activity_log_report'
+            // (added by a later migration too) — grants it to whichever
+            // role(s) hold 'report_device_management'. See
+            // ActivityLogPermissionSeeder's own docblock.
+            ActivityLogPermissionSeeder::class,
             Warehouse::class,
             StoreSettingSeeder::class,
         ]);

@@ -4878,4 +4878,13 @@ return [
 'Ecommerce_Platforms' => 'Ecommerce Platforms',
 'Integrations' => 'Integrations',
 'All_Integrations' => 'All Integrations',
+
+// Purchase Order / GRN Phase 1.
+'PurchaseOrders' => 'Purchase Orders',
+'AddPurchaseOrder' => 'Add Purchase Order',
+'EditPurchaseOrder' => 'Edit Purchase Order',
+'ExpectedDelivery' => 'Expected Delivery Date',
+'SearchByReferenceSupplier' => 'Search by reference or supplier',
+'PurchaseOrder' => 'Select Purchase Order',
+'SelectPoOptional' => 'Select Purchase Order',
 ];

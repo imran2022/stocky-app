@@ -280,6 +280,12 @@ class ClientController extends BaseController
         $isRoyaltyEligible = filter_var($request->input('is_royalty_eligible'), FILTER_VALIDATE_BOOLEAN) ? 1 : 0;
 
         DB::transaction(function () use ($request, $id, $isRoyaltyEligible) {
+            // --- Build I1 (Activity Log): snapshot before the bulk update below.
+            // Client::whereKey()->update() doesn't fire Eloquent events (see
+            // ActivityLogServiceProvider's docblock), so this update is logged
+            // explicitly here rather than from a model-event hook.
+            $activityLogOldClient = \App\Models\Client::find($id)?->getAttributes();
+
             // 1) Update Client
             // opening_balance is adjusted via the dedicated adjust-opening-balance endpoint
             Client::whereKey($id)->update([
@@ -297,6 +303,37 @@ class ClientController extends BaseController
                 'is_royalty_eligible' => $isRoyaltyEligible,
                 'credit_limit' => $request->input('credit_limit', 0),
             ]);
+
+            // --- Build I1 (Activity Log): log the update with an old/new diff.
+            try {
+                $activityLogNewClient = \App\Models\Client::find($id)?->getAttributes();
+                if ($activityLogOldClient && $activityLogNewClient) {
+                    $old = [];
+                    $new = [];
+                    foreach ($activityLogNewClient as $key => $value) {
+                        if (in_array($key, ['updated_at', 'created_at', 'deleted_at'], true)) {
+                            continue;
+                        }
+                        if (($activityLogOldClient[$key] ?? null) != $value) {
+                            $old[$key] = $activityLogOldClient[$key] ?? null;
+                            $new[$key] = $value;
+                        }
+                    }
+                    if (! empty($new)) {
+                        \App\Services\Custom\ActivityLogger::log(
+                            'Customer',
+                            'updated',
+                            'Customer "'.($activityLogNewClient['name'] ?? $id).'" updated',
+                            \App\Models\Client::class,
+                            $id,
+                            $old,
+                            $new
+                        );
+                    }
+                }
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('[ActivityLog] Client updated log failed: '.$e->getMessage());
+            }
 
             // 2) Sync the linked store account, if the customer has one.
             // Never CREATE one here: store accounts are managed through the
@@ -334,6 +371,11 @@ class ClientController extends BaseController
         DB::transaction(function () use ($id) {
             $now = Carbon::now();
 
+            // --- Build I1 (Activity Log): snapshot the name before soft-delete
+            // (same reasoning as update() above — this bulk update fires no
+            // Eloquent event).
+            $activityLogClientName = \App\Models\Client::find($id)?->name;
+
             // Soft delete Client
             Client::whereKey($id)->update(['deleted_at' => $now]);
 
@@ -344,6 +386,18 @@ class ClientController extends BaseController
                     'deleted_at' => $now,
                     'status' => 0,
                 ]);
+
+            try {
+                \App\Services\Custom\ActivityLogger::log(
+                    'Customer',
+                    'deleted',
+                    'Customer "'.($activityLogClientName ?? $id).'" deleted',
+                    \App\Models\Client::class,
+                    $id
+                );
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('[ActivityLog] Client deleted log failed: '.$e->getMessage());
+            }
         });
 
         return response()->json(['success' => true]);
@@ -364,8 +418,25 @@ class ClientController extends BaseController
         $now = Carbon::now();
 
         DB::transaction(function () use ($ids, $now) {
+            // --- Build I1 (Activity Log): snapshot names before soft-delete.
+            $activityLogClients = \App\Models\Client::whereIn('id', $ids)->pluck('name', 'id');
+
             // Soft delete all selected Clients
             Client::whereIn('id', $ids)->update(['deleted_at' => $now]);
+
+            foreach ($ids as $activityLogClientId) {
+                try {
+                    \App\Services\Custom\ActivityLogger::log(
+                        'Customer',
+                        'deleted',
+                        'Customer "'.($activityLogClients[$activityLogClientId] ?? $activityLogClientId).'" deleted',
+                        \App\Models\Client::class,
+                        $activityLogClientId
+                    );
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning('[ActivityLog] Client bulk-deleted log failed: '.$e->getMessage());
+                }
+            }
 
             // Soft delete all linked EcommerceClient rows
             EcommerceClient::whereIn('client_id', $ids)

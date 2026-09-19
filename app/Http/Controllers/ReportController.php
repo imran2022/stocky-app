@@ -6627,6 +6627,8 @@ class ReportController extends BaseController
                 'address' => $settings->CompanyAdress ?? '',
                 'phone' => $settings->CompanyPhone ?? '',
                 'email' => $settings->email ?? '',
+                'vat_number' => $settings->vat_number ?? '',
+                'website' => $settings->website ?? '',
             ],
             'warehouses' => $warehouses,
             'users' => $users,

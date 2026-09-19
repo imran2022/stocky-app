@@ -209,6 +209,13 @@ public function mail_settings(User $user)
         return $user->hasRole($permission->roles);
     }
 
+    public function activity_log_report(User $user)
+    {
+        $permission = Permission::where('name', 'activity_log_report')->first();
+
+        return $permission && $user->hasRole($permission->roles);
+    }
+
     public function update_settings(User $user)
     {
         $permission = Permission::where('name', 'update_settings')->first();

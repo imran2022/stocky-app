@@ -12,6 +12,8 @@ return [
     'phone' => 'Phone',
     'email' => 'Email',
     'address' => 'Address',
+    'vat_number' => 'VAT/BIN No',
+    'website' => 'Website',
     'tax_no' => 'Tax #',
     'product' => 'PRODUCT',
     'price' => 'PRICE',

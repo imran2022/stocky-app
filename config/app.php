@@ -191,6 +191,7 @@ return [
         Intervention\Image\ImageServiceProvider::class,
         Nwidart\Modules\LaravelModulesServiceProvider::class,
         App\Providers\AccountingV2ServiceProvider::class,
+        App\Providers\ActivityLogServiceProvider::class,
 
     ],
 

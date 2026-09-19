@@ -113,6 +113,16 @@
                   </a-form-item>
                 </a-col>
                 <a-col :xs="24" :md="12">
+                  <a-form-item label="VAT/BIN ID">
+                    <a-input v-model:value="setting.vat_number" />
+                  </a-form-item>
+                </a-col>
+                <a-col :xs="24" :md="12">
+                  <a-form-item label="Website">
+                    <a-input v-model:value="setting.website" placeholder="https://example.com" />
+                  </a-form-item>
+                </a-col>
+                <a-col :xs="24" :md="12">
                   <a-form-item :label="$t('footer')" :help="'Shown in the app footer bar. Leave empty for the default copyright line.'">
                     <a-input v-model:value="setting.footer" :placeholder="`© ${new Date().getFullYear()} Stocky. All rights reserved.`" />
                   </a-form-item>
@@ -1226,6 +1236,7 @@ async function save() {
   fd.append('CompanyAdress', s.CompanyAdress);
   fd.append('company_name_ar', s.company_name_ar || '');
   fd.append('vat_number', s.vat_number || '');
+  fd.append('website', s.website || '');
   fd.append('zatca_enabled', s.zatca_enabled ? 1 : 0);
   fd.append('footer', s.footer);
   fd.append('developed_by', s.developed_by);

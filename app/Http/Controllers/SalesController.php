@@ -3285,6 +3285,15 @@ class SalesController extends BaseController
 
         $pdf = PDF::loadHTML($Html, 'UTF-8');
 
+        // Public Invoice URL: opens the PDF directly in the browser instead
+        // of forcing a save dialog, when requested with ?inline=1 (see
+        // PublicInvoiceController::pdf()). Every existing caller is
+        // unaffected — this only changes behavior when that flag is
+        // explicitly passed.
+        if ($request->boolean('inline')) {
+            return $pdf->stream('sale.pdf');
+        }
+
         return $pdf->download('sale.pdf');
 
     }

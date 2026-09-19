@@ -108,6 +108,9 @@
             @if(!empty($setting->vat_number))
                 <div class="vat-number">الرقم الضريبي / Vat No : {{ $setting->vat_number }}</div>
             @endif
+            @if(!empty($setting->website))
+                <div style="font-size:12px;color:#666;">{{ $setting->website }}</div>
+            @endif
         </div>
 
         <div class="tax-title">

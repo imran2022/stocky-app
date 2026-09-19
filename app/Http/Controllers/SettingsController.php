@@ -13,6 +13,7 @@ use App\Models\sms_gateway;
 use App\Models\User;
 use App\Models\UserWarehouse;
 use App\Models\Warehouse;
+use App\Services\Custom\ActivityLogger;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
 use Intervention\Image\ImageManagerStatic as Image;
@@ -163,6 +164,7 @@ class SettingsController extends Controller
             'CompanyAdress' => $request['CompanyAdress'],
             'company_name_ar' => $request['company_name_ar'] ?? $setting->company_name_ar,
             'vat_number' => $request['vat_number'] ?? $setting->vat_number,
+            'website' => $request['website'] ?? $setting->website,
             'zatca_enabled' => ($request['zatca_enabled'] == '1' || $request['zatca_enabled'] == 'true' || $request['zatca_enabled'] === 1 || $request['zatca_enabled'] === true) ? 1 : 0,
             'footer' => $request['footer'],
             'developed_by' => $request['developed_by'],
@@ -311,6 +313,50 @@ class SettingsController extends Controller
                 ? $request['export_settings']
                 : $setting->export_settings,
         ] + $this->pharmacySettingsPayload($request, $setting));
+
+        // Build I3 (Activity Log extension): Settings is saved via a bulk
+        // Setting::whereId()->update(), which never fires an Eloquent model
+        // event, so this cannot use ActivityLogServiceProvider's normal
+        // hookModel() pattern (same reason Client/User's bulk-update paths
+        // are logged explicitly instead — see that provider's docblock).
+        // $setting still holds the pre-update row (loaded via findOrFail at
+        // the top of this method) — diffed against the row as it now stands
+        // in the database. ActivityLogger::diff()-style sanitization is not
+        // reusable here (that helper works off a model's own getChanges()),
+        // so old/new are built by hand and passed through
+        // ActivityLogger::sanitize(), which already strips password/
+        // remember_token/quickbooks_* — and now also every backup
+        // credential (S3 keys, Google Drive/Dropbox tokens) — so no secret
+        // ever lands in this log even though the settings form submits them
+        // in the same request.
+        try {
+            $freshSetting = Setting::find($id);
+            if ($freshSetting) {
+                $oldAttrs = ActivityLogger::sanitize($setting->getAttributes());
+                $newAttrs = ActivityLogger::sanitize($freshSetting->getAttributes());
+                $old = [];
+                $new = [];
+                foreach ($newAttrs as $key => $value) {
+                    if (($oldAttrs[$key] ?? null) != $value) {
+                        $old[$key] = $oldAttrs[$key] ?? null;
+                        $new[$key] = $value;
+                    }
+                }
+                if (! empty($new)) {
+                    ActivityLogger::log(
+                        'Settings',
+                        'updated',
+                        'System Settings updated',
+                        Setting::class,
+                        $id,
+                        $old,
+                        $new
+                    );
+                }
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('[ActivityLog] Settings updated log failed: '.$e->getMessage());
+        }
 
         if (! empty($currency)) {
             $currencyModel = \App\Models\Currency::find($currency);
@@ -898,6 +944,7 @@ class SettingsController extends Controller
             // ZATCA settings
             $item['company_name_ar'] = $settings->company_name_ar;
             $item['vat_number'] = $settings->vat_number;
+            $item['website'] = $settings->website;
             $item['zatca_enabled'] = (bool) $settings->zatca_enabled;
             // Timezone from .env file - read directly from file to avoid cache issues
             $item['timezone'] = $this->getEnvValue('APP_TIMEZONE', 'UTC');
@@ -1670,6 +1717,7 @@ class SettingsController extends Controller
             // ZATCA settings
             $item['company_name_ar'] = $settings->company_name_ar;
             $item['vat_number'] = $settings->vat_number;
+            $item['website'] = $settings->website;
             $item['zatca_enabled'] = (bool) $settings->zatca_enabled;
             // Timezone from .env file - read directly from file to avoid cache issues
             $item['timezone'] = $this->getEnvValue('APP_TIMEZONE', 'UTC');

@@ -679,6 +679,8 @@ class PurchaseOrderController extends Controller
                 'name' => $settings->CompanyName,
                 'phone' => $settings->CompanyPhone,
                 'address' => $settings->CompanyAdress,
+                'vat_number' => $settings->vat_number,
+                'website' => $settings->website,
             ],
             'po' => [
                 'Ref' => $po->Ref,

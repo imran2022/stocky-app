@@ -81,6 +81,25 @@ class PermissionsController extends BaseController
 
                 $role->permissions()->attach($data);
 
+                // --- Build I2 (Activity Log): Role::save() above fires
+                // Eloquent's 'created' event on its own (observable), but
+                // that closure has no visibility into which permissions
+                // were attached in this same transaction — logged here
+                // instead, once, with the full picture.
+                try {
+                    \App\Services\Custom\ActivityLogger::log(
+                        'Role',
+                        'created',
+                        'Role "'.$Role->name.'" created',
+                        \App\Models\Role::class,
+                        $Role->id,
+                        null,
+                        ['name' => $Role->name, 'description' => $Role->description, 'permissions' => $permissions]
+                    );
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning('[ActivityLog] Role created log failed: '.$e->getMessage());
+                }
+
             }, 10);
 
             return response()->json(['success' => true]);
@@ -117,6 +136,16 @@ class PermissionsController extends BaseController
 
             \DB::transaction(function () use ($request, $id) {
 
+                // --- Build I2 (Activity Log): snapshot before the bulk
+                // update + permission detach below — Role::whereId()
+                // ->update() and the permissions() pivot detach/attach
+                // don't fire Eloquent model events, so this update is
+                // logged explicitly, same reasoning as ClientController.
+                $activityLogOldRole = Role::with('permissions')->find($id);
+                $activityLogOldPermissions = $activityLogOldRole
+                    ? $activityLogOldRole->permissions->pluck('name')->sort()->values()->all()
+                    : [];
+
                 Role::whereId($id)->update($request['role']);
 
                 $role = Role::findOrFail($id);
@@ -131,6 +160,37 @@ class PermissionsController extends BaseController
                 }
 
                 $role->permissions()->attach($data);
+
+                try {
+                    $newPermissions = collect($permissions)->sort()->values()->all();
+                    $old = [];
+                    $new = [];
+                    if (($activityLogOldRole->name ?? null) !== $request['role']['name']) {
+                        $old['name'] = $activityLogOldRole->name ?? null;
+                        $new['name'] = $request['role']['name'];
+                    }
+                    if (($activityLogOldRole->description ?? null) !== ($request['role']['description'] ?? null)) {
+                        $old['description'] = $activityLogOldRole->description ?? null;
+                        $new['description'] = $request['role']['description'] ?? null;
+                    }
+                    if ($activityLogOldPermissions !== $newPermissions) {
+                        $old['permissions'] = $activityLogOldPermissions;
+                        $new['permissions'] = $newPermissions;
+                    }
+                    if (! empty($new)) {
+                        \App\Services\Custom\ActivityLogger::log(
+                            'Role',
+                            'updated',
+                            'Role "'.$role->name.'" updated',
+                            \App\Models\Role::class,
+                            $id,
+                            $old,
+                            $new
+                        );
+                    }
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning('[ActivityLog] Role updated log failed: '.$e->getMessage());
+                }
 
             }, 10);
 
@@ -152,9 +212,23 @@ class PermissionsController extends BaseController
     {
         $this->authorizeForUser($request->user('api'), 'delete', Role::class);
 
+        $activityLogRoleName = Role::find($id)?->name;
+
         Role::whereId($id)->update([
             'deleted_at' => Carbon::now(),
         ]);
+
+        try {
+            \App\Services\Custom\ActivityLogger::log(
+                'Role',
+                'deleted',
+                'Role "'.($activityLogRoleName ?? $id).'" deleted',
+                \App\Models\Role::class,
+                $id
+            );
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('[ActivityLog] Role deleted log failed: '.$e->getMessage());
+        }
 
         return response()->json(['success' => true]);
     }
@@ -167,10 +241,23 @@ class PermissionsController extends BaseController
         $this->authorizeForUser($request->user('api'), 'delete', Role::class);
 
         $selectedIds = $request->selectedIds;
+        $activityLogRoleNames = Role::whereIn('id', $selectedIds)->pluck('name', 'id');
         foreach ($selectedIds as $role_id) {
             Role::whereId($role_id)->update([
                 'deleted_at' => Carbon::now(),
             ]);
+
+            try {
+                \App\Services\Custom\ActivityLogger::log(
+                    'Role',
+                    'deleted',
+                    'Role "'.($activityLogRoleNames[$role_id] ?? $role_id).'" deleted',
+                    \App\Models\Role::class,
+                    $role_id
+                );
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('[ActivityLog] Role bulk-deleted log failed: '.$e->getMessage());
+            }
         }
 
         return response()->json(['success' => true]);

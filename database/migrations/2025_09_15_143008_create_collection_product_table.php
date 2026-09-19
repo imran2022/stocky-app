@@ -16,7 +16,7 @@ return new class extends Migration
         Schema::create('collection_product', function (Blueprint $table) {
             $table->bigIncrements('id');
             $table->unsignedBigInteger('collection_id')->index('collection_product_collection_id_foreign');
-            $table->integer('product_id')->index('product_id');
+            $table->integer('product_id')->index('2025_09_15_143008_create_collection_product_table_product_id_t4');
             $table->integer('sort_order')->default(0);
             $table->boolean('pinned')->default(false);
             $table->timestamps();

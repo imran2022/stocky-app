@@ -467,6 +467,11 @@ export const PERMISSION_GROUPS = [
             {
                 "v": "edit_tax_discount_shipping_purchase",
                 "l": "edit_tax_and_discount_and_shipping"
+            },
+            {
+                "v": "purchase_orders",
+                "l": "purchase_orders",
+                "f": "Purchase Orders"
             }
         ]
     },
@@ -912,6 +917,11 @@ export const PERMISSION_GROUPS = [
                 "v": "serial_numbers_report",
                 "l": "serial_numbers_report",
                 "f": "Serial Numbers Report"
+            },
+            {
+                "v": "activity_log_report",
+                "l": "activity_log_report",
+                "f": "Activity Log Report"
             }
         ]
     },

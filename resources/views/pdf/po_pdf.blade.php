@@ -24,6 +24,8 @@
                 <div class="muted" style="font-size: 8.5pt; line-height: 1.5;">
                     {{ $company['phone'] }}<br>
                     {{ $company['address'] }}
+                    @if(!empty($company['vat_number']))<br>VAT/BIN: {{ $company['vat_number'] }}@endif
+                    @if(!empty($company['website']))<br>{{ $company['website'] }}@endif
                 </div>
             </td>
             <td style="width: 45%; vertical-align: top; text-align: right;">

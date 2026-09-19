@@ -131,6 +131,10 @@ foreach ([
     "Route::resource('purchase_orders', 'PurchaseOrderController');",
     "Route::get('purchase_orders/by_provider/{providerId}', 'PurchaseOrderController@openForProvider');",
     "Route::get('purchase_orders/{id}/lines_for_grn', 'PurchaseOrderController@linesForGrn');",
+    "Route::get('purchase_orders/{id}/documents', 'PurchaseOrderController@getDocuments');",
+    "Route::post('purchase_orders/{id}/documents', 'PurchaseOrderController@uploadDocuments');",
+    "Route::get('purchase_orders/documents/{id}/download', 'PurchaseOrderController@downloadDocument');",
+    "Route::delete('purchase_orders/documents/{id}', 'PurchaseOrderController@deleteDocument');",
     "Route::get('purchase_orders/{id}/pdf', 'PurchaseOrderController@pdf');",
     "Route::post('purchase_orders/{id}/send_email', 'PurchaseOrderController@sendEmail');",
 ] as $routeLine) {
@@ -140,23 +144,49 @@ foreach ([
 // ----- Frontend: PO pages + GRN-form integration exist and are wired -----
 $poList = $source('resources/src/pages/purchase_orders/PurchaseOrders.vue');
 $contains($poList, "router.push(`/purchases/create?po_id=\${record.id}`)", 'PO list\'s "Receive" action must hand off to the GRN form with po_id.');
+$contains($poList, 'title="Purchase Orders"', 'PO list heading must use the approved human-readable "Purchase Orders" label.');
+$contains($poList, 'Add Purchase Order', 'PO list action must use the approved "Add Purchase Order" label.');
+$contains($poList, "{ title: 'Expected Delivery Date'", 'PO list must label the date column "Expected Delivery Date".');
+$contains($poList, 'onError: (error) =>', 'PO list must surface an actionable API failure instead of the shared generic toast.');
+$contains($poList, 'Confirm the PO migrations are applied.', 'HTTP 500 list failures must point the operator to the PO migration check.');
+$contains($poList, 'e?.data?.message', 'PO actions must read errors from the custom fetch wrapper\'s data property.');
+$contains($poList, 'params: () => filterParams.value', 'PO list must pass a callable params provider; a computed ref makes useCrudTable throw before the API request.');
 
 $poForm = $source('resources/src/pages/purchase_orders/PurchaseOrderForm.vue');
 $contains($poForm, "record.received_quantity || 0", 'PO edit form must not allow shrinking a line below its already-received quantity.');
+$contains($poForm, "viewOnly.value ? 'Purchase Order Details' : (isEdit.value ? 'Edit Purchase Order' : 'Add Purchase Order')", 'PO form title must expose a distinct human-readable read-only title.');
+$contains($poForm, 'label="Expected Delivery Date"', 'PO form must use the approved expected-delivery label.');
 
 $grnForm = $source('resources/src/pages/purchases/PurchaseForm.vue');
 $contains($grnForm, 'const selectedPoId = ref(', 'GRN form must have PO-selection state.');
 $contains($grnForm, 'async function loadAllPoItems()', 'GRN form must support auto-loading a PO\'s remaining lines.');
 $contains($grnForm, 'purchase_order_id: !isEdit.value ? (selectedPoId.value || null) : undefined', 'GRN form must only send purchase_order_id on create, matching the documented create-only scope of this feature.');
 $contains($grnForm, 'purchase_order_detail_id: l.purchase_order_detail_id ?? null', 'GRN form must send each line\'s PO-detail linkage.');
+$contains($grnForm, '<a-form-item label="Select Purchase Order">', 'GRN form must label the optional PO selector "Select Purchase Order".');
+$contains($grnForm, '<a-col v-if="!isEdit" :xs="24" :md="6">', 'GRN form PO selector must occupy one quarter of the approved four-field desktop row.');
+
+// The active production assets are shipped in this overlay because the
+// deployment server does not need npm/Vite. Keep source and runtime aligned.
+$manifest = json_decode($source('public/js/.vite/manifest.json'), true);
+$poListAsset = $source('public/js/'.$manifest['resources/src/pages/purchase_orders/PurchaseOrders.vue']['file']);
+$contains($poListAsset, 'Confirm the PO migrations are applied.', 'Active PO list asset must contain the actionable HTTP 500 diagnostic.');
+$purchaseFormAsset = $source('public/js/'.$manifest['resources/src/pages/purchases/PurchaseForm.vue']['file']);
+$contains($purchaseFormAsset, 'Select Purchase Order', 'Active GRN form asset must contain the approved PO-selector label.');
 
 // ----- Router + menu -----
 $router = $source('resources/src/router/index.js');
+$contains($router, "const PurchaseOrders = lazy('PurchaseOrders'", 'Router must lazy-load the PO list page.');
+$contains($router, "const PurchaseOrderForm = lazy('PurchaseOrderForm'", 'Router must lazy-load the PO form page.');
 $contains($router, "path: 'purchase-orders'", 'Router must register the PO list route.');
+$contains($router, "path: 'purchase-orders/create'", 'Router must register the PO create route.');
 $contains($router, "path: 'purchase-orders/:id(\\\\d+)'", 'Router must register the PO edit/view route.');
 
 $menu = $source('resources/src/config/menu.js');
+$contains($menu, "'/app/purchase_orders/store': '/purchase-orders/create'", 'Legacy menu alias must resolve the PO create route.');
+$contains($menu, "'/app/purchase_orders/list': '/purchase-orders'", 'Legacy menu alias must resolve the PO list route.');
 $contains($menu, "permissions: ['purchase_orders']", 'Sidebar menu must gate the PO item behind the purchase_orders permission.');
+
+$contains($routes, "'PurchaseOrders' => 'Purchase Orders'", 'English translation API fallback must map PurchaseOrders to Purchase Orders.');
 
 if ($errors !== []) {
     fwrite(STDERR, "PO+GRN regression gate FAILED:\n");

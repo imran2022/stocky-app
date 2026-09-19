@@ -1707,330 +1707,1171 @@ Recent Invoices endpoint, compare those vendor rules before replaying E1. Prefer
 the vendor implementation when it provides equivalent visibility and historical
 currency guarantees, retaining only any business-specific delta.
 
-## 25. Build E2 — Sale metadata validation + Zone/Courier creation authorization
+## 25. Build E2 — Sale metadata validation + Option B create permissions
 
-**Status:** ACTIVE. **Base required:** Build E1.
+**Status:** ACTIVE. **Base required:** Build E1 SAFE overlay (Section 24). Build E2
+is deliberately an input-hardening patch. It does not redesign the Sales/POS/
+Shipment UI, add Zone/Courier administration screens, change stock/payment
+calculations, or introduce a migration.
 
-- New `app/Support/SaleMetadataRules.php` centralizes validation for
-  `zone_id`/`courier_id` (must reference an active, non-deleted row),
-  `tracking_ref`/`consignment_id` (max 255), `box_qty` (0–99999999.99), and
-  `shipping_status` (whitelist of 5 known values). Applied to Sale create/
-  update, `sales_bulk_update`, and Shipment update — previously these fields
-  had no server-side validation at all, so a bad `zone_id` (e.g. a deleted
-  or non-existent zone) surfaced as a raw 500 DB-integrity error instead of a
-  clean 422.
-- `SaleMetaController::storeZone()`/`storeCourier()` previously had no
-  authorization check beyond the global `auth:api` middleware — any
-  authenticated user could create zone/courier lookup rows regardless of
-  role. Now requires a permission tied to Sale/POS/Shipment access ("Option
-  B" model — chosen over a brand-new dedicated permission so staff who
-  already manage sales/shipments aren't newly locked out). Includes
-  race-condition-safe duplicate-name handling and soft-deleted-row restore.
+### 25.1 Business decision: keep on-the-fly creation convenience (Option B)
 
-## 26. Build E3 — PosSales.vue Seller/Currency column parity
+The existing `CreatableSelect` workflow remains active. Staff who already have a
+legitimate business workflow may still create a Zone/Courier inline:
 
-**Status:** ACTIVE. **Base required:** Build E2.
+- Sale create permission (`Sales_add` through the existing Sale policy);
+- Sale edit permission (`Sales_edit`);
+- POS permission (`Pos_view` via `SalePolicy::Sales_pos`);
+- Shipment create/update permission (`shipment`).
 
-`Sales.vue` (the main Sales list) already had `Seller` and `Currency` columns
-from the vendor 5.8 Multi-Currency/Seller-tracking features. `PosSales.vue`
-(our own separate "POS Sales" view, built by duplicating Sales.vue's
-structure before those vendor columns existed) never received them. Added
-both columns to `PosSales.vue`, matching Sales.vue's exact convention
-(Currency column `defaultHidden: true`, only shown when multi-currency is
-enabled). No backend change — the data was already being returned.
+Unrelated authenticated users no longer get a generic metadata-creation API just
+because they are logged in. No new admin-only permission is introduced in E2,
+because the approved business requirement is to preserve the current convenience.
 
-## 27. Build F — Stock Lookup soft-delete/unit-label/variant-price cleanup
+E2 also does **not** add Zone/Courier delete or rename/edit features. Historical
+references remain untouched. A future Active/Inactive management UI, if wanted,
+must be designed as a separate feature rather than hidden inside this hardening
+patch.
 
-**Status:** ACTIVE. **Base required:** Build E3.
+### 25.2 Centralized validation contract
 
-Three related, previously-unverified audit findings, all inside
-`ProductsController` methods backing the Stock Lookup tool and
-`StockLookup.vue`:
+New support class:
 
-- Soft-deleted product variants were not excluded from variant search,
-  detail rows, or the per-warehouse stock aggregation — a deleted variant
-  could still appear in Stock Lookup results and contribute phantom stock
-  quantity. Fixed with `whereNull('deleted_at')` on the variant relation/
-  subqueries.
-- The frontend hardcoded the unit label as `"Pcs"` regardless of the
-  product's actual unit. Backend now returns `unit_label` (from the
-  product's real `Unit` relation); frontend renders that instead.
-- Variant price display now correctly shows a single price, a min–max
-  range, or "Varies" (when no active-priced variant exists) — previously it
-  could include soft-deleted variants' prices in the range calculation.
+`app/Support/SaleMetadataRules.php`
 
-## 28. Build G1 — Unit/Multi-Pack quantity normalization for Product Insights
+The same metadata can be changed through normal Sale create/edit, Sales bulk
+update, and Shipment edit. E2 therefore centralizes the API validation so these
+entry points cannot silently drift apart.
 
-**Status:** ACTIVE. **Base required:** Build F.
+Normal Sale create/edit validates:
 
-Sold (30d)/Previous 30d/Lifetime Sold/Lifetime Returned/Return Rate on the
-Products list previously summed `sale_details.quantity`/
-`sale_return_details.quantity` as stored — one row per sale line, regardless
-of whether that line was sold as a single unit, a Multi-Pack Selling bundle,
-or a non-base sale unit (e.g. a "Carton" of 24). A product sold as "3
-Cartons + 2 pcs" showed Sold (30d) = 5 (the raw line count) instead of the
-actual 74 units moved, and Return Rate could exceed 100% the same way.
+- `zone_id`: nullable integer; must reference a non-deleted `sale_zones` row;
+- `courier_id`: nullable integer; must reference a non-deleted `sale_couriers` row;
+- `tracking_ref`: nullable string, max 255 (matches the VARCHAR column);
+- `consignment_id`: nullable string, max 255;
+- `details.*.box_qty`: nullable numeric, `0..99,999,999.99`.
 
-New, isolated `app/Support/UnitQuantityResolver.php` converts each line's
-quantity into base units — `quantity × pack_multiplier × unit_conversion`,
-using the exact same `operator`/`operator_value` convention already used
-for stock deduction elsewhere in this codebase (see `PosController`) —
-before it's summed in `ProductInsightService`. The Products list's Sold
-(30d) column sort was updated to use the identical expression, so sorting
-and the displayed number can't disagree. A business that never uses a
-non-base unit or Multi-Pack Selling sees no change (multiplier resolves to
-1 for every line). Verified against live data: 2 pcs + 3 Cartons (24 each)
-correctly produced Sold (30d) = 74, not 5.
+`box_qty` remains decimal-compatible because the existing DB contract is
+`DECIMAL(10,2)`. E2 does not reinterpret Box Qty as an integer-only field.
 
-## 29. Phase 0 — Purchase form quick wins
+Shipment create/update shares the same courier/tracking contract and validates
+shipping status against the existing application vocabulary:
 
-**Status:** ACTIVE. **Base required:** Build G1.
+`ordered`, `packed`, `shipped`, `delivered`, `cancelled`.
 
-Three small, independent additions to the Purchase (GRN) creation form:
+### 25.3 Bulk-update request hardening
 
-- **Last Purchase hint** — shows the most recent received-purchase cost,
-  date, and supplier under the product name/code when adding an item,
-  using a single most-recent-row lookup added to the existing per-item
-  `show_product_data` endpoint (already called once per item added — no
-  new per-keystroke or per-list-row query).
-- **Net Unit Cost inline-editable** — the cost cell in the line table can
-  now be edited directly (matching how Quantity already worked), instead of
-  requiring the pencil-icon modal for a plain cost change. Writes to the
-  same underlying `Unit_cost` field and goes through the same
-  `recomputeCostLine()` the modal's Save already used, so a line with its
-  own discount/tax still computes correctly.
-- **Sell Price + Profit Margin % columns** — Sell Price reuses `Unit_price`
-  (already computed by `show_product_data`, no new query); Profit Margin %
-  is a pure client-side calculation from the row's own Sell Price and Net
-  Cost.
+The Sales-list bulk metadata endpoint keeps the Build B authorization boundary
+and partial-update semantics, then adds validation before the update query:
 
-Deliberately excluded from POS/thermal receipt printing — this is a
-business-specific need (shown only on the A4 invoice PDF, which already had
-it via the `enable_box_qty` setting toggle), not a universal requirement.
+- selected IDs must be integers, distinct, and non-deleted Sales;
+- at most 1000 IDs per request;
+- Zone/Courier IDs must be active lookup rows;
+- Tracking/Consignment max 255;
+- Shipping Status must be one of the existing five statuses.
 
-## 30. Purchase Order (PO) + GRN linkage
+The 1000-row cap is intentionally generous for normal UI use while preventing an
+unbounded crafted request from becoming a database/authorization workload. It can
+be changed later only if a documented operational workflow legitimately needs a
+larger batch.
 
-**Status:** ACTIVE. **Base required:** Phase 0. **Real schema change** — 6
-new migrations (see below), unlike the SAFE-overlay builds above.
+The existing custom response for a completely omitted/empty selection is
+preserved; E2 does not redesign bulk-update UX.
 
-A Purchase Order precedes a GRN (`Purchase`) and does not itself affect
-stock. New tables: `purchase_orders`, `purchase_order_details`,
-`purchase_order_documents`; nullable `purchase_order_id`/
-`purchase_order_detail_id` link columns added to the existing `purchases`/
-`purchase_details` tables (NULL for the original, unchanged direct-purchase
-flow); a new coarse-grained `purchase_orders` permission (matching the
-existing single-permission `shipment` convention, not Purchases' four-way
-split), auto-granted to whichever role(s) already had `Purchases_view`.
+### 25.4 Duplicate-safe Zone/Courier creation
 
-**Status lifecycle:** `draft`/`ordered`/`cancelled` are user-set;
-`partially_received`/`received` are computed exclusively by the new,
-isolated `app/Services/Custom/PurchaseOrderReceiptService.php` the moment a
-GRN is received against a PO — never set by hand, and deliberately excluded
-from the frontend's status dropdown so a user can't set one only to have
-the next receipt silently overwrite it.
+`SaleMetaController` now normalizes harmless whitespace (`trim` + repeated
+whitespace collapse), then searches active **and soft-deleted** rows
+case-insensitively using `LOWER(TRIM(name))`.
 
-**Architecture:** `PurchaseOrderController` is its own controller (not
-folded into `PurchasesController`) — a PO shares GRN's vocabulary but none
-of its stock/batch/serial/payment behavior. `PurchasesController::store()`
-gained exactly one new field (`purchase_order_id`) and calls
-`PurchaseOrderReceiptService` in two places (a pre-transaction validation
-call, then `applyReceipt()` after its own existing logic) — not inlined PO
-logic, keeping this large, vendor-adjacent controller's merge-conflict
-surface minimal. Deleting a PO-linked GRN (both the single-record and
-bulk-delete paths) calls `revertReceipt()` before the GRN's detail rows are
-hard-deleted, reversing the PO's received_quantity/status correctly.
+Examples intended to resolve to the same existing lookup instead of creating
+common duplicates:
 
-**Frontend:** new Purchase Orders list + form pages; the existing Create
-Purchase (GRN) form gained a PO selector next to Warehouse (visible once a
-supplier is chosen) with a one-click "Load All Items" that pre-fills
-remaining PO lines at the PO's agreed cost. PDF (dedicated template — no
-payment/due fields, since a PO has none yet) and email-to-supplier (same
-link-in-body pattern as the existing Purchase email feature) included.
+- `Pathao`
+- ` pathao `
+- `PATHAO`
 
-**Known, documented limitation:** editing an existing GRN's *quantities* in
-place (via `PurchasesController::update()`) does not adjust its linked PO's
-received_quantity — creating and deleting are both fully handled; only the
-narrower "edit quantities on an already-received GRN" case is deferred, as
-`update()`'s existing batch/serial re-alignment path is already large and
-this was judged rare enough not to add more risk to it in the same pass.
+The first canonical spelling remains stored/displayed; E2 does not lowercase
+existing names. A matching soft-deleted row is restored rather than duplicated.
+The existing DB `unique(name)` constraint remains the final concurrency guard. If
+two users submit the same new name at the same time and one insert wins, the
+other request catches the unique-key race, re-reads the row, and returns it
+cleanly instead of surfacing a raw database error.
 
-### 30.1 Security review addendum (done before deployment, not assumed)
+No migration is required.
 
-A dedicated adversarial re-read (separate from the original build/test
-pass) found and fixed two real gaps:
+### 25.5 Runtime files, tests, and upgrade contract
 
-- `PurchasesController::store()` accepted any `purchase_order_id` with no
-  validation — a crafted request could reference a PO outside the user's
-  warehouse scope, already cancelled/fully-received, or for a different
-  warehouse than the GRN itself claimed. Fixed with
-  `PurchaseOrderReceiptService::validateReceivablePo()`, called before the
-  GRN's DB transaction opens.
-- `applyReceipt()` didn't verify a `purchase_order_detail_id` actually
-  belonged to the GRN's own `purchase_order_id` — a crafted request could
-  pair a legitimate PO with a detail-line ID borrowed from a different PO,
-  crediting that unrelated PO's `received_quantity`. Fixed by validating
-  the requesting PO's actual detail-ID set once per receipt.
+**Runtime/source files changed:**
 
-Both were live-tested against real PO records (not just source-level
-assertions) and confirmed rejected/ignored correctly with no data
-corruption. `PurchaseOrderController`'s own warehouse-scoping
-(`abortIfWarehouseDenied` on every single-record action) and the
-delete-time `revertReceipt()` wiring were already correct from the
-original build and needed no changes.
+- `app/Http/Controllers/SalesController.php`
+- `app/Http/Controllers/ShipmentController.php`
+- `app/Http/Controllers/SaleMetaController.php`
+- `app/Support/SaleMetadataRules.php` (new)
 
-## 31. Line-ending normalization (housekeeping, no logic change)
+**Tests/documentation:**
 
-**Status:** ACTIVE.
+- `tests/Regression/build_e2_metadata_validation.php`
+- `tests/Unit/BuildE2MetadataValidationContractTest.php`
+- `CUSTOMIZATIONS.md`
+- `README_VENDOR_UPDATE_BN.md`
+- `BUILD_E2_SAFE_OVERLAY_README.md`
+- `BUILD_E2_FILE_MANIFEST.txt`
 
-A full audit found that `SalesController.php`, `Sales.vue`, and
-`PosSales.vue` had their entire line-ending convention silently converted
-from this codebase's own CRLF (confirmed against the vendor-merge baseline)
-to plain LF at some point during earlier editing — most likely a script
-that read a file in default text mode (which normalizes CRLF to LF) and
-wrote it back without preserving the original ending.
+**Not changed:** Vue source, `public/js`, service worker, Product Insights,
+POS Recent Invoices, invoice/packing/shipping templates, routes, migrations,
+database schema, stock movement, Unit/Multi-Pack calculations, Sale totals,
+payments, or Zone/Courier delete/edit behavior.
 
-This had zero functional effect, but it defeated the minimal-merge-
-footprint discipline this project otherwise follows: `git diff` against the
-vendor baseline showed `SalesController.php` as ~4975 of its ~4979 lines
-"changed" from line endings alone, when the real logic changes are ~118
-lines. Restored to CRLF; `PurchaseForm.vue` (21 stray LF lines, not a full
-conversion) was normalized the same way. Verified with `php -l`, the full
-regression + PHPUnit suite, and a clean frontend rebuild — no logic changed.
-A full sweep of every other file touched by this project found no further
-instances.
+Fast cumulative regression sequence after applying E2:
 
-## 32. PO Document Attachments UI + List Columns
+```bash
+php tests/Regression/build_a_stability.php
+php tests/Regression/build_a1_currency_backend.php
+php tests/Regression/build_b_authorization.php
+php tests/Regression/build_c_product_insights.php
+php tests/Regression/build_d1_product_insight_scope.php
+php tests/Regression/build_d2_product_analytics.php
+php tests/Regression/build_e1_pos_recent.php
+php tests/Regression/build_e2_metadata_validation.php
+```
 
-**Status:** ACTIVE. **Base required:** PO+GRN linkage.
+**Future vendor-update warning:** if Stocky introduces native shipping zones,
+couriers, or metadata validation, prefer the vendor entities/rules when they meet
+these business contracts. Do not keep two parallel lookup systems. Preserve the
+Option B workflow (authorized operational staff can create inline) unless the
+business explicitly approves an admin-only model, and retain validation at every
+write entry point that can mutate the same Sale metadata.
 
-The PO document upload/download/delete backend endpoints existed from the
-original PO+GRN delivery but had no frontend to use them — added an
-attachments modal to the PO list, mirroring `Purchases.vue`'s existing
-attachment pattern exactly. Also added 4 list columns: Created By, Last GRN
-Date, Age (days since placed), and an attachment indicator icon. Last GRN
-Date and the attachment indicator are each a single grouped query for the
-whole page (same N+1-safe shape as the existing `received_percent`
-calculation), not one query per row.
+## 26. Build E3 — POS Sales 5.8 Seller/Currency parity + default-hidden Currency
 
-## 33. PO Fulfillment Stats + Price Variance Report
+**Status:** ACTIVE. **Base required:** Build E2 SAFE overlay (Section 25). Build E3
+is deliberately a frontend parity/UX patch. It does not merge the POS Sales page
+back into the normal Sales page, change POS transaction behavior, or touch any
+Sale/stock/payment calculation.
 
-**Status:** ACTIVE. **Base required:** Build 32.
+### 26.1 Why this patch exists
 
-Summary stat cards on the PO list (Open POs count/value, Overdue
-count/value — click Overdue to filter), a "Days Overdue" tag, and an
-`overdue_only` quick-filter — stats computed server-side over the filtered-
-but-not-paginated query, same convention as `PurchasesController::index()`'s
-own `stats` block.
+Stocky 5.8 added shared Sales-list metadata for the Seller and document Currency.
+The custom `PosSales.vue` page was intentionally copied/separated before that
+vendor change, so it retained the existing POS-only workflow but drifted from the
+5.8 Sales columns. The backend already returns `seller_name` and the Build A.1
+resolved `currency_code`; E3 only brings the display contract into parity.
 
-New Price Variance Report compares each GRN line's actual cost against its
-originating PO line's agreed cost (joined via `purchase_order_detail_id` —
-only lines actually received against a PO have anything to compare, by
-design). KPI tiles, filters (supplier, date range, minimum variance %
-threshold), color-coded variance tags.
+This is a **Stocky 5.8 merge-regression correction**, not a redesign of POS Sales.
+The page still hard-codes `is_pos: 1` and remains a separate operational menu.
 
-## 34. Fix — GRN deletion could push stock negative
+### 26.2 Seller/Currency parity
 
-**Status:** ACTIVE. **Base required:** Build 33.
+`resources/src/pages/sales/PosSales.vue` now includes:
 
-A reported concern: deleting a received GRN naively reverses the stock it
-added; if some of that stock had since been sold, the reversal could push a
-product's warehouse quantity negative with no warning. New, isolated
-`App\Services\Custom\GrnDeletionSafetyService` performs a read-only
-pre-flight check per line before either delete path
-(`PurchasesController::destroy()`/`delete_by_selection()`) runs — using the
-exact same base-unit conversion the existing stock-reversal logic already
-uses, so the "would this go negative" arithmetic can never disagree with
-the "how much do we actually subtract" arithmetic. When blocked, the
-response lists every affected product with exact numbers.
+- Seller (`seller_name`), matching the normal Sales list;
+- Currency (`currency_code`) only while Stocky's multi-currency module is enabled;
+- the same blue currency badge rendering used on the normal Sales list.
 
-**Important ordering detail, found while building this:** the check runs
-BEFORE `DB::transaction()` opens in both delete methods, not inside the
-closure — a response returned from inside
-`DB::transaction(function () {...})` is silently discarded by these two
-methods' own unconditional success response afterward (a real, pre-existing,
-separate defect in the neighboring PurchaseReturn-exists check, which
-blocks the underlying deletion correctly but never actually reaches the
-user with an error message — left as-is, out of scope, but this new check
-deliberately does not repeat that mistake). See
-`docs/ARCHITECTURE_AND_CHANGE_CONTROL.md`'s "Hard lessons" section.
+No backend field or API contract was added in E3 because the Sales API already
+provides both values.
 
-## 35. Fix — Purchase Order permission migration broke fresh installs
+### 26.3 Currency is available, but hidden by default
 
-**Status:** ACTIVE. **Base required:** Build 34.
+The business preference is to keep Currency available without permanently using
+horizontal table space. E3 therefore marks the Currency column
+`defaultHidden: true` on both:
 
-Found via a real user report: `php artisan migrate:fresh --seed` failed
-with a duplicate-key error during `PermissionsSeeder`. The PO permission
-migration's grant-to-existing-roles logic used `insertGetId()` with no
-explicit ID; on an already-seeded site this safely landed past the
-seeder's own ID range, but on a fresh install (migrations run before
-seeders) the empty `permissions` table handed it ID 1 — directly colliding
-with the seeder's own hardcoded `id=1`. Fixed by reserving an explicit,
-high ID (900001) instead. A second bug found while fixing the first: an
-initial fix used a top-level `const`, which threw "already defined" when
-Laravel's migrator loaded the file twice in the same `migrate:fresh`
-process — moved to a class-scoped `private const`.
+- normal Sales;
+- POS Sales.
 
-## 36. Fix — Purchase Orders menu invisible on fresh install
+`DataTable.vue` already supports this contract: default-hidden columns start
+unchecked in the Columns picker and the user can enable them for the current
+session. Multi-currency disabled installations still do not create the Currency
+column at all.
 
-**Status:** ACTIVE. **Base required:** Build 35.
+This changes visibility only. Sale amounts/currency calculations from earlier
+builds remain untouched.
 
-Separate bug surfaced by the same fresh-install testing: after a
-successful `migrate:fresh --seed`, the Purchase Orders menu item didn't
-appear for any role, including Owner. The permission-granting migration's
-own grant-to-roles-with-Purchases_view logic runs during the migration
-phase, which happens BEFORE any seeder on a fresh install — at that point
-`permission_role` is completely empty, so the loop correctly found zero
-roles to grant to. Added `PurchaseOrdersPermissionSeeder`, hooked into
-`DatabaseSeeder` immediately after `PermissionRoleSeeder` (which is what
-actually creates the `Purchases_view` role links this depends on) —
-idempotent, safe to re-run.
+### 26.4 Surgical compiled-asset synchronization
 
-## 37. Fix — Zone-Wise Report crashed with an ambiguous-column SQL error
+Because the active project is maintained with SAFE overlays, E3 does **not** run
+or ship a broad replacement of `public/js`. The source changes are synchronized
+only into the two existing lazy chunks that implement these pages:
 
-**Status:** ACTIVE. **Base required:** Build 36.
+- `public/js/chunks/Sales.DrRmbclp.js`;
+- `public/js/chunks/PosSales.Tm8D__HT.js`.
 
-Found via a real user log (not initially connected to PO work, but
-investigated as part of the same "Something went wrong" report):
-`ReportController::zoneWiseReport()` built its base query with an
-unqualified `whereNull('deleted_at')` on the `Sale` model, then later
-left-joined `sale_zones`/`sale_couriers` — both of which also have their
-own `deleted_at` column. Once the join was added, MySQL could no longer
-tell which table's `deleted_at` the earlier WHERE clause meant, and
-rejected the entire query (error 1052) — a 500 on every call to this
-report. Fixed by qualifying the column (`sales.deleted_at`) at the point
-the base query is built; both the zone and courier breakdowns clone this
-same base query, so the one fix covers both.
+The PWA cache version is bumped from `stocky-pwa-v10` to `stocky-pwa-v11` so
+clients fetch those updated chunks. No entry bundle, manifest, menu/module asset,
+or unrelated lazy chunk is replaced.
 
-## 38. Fix — PO list and Price Variance Report never loaded any data
+A future normal Vite build should regenerate hashed assets from the source files;
+the source-of-truth changes are already present in `Sales.vue`/`PosSales.vue`.
 
-**Status:** ACTIVE. **Base required:** Build 37.
+### 26.5 Runtime files, tests, and upgrade contract
 
-The real, root-cause fix for the "Something went wrong" reports on the PO
-list and Price Variance Report pages (Builds 34–37 above were genuine bugs
-found and fixed along the way, but were not this one).
-`useCrudTable`'s `fetchRows()` calls its `params` option directly as a
-function — `params()`. Both `PurchaseOrders.vue` and
-`PriceVarianceReport.vue` passed `filterParams` as a `computed()` ref
-instead of a plain function, so `params()` threw `TypeError: params is not
-a function` **before** any HTTP request was built — which is why the
-browser's Network tab showed zero requests for these pages rather than one
-visible failed request. Fixed by changing `filterParams` to a plain
-`() => ({...})` function in both files, matching the working pattern
-already used elsewhere (`Bookings.vue`) and documented in
-`useCrudTable.js`'s own inline comment for the `params` option. Confirmed
-with a standalone Node.js reproduction of the exact call pattern (Node
-shares the V8 engine with Chrome) — see
-`docs/ARCHITECTURE_AND_CHANGE_CONTROL.md`'s "Hard lessons" section for the
-full incident writeup and the process change this motivated.
+**Runtime/source files changed:**
 
-## Regression test suite index
+- `resources/src/pages/sales/Sales.vue`
+- `resources/src/pages/sales/PosSales.vue`
+- `public/js/chunks/Sales.DrRmbclp.js`
+- `public/js/chunks/PosSales.Tm8D__HT.js`
+- `public/sw.js` (cache-version bump only)
 
-Every build from A onward has a corresponding `tests/Regression/build_*.php`
-script (source/static assertions, no DB required) and, for most, a mirrored
-`tests/Unit/Build*ContractTest.php` (PHPUnit). Run the regression scripts in
-build order after any deploy; run the full PHPUnit suite (`php artisan
-test`) for everything else. As of Build 38 (this entry), 17 regression
-scripts exist; all pass except the one known, pre-existing, unrelated item
-noted throughout this document (a vendor-scaffold `ExampleTest` asserting
-the homepage returns 200 outside auth, which this app correctly redirects
-instead of returning).
+**Tests/documentation:**
+
+- `tests/Regression/build_e1_pos_recent.php` (monotonic cache-version assertion: v10 or later)
+- `tests/Regression/build_e3_pos_sales_parity.php`
+- `tests/Unit/BuildE3PosSalesParityContractTest.php`
+- `CUSTOMIZATIONS.md`
+- `README_VENDOR_UPDATE_BN.md`
+- `BUILD_E3_SAFE_OVERLAY_README.md`
+- `BUILD_E3_FILE_MANIFEST.txt`
+
+**Not changed:** controllers/API behavior, Product Insights, POS Recent endpoint,
+Shipment, invoice/packing/shipping templates, routes, migrations/schema,
+Sale totals, payment logic, stock movement, Unit/Multi-Pack calculations, or the
+POS Sales menu/workflow.
+
+Fast cumulative regression sequence after applying E3:
+
+```bash
+php tests/Regression/build_a_stability.php
+php tests/Regression/build_a1_currency_backend.php
+php tests/Regression/build_b_authorization.php
+php tests/Regression/build_c_product_insights.php
+php tests/Regression/build_d1_product_insight_scope.php
+php tests/Regression/build_d2_product_analytics.php
+php tests/Regression/build_e1_pos_recent.php
+php tests/Regression/build_e2_metadata_validation.php
+php tests/Regression/build_e3_pos_sales_parity.php
+```
+
+**Future vendor-update warning:** `PosSales.vue` is still intentionally separate
+from `Sales.vue`. After each Stocky vendor update, compare shared Sales columns and
+business-safe display behavior for drift. Do not blindly overwrite POS Sales with
+the vendor Sales page; retain `is_pos: 1` and POS-specific workflow. If Stocky
+later provides a native POS-sales list, prefer that vendor implementation when it
+meets these business contracts and retire the duplicate custom page deliberately.
+
+---
+
+## 27. Build F — Stock Lookup unit, active-variant, and price-display cleanup
+
+**Status:** ACTIVE. **Base required:** working Build E3 SAFE overlay (Section 26).
+Build F is intentionally limited to the existing Stock Lookup feature. It does not
+change stock movement, valuation, Product Insights, Sales/POS/Shipment, routes, or
+database schema.
+
+### 27.1 Why this patch exists
+
+The Stock Lookup UI rendered every stock quantity as `Pcs`, even when the
+product's base stock unit was Kg, Box, Litre, etc. Its variant relationship also
+included soft-deleted variants because this codebase stores `deleted_at` without
+Laravel's global `SoftDeletes` scope. Finally, a variant product's header/search
+result used the parent product price; that value may be zero or unrelated to the
+active variants.
+
+### 27.2 Runtime contract
+
+- The detail API eager-loads the product's base `unit` and returns
+  `product.unit_label` (`ShortName`, falling back to the unit name).
+- Every Stock Lookup quantity label uses that value. Stored quantity and stock
+  aggregation remain untouched and stay in the existing base-stock unit.
+- Search-by-variant code/GTIN and detail eager loads explicitly require
+  `product_variants.deleted_at IS NULL`.
+- Variant stock aggregation is restricted to the active variant IDs, so orphaned
+  `product_warehouse` rows for deleted variants cannot reappear in totals.
+- Search and detail payloads add `price_min`/`price_max` from active variants.
+  The Vue page shows one price when equal, a range when different, and `Varies`
+  when a variant product has no active variant price. Individual expanded rows
+  continue to show each active variant's own price.
+
+The existing `price` field remains in the payload for backward compatibility;
+Stock Lookup alone chooses the variant-aware display. No shared pricing helper,
+tax/discount rule, wholesale/min-price rule, or stored price is changed.
+
+### 27.3 Surgical asset synchronization
+
+The source-of-truth changes are in:
+
+- `app/Http/Controllers/ProductsController.php`
+- `resources/src/pages/products/StockLookup.vue`
+
+Only the currently active lazy chunk referenced by the received Vite manifest is
+synchronized: `public/js/chunks/StockLookup.D-UahGfI.js`. No entry bundle,
+manifest, menu, router, or unrelated chunk is replaced. `public/sw.js` advances
+to `stocky-pwa-v12` so clients do not keep the previous Stock Lookup chunk.
+
+### 27.4 Tests and exclusions
+
+Build F adds:
+
+- `tests/Regression/build_f_stock_lookup_cleanup.php`
+- `tests/Unit/BuildFStockLookupCleanupContractTest.php`
+
+Older cache-version assertions in the A.1/E3 regression contracts are made
+monotonic so later surgical PWA releases do not falsely fail them.
+
+**Not changed:** routes, migrations/schema, product/variant records, core stock
+calculation, warehouse authorization model, Product Insights, Sales/POS,
+Shipment, Unit/Multi-Pack conversion, pricing engine, FIFO/COGS, invoice/PDF, or
+any other application feature.
+
+Fast cumulative regression sequence after applying Build F:
+
+```bash
+php tests/Regression/build_a_stability.php
+php tests/Regression/build_a1_currency_backend.php
+php tests/Regression/build_b_authorization.php
+php tests/Regression/build_c_product_insights.php
+php tests/Regression/build_d1_product_insight_scope.php
+php tests/Regression/build_d2_product_analytics.php
+php tests/Regression/build_e1_pos_recent.php
+php tests/Regression/build_e2_metadata_validation.php
+php tests/Regression/build_e3_pos_sales_parity.php
+php tests/Regression/build_f_stock_lookup_cleanup.php
+```
+
+**Future vendor-update warning:** preserve the explicit active-variant filters
+unless the `ProductVariant` model later adopts a verified global soft-delete
+scope. If Stocky's build system regenerates hashed assets normally, regenerate
+the manifest/chunk from `StockLookup.vue`; do not retain a hand-synchronized
+chunk as the source of truth.
+
+---
+
+## Post-F continuity — G1, Phase 0, PO+GRN, and registration hotfix
+
+After Build F, the active chain adds Product Insight base-quantity readiness
+(G1), Purchase Form quick wins (Phase 0), and the Purchase Order to GRN linkage.
+The full PO/GRN behavior, security decisions, schema, known GRN-edit limitation,
+tests, and file inventory are documented in `PO_GRN_SAFE_OVERLAY_README.md` and
+`PO_GRN_FILE_MANIFEST.txt`.
+
+The first PO+GRN ZIP intentionally left `routes/api.php`,
+`resources/src/router/index.js`, and `resources/src/config/menu.js` as manual
+instructions. Applying only the ZIP installed the implementation but not every
+registration, so `tests/Regression/build_po_grn.php` failed. The registration
+hotfix packages those exact three files and extends the gate to cover all PO API
+endpoints, both lazy imports, list/create/edit SPA routes, legacy aliases, and
+permission-gated menu registration.
+
+This hotfix changes registration only. It adds no migration or frontend build
+and does not alter PO/GRN status, received quantity, stock, price, payment,
+documents, email, or any unrelated workflow. The received compiled Vite entry
+already contains the PO routes/menu and PO chunks; source is now aligned with it.
+
+---
+
+## PO+GRN Phase 1.2 — labels, GRN header layout, and actionable errors
+
+**Status:** ACTIVE. **Base required:** PO+GRN registration hotfix.
+
+The initial PO UI leaked raw vue-i18n keys because `$t()` returns the key on a
+miss, making patterns such as `$t('PurchaseOrders') || 'Purchase Orders'`
+ineffective. English PO keys are now provided by the translation API (without
+overwriting database customizations) and recorded in the English translation
+seeder. The PO list/form additionally use the exact approved labels in source:
+Purchase Orders, Add Purchase Order, and Expected Delivery Date.
+
+The Create Purchase/GRN header is Date, Supplier, Select Purchase Order, and
+Warehouse in one four-column desktop row. The PO selector remains create-only,
+optional, supplier-filtered, and warehouse-locking; no receipt or stock rule is
+changed.
+
+The PO list now passes `params: () => filterParams.value`; the earlier computed
+ref was called as a function by `useCrudTable`, throwing before the list request
+could run. The shared CRUD fallback then hid that programming error as
+“Something went wrong”. A PO-specific handler now reports 403, 404, and 500
+cases separately and reads backend messages from the custom fetch wrapper's
+real `error.data` contract. `tests/Regression/po_grn_runtime.php` is a read-only
+installation check for the PO routes, three tables, purchases link column, and
+permission row. Full deployment and rollback instructions are in
+`PO_GRN_PHASE1_2_UI_ERROR_FIX_SAFE_OVERLAY_README.md`.
+
+**Not changed:** PO/GRN business formulas, receipt application/reversal,
+statuses, stock, pricing, accounting/payment, documents/email behavior,
+Sales/POS/Shipment, or any unrelated feature.
+
+---
+
+## PO+GRN Phase 1.3 — real PO view, human copy, documents/columns, safe GRN deletion
+
+**Status:** ACTIVE. **Base required:** PO+GRN Phase 1.2.
+
+PO View now opens an actual read-only details state showing header data and
+ordered/received/remaining line quantities. Partially and fully received POs
+automatically use that state, including when an old direct edit URL is opened;
+Edit is shown only for Draft and Ordered records. `PoStatusAutoNote`,
+`PoNotEditable`, `PoItemsAvailable`, and `LoadAllItems` are removed in favor of
+human-readable labels and messages.
+
+The PO list adds Created By and Last GRN Date as default-hidden columns, plus
+Age and an attachment indicator. Attachments can be uploaded, downloaded, and
+deleted from the action menu. Last GRN Date considers only active finalized
+(`received`) GRNs.
+
+The two supplied Claude ZIPs were audited, not blindly overlaid. Their useful
+document/column and GRN-deletion ideas were manually merged. The GRN safety
+implementation was corrected to aggregate duplicate lines and the entire bulk
+selection in base units, then lock stock rows inside the same deletion
+transaction. If the combined reversal would make any stock negative, the whole
+operation is rejected before mutation.
+
+Deployment and audit details are in
+`PO_GRN_PHASE1_3_SAFE_OVERLAY_README.md`,
+`PO_GRN_PHASE1_3_FILE_MANIFEST.txt`, and
+`CLAUDE_PO_GRN_ZIP_AUDIT.md`.
+
+**Not changed:** PO/GRN formulas, costing, payment logic, database schema,
+permission identifiers, routes, Product Insights, Sales/POS/Shipment, or other
+modules.
+
+Known lifecycle limitations intentionally left for the next controlled phase:
+linked GRN edits/status changes do not yet reconcile old/new PO receipt
+contributions; backend remaining-quantity/concurrency and supplier-match checks
+need hardening. Until then, a received PO-linked GRN should be safely deleted
+and recreated rather than edited. Full evidence, required invariants, tests, and
+GitHub-readiness findings are in
+`docs/CLAUDE_PO_GRN_LIFECYCLE_AUDIT_AND_PHASE1_4_HANDOFF.md`.
+
+---
+
+## PO+GRN Phase 1.4 — supplier match, over-receipt lock, unsafe-edit block
+
+**Status:** ACTIVE. **Base required:** PO+GRN Phase 1.3.
+
+This phase closes three of the P0/P1 gaps recorded in
+`docs/CLAUDE_PO_GRN_LIFECYCLE_AUDIT_AND_PHASE1_4_HANDOFF.md`. It deliberately
+does NOT attempt full linked-GRN edit reconciliation (section 7's first P0) —
+that requires reworking `PurchasesController::update()`'s stock-reversal/
+reapply blocks in place, which the handoff itself flags as needing to be
+proven safe first. Instead this phase takes the handoff's explicit fallback:
+block the unsafe edit outright.
+
+**1. Supplier match.** `PurchaseOrderReceiptService::validateReceivablePo()`
+now takes the GRN's `supplier_id` and rejects (HTTP 422) a GRN that selects a
+Purchase Order raised for a different supplier. Previously only existence,
+warehouse scope, status, and warehouse match were checked.
+
+**2. Backend over-receipt protection, under lock.** A new
+`PurchaseOrderReceiptService::lockAndValidateReceiptLines()` runs inside
+`PurchasesController::store()`'s existing transaction, before any row for the
+new GRN is written, whenever the GRN is PO-linked and saved as `received`. It
+`lockForUpdate()`s the PurchaseOrder row and every referenced
+PurchaseOrderDetail row (stable ascending-id lock order, matching
+`GrnDeletionSafetyService`'s convention), verifies each referenced line
+actually belongs to the selected PO and matches the line's product/variant,
+sums duplicate/split lines in the same GRN against the same PO detail, and
+rejects the entire GRN (no partial apply, no clamping) if the locked
+remaining quantity would be exceeded. Because the lock is held for the rest
+of the transaction, a second concurrent request against the same PO lines
+blocks until the first commits (or rolls back) and then re-reads the
+now-updated remaining quantity — closing the race the handoff describes in
+its "concurrent receipt race" section. The pre-transaction
+`validateReceivablePo()` call remains as a fast, non-locking precheck only,
+exactly as the handoff recommended.
+
+**3. Unsafe linked-GRN edit is now blocked, not silently allowed.**
+`PurchasesController::update()` now aborts with HTTP 422 at the very start of
+its transaction — before any stock or detail row is touched — whenever the
+GRN being edited is PO-linked AND either its current `statut` is `received`
+or the request would set it to `received`. This covers the case the handoff
+documents (editing an already-received linked GRN) and also a related case
+found while implementing this: transitioning a linked GRN from
+pending/ordered to `received` via `update()` moves stock through this
+method's existing blocks but never called
+`PurchaseOrderReceiptService::applyReceipt()`, so it would have desynced the
+PO exactly like a direct edit. Editing a linked GRN that stays
+pending/ordered on both sides is unaffected — no stock or PO contribution
+exists yet either way. The linked GRN edit/status-transition
+*reconciliation* itself (letting such an edit succeed and adjusting the PO
+correctly) remains for a future phase, per the handoff's own P0 write-up.
+
+**Verification performed:** all three changes were reviewed against the
+existing behavior table in `docs/CLAUDE_PO_GRN_LIFECYCLE_AUDIT_AND_PHASE1_4_HANDOFF.md`
+section 4 and the acceptance matrix in its section 9 (items 3, 5, 8–12) —
+see `tests/Regression/build_po_grn_phase1_4.php` for the automated
+source-contract checks. **This phase's engineering environment had no
+network access to Composer/Packagist and no vendor/ directory, so these
+checks are static/source-contract only — they confirm the code is wired the
+way this document describes, not that it behaves correctly against a live
+database.** A real-database functional/concurrency run (the exact scenarios
+in section 9) must still be done in the actual Laragon environment before
+this is treated as verified in production. See
+`tests/Regression/PHASE1_4_MANUAL_VERIFICATION.md` for the exact steps and
+expected results to run there.
+
+**Not changed:** linked GRN edit reconciliation (still blocked, not fixed),
+extra non-PO GRN lines policy, short-close workflow, cost variance, PO/GRN
+formulas, costing, payment logic, database schema, permission identifiers,
+routes, Product Insights, Sales/POS/Shipment, or other modules.
+
+---
+
+## Build H1 — Product Movement Ledger (backend)
+
+**Why:** A single product's lifetime stock history was scattered across
+seven separate modules (Purchases, Sales, Transfers, Adjustments, Sale
+Returns, Purchase Returns, Damages) with no unified, chronological view
+and no running balance — requested specifically to give a way to *find*
+real instances of the known stock-integrity bug (see "Known unresolved
+issues" below) on live data, not just reason about it in the abstract.
+
+**Backend:**
+- `app/Services/Custom/ProductMovementLedgerService.php` — new, isolated
+  service (not inline in any vendor controller). `build($productId,
+  $productVariantId, $warehouseId, $dateFrom, $dateTo)` unions all 7
+  sources into one array sorted by `date` then `id`, computes a running
+  balance per warehouse, and returns a `reconciliation` block comparing
+  the computed ending balance against the live `product_warehouse.qte`
+  per warehouse.
+- `app/Http/Controllers/ProductsController.php@movement_ledger` — new
+  method, thin: validates input, calls the service, returns JSON.
+- Route: `GET products/movement-ledger` (`routes/api.php`).
+- **Reconciliation semantics:** `row_missing: true` means no
+  `product_warehouse` row exists at all for that warehouse (the
+  stock-integrity bug's exact signature). `reconciled: false` with a
+  `row_missing: false` means a row exists but the numbers disagree —
+  this can also happen innocently for a Units/Multi-Pack product (see
+  scope note below), so a mismatch alone doesn't prove the bug fired.
+- **Variant products:** `product_variant_id = null` means "every variant
+  combined", not "non-variant rows only" — the reconciliation SUMs every
+  variant's own `product_warehouse` row for that warehouse. Pass a
+  specific variant id to check one variant in isolation (needed because a
+  partial case — one variant's row missing, others present — can still
+  sum to the right total and read as reconciled).
+- **QuickBooks noise:** none directly (this build predates the
+  Activity Log's own QuickBooks-noise discovery, and doesn't touch models
+  with `quickbooks_*` columns in a way that matters here).
+
+**Scope limits (documented, not fixed):**
+- Quantities are the RAW value stored on each detail row, not run through
+  any per-line unit/Multi-Pack conversion — each of the 7 source
+  controllers resolves that conversion differently today, and unifying
+  them was judged out of scope for Phase 1. For a product that never uses
+  Units/Multi-Pack, raw quantity IS the base-unit quantity and the
+  reconciliation is exact.
+- Not a single SQL UNION — each of the 7 sources is queried and merged in
+  PHP. Correct and simple for realistic log volumes; revisit if it's ever
+  slow in practice.
+
+## Build H2 — Product Movement Ledger (frontend) + two real bugs found and fixed
+
+**Frontend:**
+- `resources/src/pages/products/MovementHistoryCard.vue` — new,
+  self-contained component: chronological table, running balance,
+  warehouse/date filters, and the reconciliation badges (red = row
+  missing, orange = numbers disagree, green = reconciled) right at the
+  top. Plain English labels throughout (no `$t()` — see "House rule:
+  plain-English UI text" below).
+- Embedded in **two** places: `resources/src/pages/products/
+  ProductDetails.vue` (one import + one component tag) and a new tab on
+  the existing `resources/src/pages/reports/StockDetailReport.vue`
+  (Reports → Stock Report → a product → Stock Detail Report), which
+  already had separate Sales/Purchases/etc. tabs for a product — this
+  build added the unified view as one more tab there rather than
+  building a second, competing report page.
+
+**Bugs found while building the frontend (fixed in the same delivery):**
+1. **Variant products showed "no movement."** The backend required an
+   exact `product_variant_id` match; a variant product's rows always
+   carry one, so the "all variants" view matched nothing. Fixed in
+   `ProductMovementLedgerService` (see Build H1's notes above — this is
+   where that fix actually landed).
+2. **`users.name` doesn't exist.** An unrelated but real bug caught later
+   in the Activity Log work (Build I1) turned out to share a root cause
+   worth noting here too: this codebase's `users` table is
+   `firstname`/`lastname`, never a single `name` column. Any new code
+   written against a `User` relation must build the display name from
+   those two fields, not assume `->name` — this bit twice (see Build I1).
+
+**Environment/process notes surfaced while shipping this (all resolved,
+none code bugs):**
+- A stale PHP OPcache (Apache's own PHP module, not the CLI used for
+  `php artisan`) served an old compiled `ProductsController.php`/
+  `routes/api.php` after edits — CLI commands like `route:list` correctly
+  saw the new route while the actual web server didn't, because CLI and
+  the Apache PHP module can hold separate OPcache state. A full Laragon
+  restart (not just `optimize:clear`) was needed to clear it.
+- A genuinely pre-existing, unrelated problem was uncovered in the same
+  session: `.env`'s `APP_KEY` was empty, but the app had been silently
+  running on a stale cached config with a valid key baked in from before
+  — clearing caches (as part of normal troubleshooting) exposed it.
+  `php artisan key:generate` fixed it. Worth a periodic sanity check
+  (`php artisan config:clear` then confirm the app still works) since a
+  cached-over problem like this can sit invisible indefinitely.
+
+## Build I1 — Activity Log (Phase 1: Sales, Purchases, Products, Customers + existing logins, unified)
+
+**Why:** No general "who did what" audit trail existed — only narrow,
+unrelated logs (`MarketingActivityLog`, `MeetingActivityLog`) and a
+**self-service-only** Login Activity Report/Login Device Management pair
+(each user sees only their own login history — confirmed via
+`SecuritySettingsController::loginActivityReport()`'s
+`where('user_id', $user->id)`, not an admin-wide view).
+
+**Schema** — `database/migrations/2026_09_18_000001_create_activity_logs_table.php`:
+new `activity_logs` table: `user_id` (nullable), `module`, `action`
+(created/updated/deleted), `subject_type`/`subject_id`, `description`,
+`old_values`/`new_values` (json), `ip_address`, `user_agent`,
+`created_at` only (a log row is never edited after the fact).
+`database/migrations/2026_09_18_000002_add_activity_log_report_permission.php`:
+adds the `activity_log_report` permission, auto-granted to whichever
+role(s) already hold `report_device_management` (same reserved-id
+convention as the `purchase_orders` permission migration).
+
+**Backend — the instrumentation (the actual hard part):**
+- `app/Services/Custom/ActivityLogger.php` — `log()` writes a row;
+  `diff()` reduces a model's `getChanges()`/`getOriginal()` to just the
+  changed fields worth showing; `sanitize()` does the same for a full
+  attribute snapshot (a `created` row's `new_values` is the whole row,
+  not a diff). Both exclude `updated_at`/`created_at`/`deleted_at`/
+  `remember_token`/`password`/`NewPassword` unconditionally, and every
+  `quickbooks_*` column **by prefix** (see "QuickBooks noise" below).
+- `app/Providers/ActivityLogServiceProvider.php` — new, registers
+  model-event closures, same "dispatch from model lifecycle, don't touch
+  controllers" approach the vendor's own `AccountingV2ServiceProvider`
+  already uses elsewhere. Registered in `config/app.php`'s providers
+  array.
+- **Confirmed, not assumed, before writing any hook:** which of Sale,
+  Purchase, Product, Client's create/update/delete calls persist via an
+  Eloquent instance (`new X; ->save()` / `$x->update([...])` — fires
+  events, hookable) vs. a query-builder bulk update
+  (`X::whereKey($id)->update([...])` — does NOT fire events, needs an
+  explicit call site). Sale/Purchase/Product: fully observable. Client:
+  `created` observable, `update()`/`destroy()` are bulk — explicit
+  `ActivityLogger::log()` calls added directly in `ClientController.php`
+  at those exact call sites (commented `--- Build I1 (Activity Log)`).
+- **Soft-delete detection:** none of these models ever call Eloquent's
+  own `->delete()` — every delete here is
+  `$model->update(['deleted_at' => now(), ...])`, which fires `updated`,
+  not `deleted`. The provider's `updated()` closures check
+  `wasChanged('deleted_at')` specifically; a registered `deleted()`
+  closure would simply never fire in this codebase and isn't used.
+- `app/Http/Controllers/ActivityLogController.php` — new, the report
+  endpoint. Merges `activity_logs` with the **existing**
+  `user_login_sessions` table (same table behind Login Device
+  Management/Login Activity Report) **read for all users**, not
+  duplicated — Auth/login rows in the unified feed are just that table
+  queried without the `user_id` filter the self-service pages use.
+  Merged in PHP (not a SQL UNION) for the same reasoning as the Movement
+  Ledger.
+- Route: `GET reports/activity-log` (`routes/api.php`).
+
+**Frontend:**
+- `resources/src/pages/reports/ActivityLogReport.vue` — new, built on the
+  existing generic `ReportPage` + `useCrudTable` shell (same Filter
+  drawer / Export Excel-PDF-Print / search every other report already
+  has). Date range, User, Module filters; a 👁 action opens an old→new
+  diff modal for `updated` rows.
+- Menu + router: `resources/src/config/menu.js`,
+  `resources/src/router/index.js`.
+
+**Bugs found and fixed in this delivery:**
+1. **Menu link silently fell back to Dashboard.** This app's `/next/`
+   SPA keeps a `MIGRATED_ROUTES` lookup table at the top of `menu.js`
+   translating legacy `/app/...` menu paths to the real router path — a
+   new menu entry needs a matching row there too, or it resolves as
+   "not yet migrated" and deep-links into the legacy SPA instead.
+   Missed on the first pass, fixed as a hotfix.
+2. **`users.name` doesn't exist** (see Build H2) — hit again here in
+   `ActivityLogController`'s eager-loaded `user` relation and the Users
+   filter dropdown query. Fixed with a small `userName()` helper that
+   builds the display name from `firstname`/`lastname` everywhere a
+   `User` needs to be shown.
+3. **`SettingPolicy` needs an explicit method per permission — a
+   `permissions` table row is not enough on its own.** The new
+   `activity_log_report` permission existed correctly in the database
+   (row + role assignment, confirmed directly in phpMyAdmin) but still
+   403'd, because this app's authorization for Settings-area abilities
+   goes through `app/Policies/SettingPolicy.php`, which needs one PHP
+   method named exactly after each permission string — Laravel's
+   Gate/Policy resolution has no code path for a permission that only
+   exists as a database row. Fixed by adding
+   `SettingPolicy::activity_log_report()`, mirroring the existing
+   `report_device_management()` method exactly. **This is a standing gotcha
+   for any future Settings-area permission**, not specific to this
+   feature — check `SettingPolicy.php` before assuming a new
+   `permissions` row alone will authorize anything under Settings.
+4. **QuickBooks background sync created phantom "updated" log rows.**
+   Every Sale save (create or update) triggers a QuickBooks sync attempt
+   regardless of whether QuickBooks is connected; when it's not, it
+   writes an error into `quickbooks_sync_error`, which `ActivityLogger`
+   was — correctly, per its own logic — treating as a real field change.
+   Fixed by excluding every `quickbooks_*` column **by prefix** (not a
+   fixed list) from both `diff()` and `sanitize()`. **Standing rule for
+   any future model hooked into this log:** if it has QuickBooks columns,
+   they're already excluded automatically; no per-model action needed.
+5. **A misleading, unrelated-looking 403 that turned out to be exactly
+   that — a permission problem, not a code bug** (see item 3) —
+   documented here because it cost real debugging time going down other
+   paths (stale cache, OPcache, browser cache) before the actual cause
+   (missing Policy method) was found. **Diagnostic order worth
+   remembering:** for a 403 or "Something went wrong" on a *new*
+   authenticated endpoint, check the relevant Policy class for a matching
+   method *before* chasing cache/environment theories — a
+   `permissions`-table row existing is necessary but never sufficient in
+   this codebase.
+
+## Build I2 — Activity Log (Phase 2: Adjustments, Transfers, Users, Roles & Permissions)
+
+**Why:** Extends Build I1 to the two areas judged most valuable next:
+stock-affecting actions (ties directly to the stock-integrity bug's own
+audit-trail motivation) and access-control changes (who can do what, and
+who changed it — arguably more security-sensitive than Sales).
+
+**Backend:**
+- `ActivityLogServiceProvider` extended: `Adjustment` and `Transfer` are
+  **fully observable** (confirmed via the same direct-code-read
+  discipline as Build I1 — both use `new X;->save()` and
+  `$current->update([...])` throughout, including their soft-delete
+  path). `User` is observable for `created` and soft-delete (`destroy()`
+  uses an instance `->save()`), but its regular profile edit
+  (`UserController::update()`) is a bulk `User::whereId($id)->update()` —
+  same non-observable shape as Client — logged via an explicit call site
+  there instead.
+- **Role create/update/delete/bulk-delete** — all four are bulk/pivot
+  operations (`Role::whereKey($id)->update()`,
+  `$role->permissions()->attach()/detach()`), none observable. Four
+  explicit `ActivityLogger::log()` calls added directly in
+  `PermissionsController.php`. The **update** log specifically diffs
+  name, description, **and the permission list** (old list → new list),
+  not just "Role updated" — the actual point of logging a permission
+  change is seeing which permissions moved.
+- **Security hardening, applied proactively (not from a bug report this
+  time):** a `User`'s `created` event snapshots the whole row via
+  `getAttributes()`, which includes the hashed password. Every such
+  full-snapshot call site (the provider's generic `hookModel()`, and
+  `Client`'s own `created` hook) now goes through
+  `ActivityLogger::sanitize()`, and `password`/`NewPassword` were added
+  to the permanent exclusion list — applied here *before* it could
+  surface as an incident, having just fixed the QuickBooks version of the
+  same class of mistake in Build I1.
+
+**Frontend:** `ActivityLogReport.vue`'s Module filter extended with Stock
+Adjustments, Stock Transfers, Users, Roles & Permissions.
+
+**Known scope limit:** `UserController::IsActivated()` (the
+enable/disable toggle, separate from a full profile edit) isn't logged —
+a smaller bulk-update call site than the main `update()`, deferred as
+lower priority.
+
+**Still deferred, by explicit agreement, to a future round:** failed
+login attempt tracking (nothing tracks a wrong-password attempt today;
+the "Failed/Warning" concept from the original reference design needs
+this and doesn't exist yet).
+
+## Build J1 — Purchase Orders enable/disable toggle
+
+**Why:** A settings-level switch for the whole PO → GRN feature, for a
+store that doesn't use formal purchase orders — requested explicitly
+matching the existing "Enable Box Quantity" pattern, but PO is a full
+feature (its own data model, pages, routes), not a single display field,
+so this one is enforced server-side, not just cosmetic.
+
+**Schema** — `database/migrations/2026_09_18_000003_add_enable_purchase_orders_toggle.php`:
+new `enable_purchase_orders` boolean on `settings`, default `true` (no
+behavior change on existing installs until deliberately flipped).
+
+**Backend:**
+- `app/Http/Middleware/CheckPurchaseOrdersEnabled.php` — new, modeled
+  directly on the vendor's own existing `EnsureStoreEnabled` middleware
+  (same shape: read a settings flag, `abort()` if off). Registered as the
+  `po.enabled` named alias in `Kernel.php`.
+- The **entire** `purchase_orders` route group in `routes/api.php`
+  (list/create/edit/delete/documents/PDF/email/price-variance report) is
+  wrapped in `Route::middleware('po.enabled')->group(...)` — one
+  middleware wrap, zero changes to `PurchaseOrderController.php` itself.
+- `SettingsController.php` — read/save handling at the same 3 call sites
+  `enable_box_qty` already has (save handler + both GET-response spots).
+- **Confirmed before building:** GRN receiving has no separate route of
+  its own — it's a regular Purchase referencing a PO id, going through
+  the existing (unaffected) `purchases` routes — so wrapping only the
+  `purchase_orders`-prefixed routes correctly blocks the entry point
+  without needing to touch Purchases.
+
+**Frontend:** `SystemSettings.vue` — new toggle under "Enable Box
+Quantity".
+
+**Known, documented scope limit:** the "Purchase Orders" and "Price
+Variance Report" sidebar links still show even when the feature is off —
+clicking hits the 403 from the backend rather than the menu item
+disappearing. Making the menu itself react to the setting is a separate,
+reasonable fast-follow (this app's sidebar-rendering engine wasn't judged
+safe to change for this delivery — see also the existing whole-module
+toggle system, `resources/src/config/modules.js`, which operates at a
+coarser top-level-menu-section granularity and doesn't fit a single
+child page like this one).
+
+## Build J2 — Public Invoice URL (branded HTML page)
+
+**Why:** A shareable, no-login link to a sale's invoice — viewable and
+downloadable without the customer ever logging in.
+
+**Schema** — `database/migrations/2026_09_18_000004_add_public_token_to_sales.php`:
+new `public_token` (40-char random string, unique, nullable) on `sales`.
+Nullable and lazily generated on first request, not backfilled — a sale
+nobody has ever asked to share has no link to leak.
+
+**Backend:**
+- `app/Services/Custom/PublicInvoiceLinkService.php` — new, tiny.
+  `getOrCreateToken()`/`regenerateToken()`, both via `saveQuietly()`
+  specifically so generating a link never fires a model event (which
+  would otherwise show up as a spurious "Sale updated" row in the
+  Activity Log — applied proactively, same lesson as the QuickBooks fix
+  above, this time anticipated rather than found by a bug report).
+- `app/Http/Controllers/PublicInvoiceController.php` — new. `link()`/
+  `regenerate()` are authenticated (staff, from the Sale Detail page).
+  `show()` (JSON data for the page) and `pdf()` are genuinely public — no
+  auth, looked up by the unguessable token rather than the sale's own id.
+  `pdf()` deliberately delegates to the existing
+  `SalesController::Sale_PDF()` rather than reimplementing PDF
+  generation, so the downloaded PDF can never drift from what staff see.
+- `SalesController.php@Sale_PDF` — one additive line: honors an `inline`
+  request flag (stream vs. force-download) for the public page's
+  Download button; every existing caller is unaffected since none pass
+  it.
+- Routes: `sales/{id}/public-link` (GET) and
+  `sales/{id}/public-link/regenerate` (POST) — authenticated, near the
+  existing sale-document routes. `public/invoice/{token}` (JSON) and
+  `public/invoice/{token}/pdf` — genuinely public, in the same no-auth
+  block as the existing customer-display routes.
+
+**Frontend:**
+- `resources/src/pages/public/PublicInvoice.vue` — new. A real financial
+  document, designed accordingly (restrained slate/ink palette, one
+  accent color reserved for the Download button, tabular-aligned
+  numbers, system fonts, print-aware — the Download button hides when
+  printed — responsive down to mobile).
+- `resources/src/pages/sales/SaleDetails.vue` — new "Public Link"
+  dropdown-button: main click copies the link (with an
+  `execCommand('copy')` fallback and a manual-copy dialog for when even
+  that fails — see the clipboard bug below); dropdown → "Regenerate"
+  invalidates the old link.
+- `resources/src/router/index.js` — new top-level route,
+  `/invoice/:token`, `meta: { skipAuth: true }`, registered as a sibling
+  to the existing `/ping` diagnostic route (i.e. genuinely outside
+  `AdminLayout`, not nested under it).
+
+**Scope decision:** the page's own numbers are a fresh, simple read of
+the sale (not run through `Sale_PDF`'s multi-currency conversion — that
+method mixes PDF-specific concerns into one long block with no separable
+"just get the data" entry point, and refactoring it was judged riskier
+than this modest, explicit duplication). The **Download PDF** button
+still produces the fully currency-converted, authoritative PDF via the
+unchanged `Sale_PDF`.
+
+**Bugs found and fixed across this delivery:**
+1. **Delivered a `routes/api.php` with an accidental dependency on the
+   (not-yet-applied) PO toggle build.** Caught and reissued as a
+   standalone version built from the correct earlier baseline — flagging
+   as a process reminder: when multiple builds are in flight
+   simultaneously, each delivery's shared-file edits must be checked
+   against exactly which *other* builds the recipient has actually
+   applied, not the most recent one produced.
+2. **Clipboard copy failed over plain HTTP.**
+   `navigator.clipboard.writeText()` needs a secure context (HTTPS, or
+   the literal hostname `localhost`) and silently throws on a
+   plain-HTTP custom hostname (this environment's own `stocky.test`).
+   Fixed with a `copyToClipboard()` helper: modern API first, falls back
+   to `execCommand('copy')`, and as a last resort shows the link in a
+   dialog to copy by hand.
+3. **The public page redirected to login even in a fresh incognito
+   window — the real cause was one level below the Vue Router.** The
+   entire `/next/*` SPA is served by one catch-all in `routes/web.php`
+   (`Route::view('/next/{any?}', 'next')`) wrapped in `auth:web`
+   middleware — that runs server-side, before any JavaScript loads, so
+   an unauthenticated visitor never received the app at all; the
+   client-side router's `skipAuth` meta never got a chance to run.
+   Fixed with one new, more specific, unguarded route,
+   `Route::view('/next/invoice/{token}', 'next')`, registered *before*
+   the auth-gated catch-all group (Laravel matches routes in
+   registration order) — scoped to this exact path only; every other
+   `/next/*` path is unaffected. **Standing lesson for any future public
+   page inside `/next/`:** a client-side router `skipAuth` route meta is
+   necessary but not sufficient in this app — the corresponding
+   server-side carve-out in `routes/web.php` must be added too, or the
+   page is unreachable by the very unauthenticated visitors it's meant
+   for.
+
+## House rule adopted this session: plain-English UI text, always
+
+Every new/changed page or component built from this point forward uses
+literal English strings for labels, titles, placeholders, and messages —
+**not** `$t('Some_Key')`-style translation keys — even where the rest of
+this codebase's convention is a translation key. Reasoning: this app's
+`$t()` returns the raw key text verbatim when no matching row exists in
+the translations table (a documented lesson already in this file, see
+"Hard lessons from real incidents" in `docs/ARCHITECTURE_AND_CHANGE_CONTROL.md`),
+and every key introduced by a *new* feature is, by definition, not yet in
+that table — so a new feature's own key would render as raw text like
+`Activity_Log_Report` regardless. Writing the plain-English text directly
+sidesteps that entirely and needs no follow-up translation-seeding step.
+This is an explicit, standing instruction — apply it to all future work
+in this codebase, not just the features listed above.
+
+## Known unresolved issues (confirmed this session, not yet fixed)
+
+**1. Stock-integrity bug — still open, now better understood.**
+Pre-existing vendor pattern across Purchases/Transfers/Adjustments/Sales/
+Sale Returns/Purchase Returns/Damages: checks whether a `product_warehouse`
+row exists and only updates it if so, with no else-branch to create one —
+a product's first-ever stock movement in a given warehouse can silently
+do nothing. Confirmed still present in the code (both fresh vendor 5.8
+and this customized version). **Revised understanding from this
+session:** it's rarer in practice than first assumed, because both
+"create product" and "create warehouse" already auto-backfill
+`product_warehouse` rows for the full product×warehouse grid — the bug
+only bites when that backfill was bypassed (bulk import — though the
+current `ProductImport.php` turns out to be an empty, non-functional
+stub anyway — legacy pre-backfill data, or a variant added after the
+fact). **The Movement Ledger (Build H1/H2)'s reconciliation check is now
+the tool to go find a real instance on live data** before deciding
+whether/how to fix this — a `row_missing: true` badge on a real product
+is the bug's exact signature.
+
+**2. `ReportController` — ~45 instances of a related bug, confirmed,
+not fixed.** `$perPage = $request->limit;` pattern repeated ~45 times
+across report methods — same category of issue as the stock bug in
+spirit (an unguarded assumption that repeats across many call sites) but
+this one is about report pagination, not stock quantity. Confirmed
+present in both fresh vendor 5.8 and this customized version. Not yet
+started.
+
+## GitHub repository note
+
+`imran2022/stocky-app` was found set to **Public** visibility (previously
+believed Private) during this session — `.gitignore` itself is correctly
+configured (excludes `.env`, `storage/*.key`, sessions, logs,
+`database.sqlite`), so no secret is known to have been exposed, but
+CodeCanyon license terms and business-logic exposure are both reasons to
+set it back to Private. **Confirm this was actually done** — it was
+flagged and the owner said they'd handle it, but this doc can't confirm
+the follow-through happened.
+
+Also found: earlier in the repo's history, `public/js` (the built
+frontend bundle) had been committed despite `.gitignore` already
+excluding it going forward — a `git rm -r --cached public/js` plus a
+fresh commit was recommended to stop tracking it (build output doesn't
+belong in version control) and to get GitHub's copy of the repo current
+with all of this session's work (Movement Ledger, Activity Log Phase 1/2,
+PO toggle, Public Invoice URL). **Confirm this push actually happened** —
+same caveat as above.
+
+## Build K.4 — Activity Log Report invisible on fresh install + custom permissions missing from Roles & Permissions
+
+Found from a live fresh-install report (`php artisan migrate:fresh --seed`
+run for testing): after seeding, "Activity Log Report" was gone from the
+Reports menu for every role, including Owner, and separately, neither
+"Activity Log Report" nor "Purchase Orders" could be selected anywhere in
+the Roles & Permissions screen when building a new role's permission set.
+
+**Bug 1 — Activity Log Report invisible after a fresh install.**
+`2026_09_18_000002_add_activity_log_report_permission.php` creates the
+`activity_log_report` permission and grants it to whichever role(s)
+currently hold `report_device_management` — but that grant logic runs
+*inside the migration itself*. Migrations always run before seeders, so
+on `migrate:fresh --seed` the `permission_role` table is still completely
+empty at the moment this migration executes (no roles or role-permission
+links exist yet — those only get created afterward, by
+`RoleSeeder`/`PermissionRoleSeeder`). The permission gets created, but is
+granted to zero roles, so it's invisible in the sidebar for everyone,
+including a brand-new Owner account.
+
+This is the exact same bug already found and fixed once before, for
+`purchase_orders` — that's precisely why `PurchaseOrdersPermissionSeeder`
+exists and is explicitly called *after* `PermissionRoleSeeder` in
+`DatabaseSeeder.php` (see that seeder's own docblock, which documents the
+original discovery). The Activity Log migration was added afterward and
+never got the equivalent fix.
+
+**Fix:** added `ActivityLogPermissionSeeder` (mirrors
+`PurchaseOrdersPermissionSeeder` exactly — same grant rule, same
+idempotent check-before-insert), called in `DatabaseSeeder.php`
+immediately after `PurchaseOrdersPermissionSeeder`. Confirmed no other
+migration in the codebase creates a `permissions` row with this same
+self-contained-grant pattern (`purchase_orders` and `activity_log_report`
+are the only two), so this closes the bug class completely for now — see
+the standing rule added below for future permissions.
+
+**Bug 2 — custom permissions not selectable in Roles & Permissions, on
+any install.** `resources/src/config/permissions.js` is a static,
+hand-frozen catalogue — its own header comment says it was "extracted"
+once from the legacy Vue2 permission-editor template (239 entries at the
+time) — not a live read of the `permissions` database table (which has
+since grown to 309 rows). Every permission added after that extraction,
+including both of ours (`purchase_orders`, `activity_log_report`), was
+simply never added to this file, so the Roles & Permissions screen has no
+way to offer them as checkboxes at all — correctly configuring the
+backend changes nothing here.
+
+Diffed all 309 canonical DB permission names against the file's 305
+entries: only 4 gaps existed. Two were `purchase_orders` and
+`activity_log_report` (fixed here — added to the "Purchases" and
+"Reports" groups respectively, using the file's existing `v`/`l`/`f`
+fallback-label pattern so they render as plain English without needing a
+translations-table row, consistent with the plain-English-UI-text house
+rule). The other two, `record_view` and `module_settings`, are
+pre-existing base items unrelated to this fix and were deliberately left
+alone: `record_view` is set per-user directly on `UserForm.vue`, not
+meant to be a role-level checkbox; `module_settings` (permission id 125,
+well within the original vendor ID range) is a separate, pre-existing
+naming inconsistency between its menu gate (`business_modules`/
+`setting_system`) and its policy check — unrelated to any of our
+customization work, not touched here.
+
+**For the already-seeded live/test database** (no need to
+`migrate:fresh` again — this is additive and idempotent): run
+```
+php artisan db:seed --class=ActivityLogPermissionSeeder
+```
+then rebuild the frontend (`npm run build`) so the updated
+`permissions.js` ships, and the Activity Log Report checkbox will need to
+be turned on by hand once for any role that should see it beyond Owner
+(Owner gets it automatically via the `report_device_management` rule,
+same as before).
+
+**Standing rule going forward (new — add to house rules):** any new
+permission, whether added via `PermissionsSeeder.php` or a standalone
+migration, must ship with BOTH: (1) if granted via a migration's own
+self-contained logic, a matching seeder call placed after
+`PermissionRoleSeeder` in `DatabaseSeeder.php` — mirroring
+`PurchaseOrdersPermissionSeeder`/`ActivityLogPermissionSeeder` — so a
+fresh install ends up in the same state as an already-running site; and
+(2) an entry in `resources/src/config/permissions.js`, in the relevant
+group, using the `v`/`l`/`f` pattern — or it will never be assignable
+from Roles & Permissions no matter how correct the backend is. Skipping
+either half has now caused the identical user-visible bug twice.
+
+Verification: every assertion in
+`tests/Regression/build_k4_activity_log_permission_and_config_gap.php`
+was manually checked against the delivered files with grep/Python (no
+PHP CLI in the build environment), including a full diff confirming zero
+remaining DB-to-frontend permission gaps outside the two documented,
+deliberate exceptions.
+
+**Not resolved by this build:** the user separately recalled a second
+report also missing from the menu after the fresh install, but couldn't
+remember its name. Checked the strongest candidate, "Zone / Courier
+Report" — its permission (`Reports_sales`) is one of the 307 base
+permissions confirmed correctly granted to Owner, and its legacy-path
+route mapping (`/app/reports/zone_wise_report` → `/reports/zone-wise` in
+`MIGRATED_ROUTES`) is registered correctly — found no structural reason
+for it to be invisible. Worth the user re-checking the menu after this
+fix is applied; if something is still missing, we'll need the actual name
+to trace it (a static-analysis diff can't find a bug it isn't pointed
+at).
+
+## Build I3 — Activity Log: real reference numbers + full audit-trail coverage (2026-09-19)
+
+**Why:** A deep audit (see `docs/AUDIT_REPORT_2026-09-19.md`) found the
+Activity Log Report describing Sale/Purchase entries as "Sale #5" /
+"Purchase #12" — the internal database id — instead of the human invoice
+number ("SL-104") actually shown everywhere else in the app. Separately,
+only 8 of the app's ~19 document/record types were logged at all (Sale,
+Purchase, Product, Adjustment, Transfer, User, Customer, Role/Permission)
+— Sale Return, Purchase Return, Damage, Quotation, Purchase Order,
+Warehouse, Shipment, System Settings, and all four Payment types had no
+audit trail whatsoever.
+
+**Root cause of the reference-number bug:** Sale/Purchase describers read
+a non-existent `->reference` attribute — the real column is `Ref` — which
+is always `null` on an Eloquent model, so the description silently fell
+back to the raw `id` every single time. Adjustment/Transfer never
+attempted to use `Ref` at all.
+
+**Fix — reference numbers (`app/Providers/ActivityLogServiceProvider.php`):**
+every describer for Sale, Purchase, Adjustment, Transfer, and all newly
+added modules below now reads `$model->Ref`, falling back to `'#'.$id`
+only when `Ref` is genuinely empty (`?:`, not `??`, since an empty string
+still needs the fallback). Verified against a real seeded database:
+creating a Sale with `Ref = 'SL-9001'` produced the log line
+`Sale SL-9001 created`, not `Sale #5 created`.
+
+**Fix — coverage extension.** Nine more record types added, following the
+same investigation discipline as Build I1/I2 (read each controller
+directly to confirm whether create/update/delete go through an instance
+`->save()`/`->update()` — observable via Eloquent model events and the
+existing `hookModel()` helper — or a bulk `Model::whereId()->update([...])`
+— not observable, needs an explicit `ActivityLogger::log()` call site,
+same pattern as the existing Client/User bulk-update handling):
+
+- **Sale Return, Purchase Return, Damage, Quotation, Purchase Order** —
+  confirmed fully instance-based (create, update, and delete-via-update)
+  → added via `hookModel()`, same as Sale/Purchase/Adjustment/Transfer.
+  A Purchase Order's GRN-driven status transitions (`ordered` →
+  `partially_received` → `received`) go through `$po->update([...])` in
+  `PurchasesController`, so they already show up as ordinary
+  "Purchase Order ... updated" entries with a status old/new diff — no
+  separate "received" action was needed.
+- **Warehouse** — create is instance-based (`hookModel()` covers it), but
+  `update()`, `destroy()`, and `delete_by_selection()` all use a bulk
+  `Warehouse::whereId()->update([...])` — three explicit log call sites
+  added directly in `WarehouseController.php` (update logs an old/new
+  diff of the changed fields; both delete paths snapshot the warehouse
+  name before the bulk update runs, since it's gone from the row after).
+- **Shipment** — create/update are instance-based (`hookModel()` covers
+  them), but `destroy()` is the one place in the whole app that calls a
+  model's *real* Eloquent `->delete()` (Shipment doesn't use the
+  `SoftDeletes` trait, just a plain `deleted_at` cast) — fires Eloquent's
+  `deleted` event, not `updated`, so it needed its own explicit
+  `Shipment::deleted(...)` listener rather than `hookModel()`'s shared
+  `wasChanged('deleted_at')` logic.
+- **Payment (Sale/Purchase/Sale Return/Purchase Return)** — all four:
+  create (`Model::create([...])`) and update (`$payment->update([...])`)
+  are both instance-based → covered by `hookModel()`. Delete is a bulk
+  `Model::whereId()->update(['deleted_at'=>...])` in all four controllers
+  → one explicit log call site added at each of the four `destroy()`
+  methods.
+- **System Settings** — the entire settings-save endpoint
+  (`SettingsController::update()`) is one large bulk
+  `Setting::whereId($id)->update([...])` covering 100+ columns, including
+  several backup-credential fields (S3 access/secret key, Google Drive/
+  Dropbox access & refresh tokens, Google Calendar client secret) that
+  must never be persisted into a log table with a wide admin readership.
+  Handled with an explicit log call built by hand from the `$setting`
+  instance already loaded (pre-update) at the top of the method, diffed
+  against a fresh re-query after the update — every value passed through
+  `ActivityLogger::sanitize()`, which now also strips those specific
+  credential keys (added to `ActivityLogger`'s `$ignoredDiffKeys`).
+  Verified against a real database: setting `backup_s3_secret_key` to a
+  test value and checking the resulting `activity_logs.new_values` column
+  confirmed the secret never appears in it.
+
+**Changed:**
+- `app/Providers/ActivityLogServiceProvider.php` — Ref-based descriptions
+  for Sale/Purchase/Adjustment/Transfer; `hookModel()` calls for
+  SaleReturn, PurchaseReturn, Damage, Quotation, PurchaseOrder, Warehouse,
+  and the four Payment models; explicit `Shipment::deleted()` listener.
+- `app/Services/Custom/ActivityLogger.php` — added 8 backup/OAuth
+  credential field names to `$ignoredDiffKeys`.
+- `app/Http/Controllers/SettingsController.php` — explicit Settings
+  change log after the bulk update, secret-safe.
+- `app/Http/Controllers/WarehouseController.php` — explicit update/
+  destroy/delete_by_selection log calls.
+- `app/Http/Controllers/PaymentSalesController.php`,
+  `PaymentPurchasesController.php`, `PaymentSaleReturnsController.php`,
+  `PaymentPurchaseReturnsController.php` — explicit destroy() log calls.
+- `resources/src/pages/reports/ActivityLogReport.vue` — module filter
+  dropdown extended with all 9 new modules.
+- New: `tests/Regression/build_i3_activity_log_reference_numbers.php`,
+  `tests/Regression/build_i3b_activity_log_coverage_extension.php`.
+
+**Verification:** both new regression test files pass; the full existing
+23-file regression suite and the project's PHPUnit suite (37 tests) were
+re-run afterward with no new failures. Additionally, real runtime
+verification against a seeded SQLite database: created one real instance
+of every newly-hooked model (SaleReturn, PurchaseReturn, Damage,
+Quotation, PurchaseOrder, Shipment, PaymentSale, PaymentPurchase) and
+confirmed each produced a correctly-described `activity_logs` row;
+directly exercised the Warehouse/Settings explicit update paths and the
+Shipment hard-delete path; confirmed a Settings update carrying a test
+secret value never leaked that value into the logged `new_values`.
+
+**Still not covered (documented, not built this round — candidates for a
+future pass if wanted):** exports/downloads (who printed/exported a
+report or invoice), failed/denied action attempts (403s), and delete
+paths not capturing a full pre-delete snapshot (currently `deleted`
+entries log only the description, not the record's last-known values —
+they can still be reconstructed from the record's own `updated` history
+in the log, but not in one row). Flagged in the audit report as ideas,
+not requested for this build.

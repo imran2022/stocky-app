@@ -31,17 +31,25 @@ class PurchaseOrderReceiptService
      * fast rather than silently ignored after the fact. Checks, in order:
      * exists (and not soft-deleted), warehouse-accessible to the current
      * user (same UserWarehouse scoping used everywhere else in this app),
-     * in a receivable status, and — critically — that the GRN's own
-     * warehouse_id matches the PO's, so stock can't be received into a
-     * different warehouse than the one the PO was raised for while still
-     * crediting that PO's received_quantity.
+     * in a receivable status, that the GRN's own warehouse_id matches the
+     * PO's (so stock can't be received into a different warehouse than the
+     * one the PO was raised for while still crediting that PO's
+     * received_quantity), and — Phase 1.4 — that the GRN's supplier matches
+     * the PO's supplier.
+     *
+     * This is a FAST, NON-LOCKING precheck only, meant to reject an obviously
+     * bad reference before opening a transaction. Quantity/over-receipt
+     * checks are deliberately NOT done here — see
+     * lockAndValidateReceiptLines(), which re-checks everything that matters
+     * again under row locks inside the caller's transaction, because a
+     * value read here could be stale by the time the transaction commits.
      *
      * Returns null when no PO was referenced at all (the ordinary direct-
      * purchase case this feature doesn't touch). Aborts the request with
      * a 422/403 if a PO *was* referenced but fails any check — this method
      * never silently drops a bad reference.
      */
-    public function validateReceivablePo($purchaseOrderId, int $grnWarehouseId): ?PurchaseOrder
+    public function validateReceivablePo($purchaseOrderId, int $grnWarehouseId, ?int $grnSupplierId = null): ?PurchaseOrder
     {
         if (! $purchaseOrderId) {
             return null;
@@ -68,7 +76,135 @@ class PurchaseOrderReceiptService
             abort(422, "This GRN's warehouse must match the Purchase Order's warehouse.");
         }
 
+        // Phase 1.4: the UI already filters the PO picker by the GRN's
+        // selected supplier, but nothing previously stopped a crafted or
+        // stale request from pairing a GRN with a PO raised for a
+        // different supplier. $grnSupplierId is nullable only so existing
+        // callers that haven't been updated yet don't hard-break; every
+        // real call site passes it.
+        if ($grnSupplierId !== null && (int) $po->provider_id !== $grnSupplierId) {
+            abort(422, 'This Purchase Order belongs to a different supplier than the one selected on this GRN.');
+        }
+
         return $po;
+    }
+
+    /**
+     * Authoritative, row-locked over-receipt check — MUST be called from
+     * inside the same DB transaction that will go on to persist the GRN
+     * and call applyReceipt(), and BEFORE any stock/PurchaseDetail row for
+     * this GRN is written. This is what actually prevents two concurrent
+     * requests from both reading the same "remaining 60" and both being
+     * allowed to receive 60 (a combined 120 against a PO that only had 60
+     * left) — validateReceivablePo() above cannot do this because it
+     * intentionally runs before the transaction opens.
+     *
+     * Locks (in this order, to keep lock order consistent with the rest of
+     * this class and reduce deadlock risk): the PurchaseOrder row, then the
+     * specific PurchaseOrderDetail rows referenced by $requestDetails.
+     * Duplicate lines in the same GRN that reference the same
+     * purchase_order_detail_id are summed before comparison, so splitting
+     * one quantity across two lines can't bypass the check.
+     *
+     * Aborts with HTTP 422 and a human message (ordered/already
+     * received/attempted/remaining, per line) before returning if any
+     * referenced line does not belong to this PO, does not match the
+     * line's product/variant, or would push received_quantity past
+     * quantity. Rejects the entire GRN — never partially applies or
+     * silently clamps.
+     *
+     * @param  array  $requestDetails  The raw `details` array from the
+     *     request (same shape applyReceipt() reads: purchase_order_detail_id,
+     *     product_id, product_variant_id, quantity, purchase_unit_id).
+     */
+    public function lockAndValidateReceiptLines(PurchaseOrder $po, array $requestDetails): void
+    {
+        // Lock the PO row itself so a concurrent edit/cancel of the PO
+        // can't interleave with this receipt decision.
+        $lockedPo = PurchaseOrder::whereKey($po->id)->lockForUpdate()->first();
+        if (! $lockedPo || ! in_array($lockedPo->status, ['ordered', 'partially_received'], true)) {
+            abort(422, 'This Purchase Order is no longer in a receivable state.');
+        }
+
+        $detailIds = [];
+        foreach ($requestDetails as $row) {
+            if (! empty($row['purchase_order_detail_id'])) {
+                $detailIds[] = (int) $row['purchase_order_detail_id'];
+            }
+        }
+        if ($detailIds === []) {
+            return;
+        }
+
+        // Lock every referenced PO-detail row up front, in a stable
+        // (ascending id) order, so two concurrent GRNs touching an
+        // overlapping set of PO lines always acquire locks in the same
+        // order instead of potentially deadlocking each other.
+        $lockedDetails = PurchaseOrderDetail::where('purchase_order_id', $lockedPo->id)
+            ->whereIn('id', array_unique($detailIds))
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get()
+            ->keyBy('id');
+
+        // Sum requested base-unit quantity per PO-detail id across every
+        // line in this GRN that references it, so duplicate/split lines
+        // are checked cumulatively rather than one at a time.
+        $requestedByDetail = [];
+        foreach ($requestDetails as $row) {
+            $poDetailId = $row['purchase_order_detail_id'] ?? null;
+            if (! $poDetailId) {
+                continue;
+            }
+            $poDetailId = (int) $poDetailId;
+
+            $detail = $lockedDetails->get($poDetailId);
+            if (! $detail) {
+                abort(422, "One of this GRN's lines references a Purchase Order detail that does not belong to the selected Purchase Order.");
+            }
+
+            $rowProductId = (int) ($row['product_id'] ?? 0);
+            $rowVariantId = $row['product_variant_id'] ?? null;
+            $rowVariantId = $rowVariantId === null ? null : (int) $rowVariantId;
+            if ((int) $detail->product_id !== $rowProductId || (int) ($detail->product_variant_id ?? 0) !== (int) ($rowVariantId ?? 0)) {
+                abort(422, 'One of this GRN\'s lines does not match the product/variant of the Purchase Order line it references.');
+            }
+
+            $qty = (float) ($row['quantity'] ?? 0);
+            $unitId = $row['purchase_unit_id'] ?? null;
+            $baseQty = $qty;
+            if ($unitId) {
+                $unit = Unit::find($unitId);
+                if ($unit) {
+                    $baseQty = $unit->operator === '/'
+                        ? $qty / ($unit->operator_value ?: 1)
+                        : $qty * ($unit->operator_value ?: 1);
+                }
+            }
+
+            $requestedByDetail[$poDetailId] = ($requestedByDetail[$poDetailId] ?? 0.0) + $baseQty;
+        }
+
+        $problems = [];
+        foreach ($requestedByDetail as $poDetailId => $attempted) {
+            $detail = $lockedDetails->get($poDetailId);
+            $remaining = (float) $detail->quantity - (float) $detail->received_quantity;
+            if ($attempted - $remaining > 0.0001) {
+                $productName = optional($detail->product)->name ?: 'Product #'.$detail->product_id;
+                $problems[] = sprintf(
+                    '%s: ordered %s, already received %s, attempted %s, remaining %s',
+                    $productName,
+                    number_format((float) $detail->quantity, 2),
+                    number_format((float) $detail->received_quantity, 2),
+                    number_format($attempted, 2),
+                    number_format(max($remaining, 0.0), 2)
+                );
+            }
+        }
+
+        if ($problems !== []) {
+            abort(422, 'Cannot receive this GRN because it exceeds the Purchase Order\'s remaining quantity: '.implode(' | ', $problems));
+        }
     }
 
     /**

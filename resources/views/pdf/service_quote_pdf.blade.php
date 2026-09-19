@@ -91,6 +91,12 @@
                             <div><strong>Phone:</strong> {{$setting['CompanyPhone']}}</div>
                             <div><strong>Email:</strong> {{$setting['email']}}</div>
                             <div><strong>Address:</strong> {{$setting['CompanyAdress']}}</div>
+                            @if(!empty($setting['vat_number']))
+                            <div><strong>VAT/BIN No:</strong> {{$setting['vat_number']}}</div>
+                            @endif
+                            @if(!empty($setting['website']))
+                            <div><strong>Website:</strong> {{$setting['website']}}</div>
+                            @endif
                         </div>
                     </div>
                 </div>

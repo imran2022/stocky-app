@@ -46,6 +46,14 @@
             <template #icon><PrinterOutlined /></template>
             {{ $t('print') }}
           </a-button>
+          <a-dropdown-button :loading="copyingPublicLink" @click="copyPublicLink">
+            <LinkOutlined /> Public Link
+            <template #overlay>
+              <a-menu @click="onPublicLinkMenuClick">
+                <a-menu-item key="regenerate">Regenerate Link (invalidates the old one)</a-menu-item>
+              </a-menu>
+            </template>
+          </a-dropdown-button>
           <a-button
             v-if="auth.can('Sales_delete') && sale.sale_has_return === 'no'"
             danger
@@ -215,7 +223,7 @@ import { useI18n } from 'vue-i18n';
 import {
   ArrowLeftOutlined, PrinterOutlined, EditOutlined, DeleteOutlined,
   ExclamationCircleOutlined, MailOutlined, MessageOutlined, FilePdfOutlined,
-  TagOutlined, UnorderedListOutlined,
+  TagOutlined, UnorderedListOutlined, LinkOutlined,
 } from '@ant-design/icons-vue';
 import PageHeader from '../../components/PageHeader.vue';
 import { useFormat } from '../../composables/useFormat';
@@ -244,6 +252,7 @@ const sendingEmail = ref(false);
 const sendingSms = ref(false);
 const downloadingPdf = ref(false);
 const downloadingLabel = ref(false);
+const copyingPublicLink = ref(false);
 const downloadingPackingList = ref(false);
 
 const num = v => {
@@ -311,6 +320,90 @@ async function downloadPdf() {
   } finally {
     downloadingPdf.value = false;
   }
+}
+
+// Public Invoice URL: fetches (creating on first use) a no-login,
+// unguessable link to this invoice's PDF and copies it to the clipboard.
+// The link never expires on its own — if it's ever shared somewhere it
+// shouldn't have been, use the dropdown's "Regenerate" to invalidate it
+// and issue a new one.
+//
+// navigator.clipboard needs a secure context (HTTPS, or the literal
+// hostname "localhost") — it silently throws on a plain-HTTP custom
+// hostname like this site's own stocky.test, which is exactly the setup
+// this was first tested on. Falls back to the older execCommand('copy')
+// approach (works over plain HTTP), and if even that fails, shows the
+// link in a dialog so it can be selected and copied by hand rather than
+// leaving the person with nothing.
+async function copyToClipboard(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (e) {
+    // fall through to the fallback below
+  }
+  try {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(textarea);
+    return ok;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function copyPublicLink() {
+  copyingPublicLink.value = true;
+  try {
+    const data = await http.get(`sales/${sale.value.id}/public-link`);
+    if (await copyToClipboard(data.url)) {
+      message.success('Public invoice link copied to clipboard');
+    } else {
+      Modal.info({ title: 'Public Invoice Link', content: data.url });
+    }
+  } catch (e) {
+    message.error(t('InvalidData'));
+  } finally {
+    copyingPublicLink.value = false;
+  }
+}
+
+function onPublicLinkMenuClick({ key }) {
+  if (key === 'regenerate') regeneratePublicLink();
+}
+
+function regeneratePublicLink() {
+  Modal.confirm({
+    title: 'Regenerate public link?',
+    icon: createVNode(ExclamationCircleOutlined),
+    content: 'The old link will stop working immediately. Anyone who still has it (e.g. in an old email) will no longer be able to open this invoice.',
+    okText: 'Regenerate',
+    okType: 'danger',
+    cancelText: t('Delete_cancelButtonText'),
+    async onOk() {
+      copyingPublicLink.value = true;
+      try {
+        const data = await http.post(`sales/${sale.value.id}/public-link/regenerate`);
+        if (await copyToClipboard(data.url)) {
+          message.success('New public invoice link copied to clipboard');
+        } else {
+          Modal.info({ title: 'New Public Invoice Link', content: data.url });
+        }
+      } catch (e) {
+        message.error(t('InvalidData'));
+      } finally {
+        copyingPublicLink.value = false;
+      }
+    },
+  });
 }
 
 async function downloadShippingLabel() {

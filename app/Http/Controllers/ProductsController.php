@@ -30,6 +30,7 @@ use App\Models\PurchaseDetail;
 use App\Models\SaleDetail;
 use App\Services\ProductGalleryService;
 use App\Services\Custom\ProductInsightService;
+use App\Services\Custom\ProductMovementLedgerService;
 use App\Services\WholesalePricingService;
 use App\utils\helpers;
 use Carbon\Carbon;
@@ -4500,6 +4501,31 @@ class ProductsController extends BaseController
             ->get(['id', 'name', 'code']);
 
         return response()->json(['products' => $products]);
+    }
+
+    // -------------- movement_ledger ------------------\\
+
+    public function movement_ledger(Request $request)
+    {
+        $this->authorizeForUser($request->user('api'), 'products_view', Product::class);
+
+        $request->validate([
+            'product_id' => 'required|integer|exists:products,id',
+            'product_variant_id' => 'nullable|integer',
+            'warehouse_id' => 'nullable|integer',
+            'date_from' => 'nullable|date',
+            'date_to' => 'nullable|date',
+        ]);
+
+        $result = ProductMovementLedgerService::build(
+            (int) $request->input('product_id'),
+            $request->filled('product_variant_id') ? (int) $request->input('product_variant_id') : null,
+            $request->filled('warehouse_id') ? (int) $request->input('warehouse_id') : null,
+            $request->input('date_from'),
+            $request->input('date_to')
+        );
+
+        return response()->json($result);
     }
 
     // -------------- get_products_materiels ------------------\\

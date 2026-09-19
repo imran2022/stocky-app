@@ -17,6 +17,7 @@ use App\Models\PurchaseReturn;
 use App\Models\Role;
 use App\Models\Setting;
 use App\Models\sms_gateway;
+use App\Models\PurchaseOrder;
 use App\Models\SMSMessage;
 use App\Models\Unit;
 use App\Models\User;
@@ -226,13 +227,33 @@ class PurchasesController extends BaseController
         // reference is rejected fast rather than after partially creating
         // the GRN. See PurchaseOrderReceiptService::validateReceivablePo()
         // for the exact checks (existence, warehouse scope, receivable
-        // status, warehouse match).
+        // status, warehouse match, supplier match). This is a fast
+        // precheck only — it does not lock anything, so it cannot catch a
+        // concurrent over-receipt by itself. See the locked, authoritative
+        // recheck inside the transaction below.
         app(PurchaseOrderReceiptService::class)->validateReceivablePo(
             $request->purchase_order_id,
-            (int) $request->warehouse_id
+            (int) $request->warehouse_id,
+            (int) $request->supplier_id
         );
 
         \DB::transaction(function () use ($request) {
+            // Phase 1.4: authoritative, row-locked re-check — must run
+            // before any row for this GRN is written. Locks the PO and its
+            // referenced detail rows for the rest of this transaction, then
+            // rejects the entire GRN (HTTP 422, before mutation) if it would
+            // receive more than the PO's locked remaining quantity on any
+            // line. No-op for a GRN with no purchase_order_id, and for one
+            // saved as pending/ordered (nothing is received yet, matching
+            // why such a GRN also doesn't move stock below).
+            if ($request->purchase_order_id && $request->statut === 'received') {
+                $po = PurchaseOrder::whereNull('deleted_at')->find($request->purchase_order_id);
+                if (! $po) {
+                    abort(422, 'The selected Purchase Order could not be found.');
+                }
+                app(PurchaseOrderReceiptService::class)->lockAndValidateReceiptLines($po, $request['details'] ?? []);
+            }
+
             $order = new Purchase;
 
             $order->date = $request->date;
@@ -395,6 +416,26 @@ class PurchasesController extends BaseController
             // Backward compatibility: If record_view is null, fall back to role permission check
             $view_records = $user->hasRecordView();
             $current_Purchase = Purchase::findOrFail($id);
+
+            // Phase 1.4 safe-edit guard: this update() method does not
+            // reconcile a PO-linked GRN's old/new receipt contribution (see
+            // CLAUDE_PO_GRN_LIFECYCLE_AUDIT_AND_PHASE1_4_HANDOFF.md, P0 #1).
+            // Rather than let an edit silently desync the linked Purchase
+            // Order's received_quantity/status from actual stock, block it
+            // outright here — the UI already tells the user to delete and
+            // recreate a received linked GRN instead of editing it. This
+            // blocks BOTH directions of the unsafe case: editing a GRN that
+            // is already linked+received, and editing a linked GRN so that
+            // it newly becomes 'received' (which would move stock via the
+            // blocks further down in this method without ever calling
+            // PurchaseOrderReceiptService::applyReceipt()). Editing a linked
+            // GRN that stays pending/ordered on both sides is unaffected —
+            // no stock or PO contribution has happened yet either way.
+            if ($current_Purchase->purchase_order_id
+                && ($current_Purchase->statut === 'received' || $request->statut === 'received')) {
+                abort(422, 'This GRN is linked to a Purchase Order and involves a "received" state. '
+                    .'Editing a received, PO-linked GRN is not supported — delete it and create a new one instead.');
+            }
 
              /**
              * Warehouses restriction
@@ -675,26 +716,6 @@ class PurchasesController extends BaseController
     {
         $this->authorizeForUser($request->user('api'), 'delete', Purchase::class);
 
-        // Stock-safety pre-flight — deliberately BEFORE the transaction
-        // opens (and outside its closure entirely). A response returned
-        // from inside a DB::transaction(function(){...}) closure is
-        // silently discarded by this method's own unconditional success
-        // response after the transaction block (see the pre-existing
-        // PurchaseReturn check just below, which has this exact same
-        // latent issue — real but out of scope to fix here since it
-        // predates this change and isn't a data-safety bug, just a
-        // misleading success message). This check must not repeat that
-        // mistake, since its entire purpose is to actually reach the user.
-        $preflightPurchase = Purchase::findOrFail($id);
-        $preflightDetails = PurchaseDetail::where('purchase_id', $id)->get();
-        $stockProblems = app(GrnDeletionSafetyService::class)->checkSafeToDelete($preflightPurchase, $preflightDetails);
-        if (! empty($stockProblems)) {
-            return response()->json([
-                'success' => false,
-                'message' => 'This GRN cannot be deleted — it would make stock negative for: '.implode(' | ', $stockProblems),
-            ], 422);
-        }
-
         \DB::transaction(function () use ($id, $request) {
             $user = Auth::user();
             // New way: Check user's record_view field (user-level boolean)
@@ -738,6 +759,11 @@ class PurchasesController extends BaseController
                     // Check If User->id === current_Purchase->id
                     $this->authorizeForUser($request->user('api'), 'check_record', $current_Purchase);
                 }
+
+                // Run inside this same transaction. The service aggregates
+                // duplicate lines and locks the relevant stock rows until all
+                // reversal writes below commit.
+                app(GrnDeletionSafetyService::class)->assertSafeToDelete(collect([$current_Purchase]));
 
                 foreach ($old_purchase_details as $key => $value) {
 
@@ -844,37 +870,28 @@ class PurchasesController extends BaseController
 
         $this->authorizeForUser($request->user('api'), 'delete', Purchase::class);
 
-        // Stock-safety pre-flight for the whole batch, before the
-        // transaction opens — same reasoning as destroy() above. Checking
-        // every selected GRN up front (rather than stopping at the first
-        // problem) means one clear message listing every affected product
-        // across the whole selection, instead of the user fixing one and
-        // re-discovering the next on a second attempt.
-        $allStockProblems = [];
-        foreach ((array) $request->selectedIds as $purchaseId) {
-            $preflightPurchase = Purchase::find($purchaseId);
-            if (! $preflightPurchase) {
-                continue;
-            }
-            $preflightDetails = PurchaseDetail::where('purchase_id', $purchaseId)->get();
-            $problems = app(GrnDeletionSafetyService::class)->checkSafeToDelete($preflightPurchase, $preflightDetails);
-            foreach ($problems as $problem) {
-                $allStockProblems[] = "GRN {$preflightPurchase->Ref}: {$problem}";
-            }
-        }
-        if (! empty($allStockProblems)) {
-            return response()->json([
-                'success' => false,
-                'message' => 'These GRNs cannot be deleted — stock would go negative: '.implode(' | ', $allStockProblems),
-            ], 422);
-        }
-
         \DB::transaction(function () use ($request) {
             $user = Auth::user();
             // New way: Check user's record_view field (user-level boolean)
             // Backward compatibility: If record_view is null, fall back to role permission check
             $view_records = $user->hasRecordView();
             $selectedIds = $request->selectedIds;
+
+            // Authorize the complete selection before checking or mutating
+            // stock, then make one cumulative preflight across all GRNs.
+            $preflightPurchases = collect();
+            foreach ($selectedIds as $selectedId) {
+                $candidate = Purchase::whereNull('deleted_at')->findOrFail($selectedId);
+                $this->abortIfDocumentWarehouseDenied($candidate);
+                if (! $view_records) {
+                    $this->authorizeForUser($request->user('api'), 'check_record', $candidate);
+                }
+                if (PurchaseReturn::where('purchase_id', $selectedId)->whereNull('deleted_at')->exists()) {
+                    abort(422, 'A selected GRN has a Purchase Return and cannot be deleted.');
+                }
+                $preflightPurchases->push($candidate);
+            }
+            app(GrnDeletionSafetyService::class)->assertSafeToDelete($preflightPurchases);
 
             foreach ($selectedIds as $purchase_id) {
 

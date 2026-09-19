@@ -52,6 +52,9 @@
     </a-row>
 
     <a-tabs v-model:activeKey="tab">
+      <a-tab-pane key="movement_history" tab="Movement History">
+        <MovementHistoryCard :product-id="Number(id)" style="margin-top: 0" />
+      </a-tab-pane>
       <a-tab-pane v-for="pane in panes" :key="pane.key" :tab="$t(pane.label)">
         <ReportTab
           :endpoint="pane.endpoint" :rows-key="pane.rowsKey" row-key="Ref"
@@ -92,6 +95,7 @@ import { useI18n } from 'vue-i18n';
 import PageHeader from '../../components/PageHeader.vue';
 import ReportTab from '../../components/ReportTab.vue';
 import ViewCurrencySelect from '../../components/ViewCurrencySelect.vue';
+import MovementHistoryCard from '../products/MovementHistoryCard.vue';
 import { useFormat } from '../../composables/useFormat';
 import http from '../../lib/http';
 
