@@ -83,8 +83,10 @@
                     <div class="hub-title-tag">Sender (From):</div>
                     <div style="font-size: 9pt; font-weight: bold; color: #0f172a;">{{ $company['CompanyName'] }}</div>
                     @if(!empty($company['CompanyAdress']))<div style="font-size: 7.5pt; color: #475569; margin-top: 2px;">{{ $company['CompanyAdress'] }}</div>@endif
-                    @if(!empty($company['CompanyPhone']))<div style="font-size: 7.5pt; color: #475569; font-weight: bold; margin-top: 2px;">Phone: {{ $company['CompanyPhone'] }}</div>@endif
                     @if(!empty($company['vat_number']))<div style="font-size: 7pt; color: #64748b; margin-top: 1px;">VAT/BIN: {{ $company['vat_number'] }}</div>@endif
+                    @if(!empty($company['CompanyPhone']))<div style="font-size: 7.5pt; color: #475569; font-weight: bold; margin-top: 2px;">Phone: {{ $company['CompanyPhone'] }}</div>@endif
+                    @if(!empty($company['email']))<div style="font-size: 7.5pt; color: #475569; margin-top: 2px;">Mail: {{ $company['email'] }}</div>@endif
+                    @if(!empty($company['website']))<div style="font-size: 7pt; color: #64748b; margin-top: 1px;">Website: {{ $company['website'] }}</div>@endif
                 </td>
             </tr>
         </table>

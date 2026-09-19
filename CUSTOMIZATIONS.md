@@ -3519,3 +3519,64 @@ text via the same case-insensitive lookup logic the frontend uses (no
 browser available in this sandbox to screenshot, so verified at the
 data layer instead). DB confirmed back to its 7-client/16-sale baseline
 with no leftover temp files after the run.
+
+## Build M5 — Company header (VAT/BIN, Website) on "Modern"-family PDFs + shipping section removed from invoice (2026-09-19)
+
+**What was asked:** the Modern Sale Invoice's top-left header only showed
+company name/address/phone/email — no VAT/BIN number, no website — even
+though the Classic invoice (and Purchase, Quotation, Return PDFs, etc.)
+already showed both since Build K1. Wanted the same treatment applied to
+"other PDF documents" too. Also asked to remove the embedded shipping-
+label section from the bottom of the Modern Sale Invoice.
+
+**Root cause:** Build K1 (VAT/BIN + Website) only touched the *Classic*
+company "From" box design. The separate "Modern" family of templates —
+built later (L3–L6, M4), which use a plain top-left header instead of
+that boxed design — never got the same fields added.
+
+**Fix — new header format** (address, then one line per field, matching
+what the user showed):
+```
+<Company Address>
+VAT/BIN: <vat_number>      (only when set)
+Phone: <CompanyPhone>
+Mail: <email>
+Website: <website>          (only when set)
+```
+Applied to all four "Modern"-family PDFs that share this header design:
+- `resources/views/pdf/sale_pdf_modern.blade.php` (the Modern Sale Invoice).
+- `resources/views/pdf/packing_list.blade.php`.
+- `resources/views/pdf/customer_statement_modern.blade.php` (Build M4).
+- `resources/views/pdf/shipping_label.blade.php` — already had VAT/BIN
+  (just Phone, no Mail/Website); added Mail and Website, reordered to
+  match the new standard order.
+
+The Classic-family PDFs (Sale, Purchase, Quotation, Returns, Service
+Job, etc.) already showed VAT/BIN and Website via Build K1's "From" box
+— left untouched, nothing to fix there.
+
+**Shipping section removed from the Modern Sale Invoice:** the invoice
+template had an entire second "DELIVERY INFORMATION" shipping-label
+design embedded at the bottom (duplicate of the standalone
+`shipping_label.blade.php`, which still exists and is downloaded
+separately from the Sales list). Removed the HTML block and its CSS
+(`.shipping-wrapper`, `.cut-line`, `.hub-label-box`, `.hub-cell`,
+`.hub-title-tag`) entirely — the invoice now ends after the thank-you/
+footer block. Nothing referenced these classes elsewhere (no PDF
+customizer toggle was wired to it), so this is a clean removal.
+
+**Files touched:**
+- `resources/views/pdf/sale_pdf_modern.blade.php`,
+  `resources/views/pdf/packing_list.blade.php`,
+  `resources/views/pdf/customer_statement_modern.blade.php`,
+  `resources/views/pdf/shipping_label.blade.php`.
+- New: `tests/Regression/build_m5_company_header_and_shipping_removal.php`.
+
+**Verification:** a real, DB-backed test renders all four templates
+with real Setting data (this sandbox's VAT number and website already
+match the user's own example exactly) and confirms each header shows
+"VAT/BIN: …", "Phone: …", "Mail: …", "Website: …" in order, and that
+the Modern Sale Invoice's rendered HTML no longer contains "DELIVERY
+INFORMATION" or any of the removed CSS class names. Re-ran L3–L6 and M3
+regression gates plus M4 — all still pass, confirming the header/CSS
+changes didn't disturb anything else in these shared templates.

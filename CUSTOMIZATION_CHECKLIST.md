@@ -1863,3 +1863,36 @@ the Translations UI; only adds/updates the defaults.)
 
 **Regression test:** `tests/Regression/build_m4_customer_statement.php`
 (extended — now also opens the real generated `.xlsx` with PhpSpreadsheet).
+
+## Build M5 — Company header (VAT/BIN, Website) + shipping section removed
+
+**Files:**
+- `resources/views/pdf/sale_pdf_modern.blade.php`
+- `resources/views/pdf/packing_list.blade.php`
+- `resources/views/pdf/customer_statement_modern.blade.php`
+- `resources/views/pdf/shipping_label.blade.php`
+- New: `tests/Regression/build_m5_company_header_and_shipping_removal.php`
+
+**Prerequisite:** Settings → Company (or wherever VAT number / Website
+are set — same fields the Classic invoice already reads) must have a
+VAT/BIN number and Website filled in for these lines to show (both are
+optional; the line just doesn't render when empty).
+
+**How to verify:**
+- [ ] Download/print a Modern-layout Sale Invoice — top-left header now
+      shows Address, VAT/BIN, Phone, Mail, Website (address/phone/mail
+      always show; VAT/BIN and Website only when set).
+- [ ] Same Modern invoice: the old "DELIVERY INFORMATION" shipping-
+      label block at the bottom is completely gone — the invoice now
+      ends right after the thank-you/footer text.
+- [ ] Download a Packing List — same header fields now present.
+- [ ] Download a Customer Statement PDF (Build M4) — same header
+      fields now present.
+- [ ] Download the standalone Shipping Label (from the Sales list) —
+      now also shows Mail and Website (it already had VAT/BIN and
+      Phone).
+- [ ] The Classic-layout Sale Invoice and other Classic PDFs are
+      unchanged (they already had this).
+
+**Regression test:**
+`tests/Regression/build_m5_company_header_and_shipping_removal.php`.

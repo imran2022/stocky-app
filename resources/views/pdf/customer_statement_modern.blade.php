@@ -109,7 +109,14 @@
                         <td style="vertical-align: top; padding-left: 12px;">
                             <div style="font-size: 11pt; font-weight: bold; color: #0f172a;">{{ $setting['CompanyName'] ?? '' }}</div>
                             <div style="font-size: 8pt; color: #64748b;">{{ $setting['CompanyAdress'] ?? '' }}</div>
-                            <div style="font-size: 8pt; color: #64748b;">{{ $setting['CompanyPhone'] ?? '' }} | {{ $setting['email'] ?? '' }}</div>
+                            @if(!empty($setting['vat_number']))
+                            <div style="font-size: 8pt; color: #64748b;">VAT/BIN: {{ $setting['vat_number'] }}</div>
+                            @endif
+                            <div style="font-size: 8pt; color: #64748b;">Phone: {{ $setting['CompanyPhone'] ?? '' }}</div>
+                            <div style="font-size: 8pt; color: #64748b;">Mail: {{ $setting['email'] ?? '' }}</div>
+                            @if(!empty($setting['website']))
+                            <div style="font-size: 8pt; color: #64748b;">Website: {{ $setting['website'] }}</div>
+                            @endif
                         </td>
                     </tr>
                 </table>

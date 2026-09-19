@@ -159,58 +159,6 @@
             break-inside: avoid;
         }
         .calc-container td { padding: 4px 12px; border-bottom: 1px solid #f1f5f9; }
-
-        /* ================================================================= */
-        /* 📦 LIGHTWEIGHT COURIER HUB SHIPPING LABEL                        */
-        /* ================================================================= */
-        .shipping-wrapper {
-            margin-top: 35px;
-            page-break-inside: avoid; 
-            break-inside: avoid;
-        }
-        
-        .cut-line {
-            border-top: 2px dashed #94a3b8;
-            text-align: center;
-            height: 14px;
-            margin-bottom: 12px;
-            position: relative;
-        }
-        .cut-line span {
-            position: absolute;
-            top: -12px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: #fff;
-            padding: 0 15px;
-            font-size: 8.5pt;
-            font-weight: bold;
-            color: #64748b;
-            text-transform: uppercase;
-            letter-spacing: 1.5px;
-        }
-        
-        /* 🟢 Halka & Soft Light Outer Box (With 10px Smooth Corner Radius) */
-        .hub-label-box {
-            border: 1px solid #cbd5e1; /* Subtle & thin grey border */
-            border-radius: 10px;
-            background: #ffffff;
-            overflow: hidden;
-        }
-
-        .hub-cell {
-            padding: 12px 14px;
-            vertical-align: top;
-        }
-
-        .hub-title-tag {
-            font-size: 7.5pt;
-            font-weight: bold;
-            color: #64748b;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 4px;
-        }
     </style>
 </head>
 <body>
@@ -235,7 +183,14 @@
                         <td style="vertical-align: top; padding-left: 12px;">
                             <div style="font-size: 11pt; font-weight: bold; color: #0f172a;">{{$setting['CompanyName']}}</div>
                             <div style="font-size: 8pt; color: #64748b;">{{$setting['CompanyAdress']}}</div>
-                            <div style="font-size: 8pt; color: #64748b;">{{$setting['CompanyPhone']}} | {{$setting['email']}}</div>
+                            @if(!empty($setting['vat_number']))
+                            <div style="font-size: 8pt; color: #64748b;">VAT/BIN: {{$setting['vat_number']}}</div>
+                            @endif
+                            <div style="font-size: 8pt; color: #64748b;">Phone: {{$setting['CompanyPhone']}}</div>
+                            <div style="font-size: 8pt; color: #64748b;">Mail: {{$setting['email']}}</div>
+                            @if(!empty($setting['website']))
+                            <div style="font-size: 8pt; color: #64748b;">Website: {{$setting['website']}}</div>
+                            @endif
                         </td>
                     </tr>
                 </table>
@@ -406,65 +361,6 @@
             <p style="font-size: 7.5pt; color: #6b7280; line-height: 1.5; margin: 0;">{{ $pdfT['footer_text'] !== '' ? $pdfT['footer_text'] : $setting['invoice_footer'] }}</p>
         </div>
         @endif
-    </div>
-
-
-    <div class="shipping-wrapper">
-        <div class="cut-line">
-        </div>
-        
-        <div class="hub-label-box">
-            
-            <div style="background: #ffffff; color: #0f172a; border-bottom: 1px solid #cbd5e1; padding: 10px 14px; font-size: 11pt; font-weight: 800; letter-spacing: 1px; text-transform: uppercase;">
-                DELIVERY INFORMATION
-            </div>
-
-            <table style="width: 100%; border-bottom: 1px solid #e2e8f0;">
-                <tr>
-                    <td style="width: 50%; border-right: 1px solid #e2e8f0;" class="hub-cell">
-                        <div class="hub-title-tag">Sender (From):</div>
-                        <div style="font-size: 9.5pt; font-weight: bold; color: #0f172a;">{{$setting['CompanyName']}}</div>
-                        <div style="font-size: 8pt; color: #475569; margin-top: 2px;">{{$setting['CompanyAdress']}}</div>
-                        <div style="font-size: 8pt; color: #475569; font-weight: bold; margin-top: 2px;">Phone: {{$setting['CompanyPhone']}}</div>
-                    </td>
-                    <td style="width: 50%;" class="hub-cell">
-                        <div class="hub-title-tag">Shipment Ref:</div>
-                        <div style="font-size: 8.5pt; color: #1e293b; line-height: 1.4;">
-                            <strong>Invoice No:</strong> {{$sale['Ref']}}<br>
-                            <strong>Date:</strong> {{$sale['date']}}<br>
-                            <div style="font-size: 9pt; font-weight: bold; color: #0f172a; margin-top: 4px; border-top: 1px dashed #cbd5e1; padding-top: 3px;">
-                                <strong>Order Total:</strong> {{$symbol}} {{formatPrice($sale['GrandTotal'], 2, $priceFormat)}}
-                            </div>
-                        </div>
-                    </td>
-                </tr>
-            </table>
-
-            <table style="width: 100%;">
-                <tr>
-                    <td style="width: 55%; border-right: 1px solid #e2e8f0;" class="hub-cell">
-                        <div class="hub-title-tag" style="color: #2563eb; font-weight: bold;">Ship To (Receiver):</div>
-                        <div style="font-size: 11pt; font-weight: bold; color: #0f172a; line-height: 1.2;">{{$sale['client_name']}}</div>
-                        <div style="font-size: 9.5pt; color: #334155; font-weight: 500; margin-top: 4px; line-height: 1.4;">{{$sale['client_adr']}}</div>
-                        <div style="font-size: 10.5pt; font-weight: bold; color: #0f172a; margin-top: 6px;">Phone: {{$sale['client_phone']}}</div>
-                    </td>
-                    
-                    <td style="width: 45%; padding: 15px; vertical-align: middle; text-align: center;">
-                        @if(in_array(strtoupper($sale['payment_status']), ['PARTIAL', 'UNPAID', 'NOT PAID', 'DUE']) && (float)$sale['due'] > 0)
-                            <div style="background: #fff5f5; border: 1px dashed #e11d48; border-radius: 6px; padding: 12px 6px;">
-                                <span style="font-size: 8pt; font-weight: bold; color: #991b1b; text-transform: uppercase; display: block; letter-spacing: 0.5px; margin-bottom: 2px;">Cash On Delivery (COD)</span>
-                                <span style="font-size: 14pt; font-weight: 900; color: #e11d48;">{{$symbol}} {{formatPrice($sale['due'], 2, $priceFormat)}}</span>
-                            </div>
-                        @else
-                            <div style="background: #f0fdf4; border: 1px dashed #166534; border-radius: 6px; padding: 15px 6px;">
-                                <span style="font-size: 12pt; font-weight: 900; color: #166534; text-transform: uppercase; letter-spacing: 2px; display: block;">PAID</span>
-                            </div>
-                        @endif
-                    </td>
-                </tr>
-            </table>
-
-        </div>
     </div>
 
 </body>
