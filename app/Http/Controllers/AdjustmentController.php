@@ -1066,7 +1066,7 @@ class AdjustmentController extends BaseController
                 $data['product_id'] = $detail->product_id;
                 $data['product_variant_id'] = $detail->product_variant_id;
                 $data['code'] = $productsVariants->code;
-                $data['name'] = '['.$productsVariants->name.']'.$detail['product']['name'];
+                $data['name'] = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
                 $data['current'] = $item_product ? $item_product->qte : 0;
                 $data['type'] = $detail->type;
                 $data['unit'] = $detail['product']['unit']->ShortName;
@@ -1160,7 +1160,7 @@ class AdjustmentController extends BaseController
 
                 $data['quantity'] = $detail->quantity;
                 $data['code'] = $productsVariants->code;
-                $data['name'] = '['.$productsVariants->name.']'.$detail['product']['name'];
+                $data['name'] = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
                 $data['unit'] = $detail['product']['unit']->ShortName;
                 $data['type'] = $detail->type;
 
@@ -1217,7 +1217,7 @@ class AdjustmentController extends BaseController
 
                 $data['quantity'] = $detail->type == 'add' ? '+'.' '.number_format($detail->quantity, 2, '.', '') : '-'.' '.number_format($detail->quantity, 2, '.', '');
                 $data['code'] = $productsVariants->code;
-                $data['name'] = '['.$productsVariants->name.']'.$detail['product']['name'];
+                $data['name'] = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
                 $data['unit'] = $detail['product']['unit']->ShortName;
 
                 if ($productsVariants) {

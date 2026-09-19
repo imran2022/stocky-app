@@ -2141,8 +2141,8 @@ class ProductsController extends BaseController
                 $item['product_variant_id'] = $product_warehouse->product_variant_id;
 
                 $item['code'] = $product_warehouse['productVariant']->code;
-                $item['Variant'] = '['.$product_warehouse['productVariant']->name.']'.$product_warehouse['product']->name;
-                $item['name'] = '['.$product_warehouse['productVariant']->name.']'.$product_warehouse['product']->name;
+                $item['Variant'] = \App\Support\ProductDisplayName::format($product_warehouse['product']->name, $product_warehouse['productVariant']->name);
+                $item['name'] = \App\Support\ProductDisplayName::format($product_warehouse['product']->name, $product_warehouse['productVariant']->name);
                 $item['barcode'] = $product_warehouse['productVariant']->code;
 
                 $product_price = $product_warehouse['productVariant']->price;
@@ -2569,7 +2569,7 @@ class ProductsController extends BaseController
             $product_price = $product_variant_data['price'];
             $product_cost = $product_variant_data['cost'];
             $item['code'] = $product_variant_data['code'];
-            $item['name'] = '['.$product_variant_data['name'].']'.$Product_data['name'];
+            $item['name'] = \App\Support\ProductDisplayName::format($Product_data['name'], $product_variant_data['name']);
 
             // product is_service
         } else {
@@ -2907,7 +2907,7 @@ class ProductsController extends BaseController
                 if ($product_warehouse->qte <= $product_warehouse['product']->stock_alert) {
                     if ($product_warehouse->product_variant_id !== null) {
                         $item['code'] = $product_warehouse['productVariant']->code;
-                        $item['name'] = '['.$product_warehouse['productVariant']->name.']'.$product_warehouse['product']->name;
+                        $item['name'] = \App\Support\ProductDisplayName::format($product_warehouse['product']->name, $product_warehouse['productVariant']->name);
                     } else {
                         $item['code'] = $product_warehouse['product']->code;
                         $item['name'] = $product_warehouse['product']->name;
@@ -4441,7 +4441,7 @@ class ProductsController extends BaseController
 
             if ($product->productVariantID) {
                 $variant = ProductVariant::where('product_id', $product->productID)->where('id', $product->productVariantID)->first();
-                $item['product_name'] = $variant->name.'-'.$product->name;
+                $item['product_name'] = \App\Support\ProductDisplayName::format($product->name, $variant->name);
             } else {
                 $item['product_name'] = $product->name;
             }

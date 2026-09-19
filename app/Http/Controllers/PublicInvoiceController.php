@@ -153,7 +153,7 @@ class PublicInvoiceController extends BaseController
                     : optional($d->product)->unitSale;
 
                 return [
-                    'name' => ($variant ? '['.$variant->name.']' : '').($d->product->name ?? ''),
+                    'name' => \App\Support\ProductDisplayName::format($d->product->name ?? '', $variant?->name),
                     'code' => $variant ? $variant->code : ($d->product->code ?? ''),
                     'quantity' => (float) $d->quantity,
                     'unit' => $unit->ShortName ?? '',

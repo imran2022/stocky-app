@@ -1016,7 +1016,7 @@ class SalesReturnController extends BaseController
                     ->where('id', $detail->product_variant_id)->first();
 
                 $data['code'] = $productsVariants->code;
-                $data['name'] = '['.$productsVariants->name.']'.$detail['product']['name'];
+                $data['name'] = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
 
             } else {
                 $data['code'] = $detail['product']['code'];
@@ -1215,7 +1215,7 @@ class SalesReturnController extends BaseController
                 $item_product ? $data['del'] = 0 : $data['del'] = 1;
                 $data['product_variant_id'] = $detail->product_variant_id;
                 $data['code'] = $productsVariants->code;
-                $data['name'] = '['.$productsVariants->name.']'.$detail['product']['name'];
+                $data['name'] = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
 
             } else {
                 $item_product = product_warehouse::where('product_id', $detail->product_id)
@@ -1343,7 +1343,7 @@ class SalesReturnController extends BaseController
                     ->where('id', $detail->product_variant_id)
                     ->first();
                 $data['code'] = $productsVariants->code;
-                $data['name'] = '['.$productsVariants->name.']'.$detail['product']['name'];
+                $data['name'] = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
             } else {
                 $data['code'] = $detail['product']['code'];
                 $data['name'] = $detail['product']['name'];
@@ -1497,7 +1497,7 @@ class SalesReturnController extends BaseController
                 $data['product_variant_id'] = $detail->product_variant_id;
 
                 $data['code'] = $productsVariants->code;
-                $data['name'] = '['.$productsVariants->name.']'.$detail['product']['name'];
+                $data['name'] = \App\Support\ProductDisplayName::format($detail['product']['name'], $productsVariants->name);
 
             } else {
                 $item_product = product_warehouse::where('product_id', $detail->product_id)

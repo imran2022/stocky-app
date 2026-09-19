@@ -3850,3 +3850,36 @@ Payment Status — against hand-worked expected values, plus the
 summary-card totals and the Status/"Show Outstanding Only" filters.
 Re-ran L1–L6, A, A.1, B, C, D1, D2 and M1, M3–M7 regression gates —
 all still pass.
+
+---
+
+## Build N1 — Readable Product + Variant Display Names (2026-09-19)
+
+**Request:** replace the visually awkward `[Grey]Apple Macbook 2026`
+format with `Apple Macbook 2026 - Variant: Grey` in item lists, POS,
+Sale Create, suggestions, reports, documents, and every other user-facing
+surface.
+
+**Root cause:** product/variant labels were assembled independently in dozens
+of controller and service paths. Most used `[Variant]Product`, while a few
+used `Product - Variant` or returned only the variant name. There was no shared
+display contract.
+
+**Fix:** added `App\Support\ProductDisplayName` as the single formatter. It
+keeps product and variant database fields separate and changes presentation
+only. Simple products remain unchanged; blank variants add no suffix; compound
+variant names such as `Blue / XL` remain intact.
+
+**Coverage:** Products/suggestions, POS, Sales, Purchases, Purchase Orders,
+Quotations, both Return flows, Transfers, Adjustments, Damage, Reports,
+public/portal invoices, online orders, kitchen orders, and Xero descriptions.
+
+**Files:** see `BUILD_N1_PRODUCT_VARIANT_DISPLAY_NAMES.md` and the release
+overlay manifest. New tests:
+
+- `tests/Unit/ProductDisplayNameTest.php`
+- `tests/Regression/build_n1_product_variant_display_name.php`
+
+**Database/frontend impact:** no migration, no stored-name rewrite, and no
+frontend component change. Production assets were rebuilt as a regression
+check because this is delivered with the complete customized application.
