@@ -173,6 +173,12 @@
                 </div>
               </div>
 
+              <!-- Delivery Info -->
+              <div v-if="docType === 'sale' && form.show_delivery_info" class="pv-note" style="margin-bottom: 10px;">
+                <b>Delivery Info</b>
+                <div>Warehouse: Dhaka HQ &nbsp;|&nbsp; Tracking Ref: DC01 &nbsp;|&nbsp; Zone: Dhaka &nbsp;|&nbsp; Courier: Pathao</div>
+              </div>
+
               <!-- Items table -->
               <table class="pv-table" :style="{ border: form.table_borders ? '1px solid #e5e7eb' : 'none' }">
                 <thead>
@@ -292,6 +298,7 @@ const sectionFields = computed(() => [
     { key: 'show_previous_dues', label: 'Previous Dues line', desc: 'The client’s outstanding balance before this sale. Printed only when it is greater than zero.' },
     { key: 'show_net_balance', label: 'Net Balance line', desc: 'Previous dues plus what is still due on this sale. Printed only when previous dues are greater than zero.' },
     { key: 'show_due_date', label: 'Due Date line', desc: 'This invoice’s own Payment Term due date. Printed only when Payment Terms & Due Dates is enabled in Settings and the sale has one.' },
+    { key: 'show_delivery_info', label: 'Delivery Info (Warehouse / Tracking Ref / Zone / Courier)', desc: 'Prints only the ones actually set on the sale — hidden entirely when none are set.' },
   ] : []),
 ]);
 

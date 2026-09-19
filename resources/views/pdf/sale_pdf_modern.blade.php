@@ -230,6 +230,28 @@
         </tr>
     </table>
 
+    @php
+        // Delivery / Shipment info (Build M6) — Warehouse / Tracking Ref /
+        // Zone / Courier, the same fields the Sale Detail page's header card
+        // shows. Only the ones actually set on this sale are printed.
+        $deliveryParts = [];
+        if (!empty($sale['warehouse'])) { $deliveryParts[] = ['Warehouse', $sale['warehouse']]; }
+        if (!empty($sale['tracking_ref'])) { $deliveryParts[] = ['Tracking Ref', $sale['tracking_ref']]; }
+        if (!empty($sale['zone_name'])) { $deliveryParts[] = ['Zone', $sale['zone_name']]; }
+        if (!empty($sale['courier_name'])) { $deliveryParts[] = ['Courier', $sale['courier_name']]; }
+    @endphp
+    @if(!empty($pdfT['show_delivery_info']) && count($deliveryParts))
+    <div style="margin-bottom: 15px; border: 1px solid #e2e8f0; border-radius: 6px; padding: 7px 12px; background: #f8fafc; page-break-inside: avoid;">
+        <span class="label" style="margin-bottom: 3px;">Delivery Info</span>
+        <div style="font-size: 8.5pt; color: #64748b;">
+            @foreach($deliveryParts as $i => $part)
+                @if($i > 0)<span style="color: #cbd5e1;">&nbsp;&nbsp;|&nbsp;&nbsp;</span>@endif
+                <strong style="color: #1e293b;">{{ $part[0] }}:</strong> {{ $part[1] }}
+            @endforeach
+        </div>
+    </div>
+    @endif
+
     <table class="product-table" style="margin-bottom: 15px;">
         <thead>
             <tr>

@@ -51,6 +51,13 @@ class PdfTemplate extends Model
         // quotation/purchase PDFs — harmless to carry on every doc type's
         // settings row for schema simplicity, same as the two rows above.
         'show_due_date' => true,
+        // Sale-only: Warehouse / Tracking Ref / Zone / Courier block (Build
+        // M6). Same fields already shown on the Sale Detail page's header
+        // card — printed on the invoice only when at least one of the four
+        // is actually set on the sale. No effect on quotation/purchase
+        // PDFs (harmless to carry on every doc type's settings row, same as
+        // the three rows above).
+        'show_delivery_info' => true,
         // Text overrides ('' = keep the translated default)
         'labels' => [
             'title' => '',

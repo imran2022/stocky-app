@@ -1896,3 +1896,25 @@ optional; the line just doesn't render when empty).
 
 **Regression test:**
 `tests/Regression/build_m5_company_header_and_shipping_removal.php`.
+
+---
+
+## Build M6 — Delivery Info on Sale Invoice PDF
+
+**How to verify:**
+- [ ] Open a sale that has a Tracking Ref, Zone and Courier set (Sale
+      Detail page shows these in its top-right card) → download/print
+      its Invoice PDF (either layout) → a "Delivery Info" box now
+      shows Warehouse, Tracking Ref, Zone and Courier.
+- [ ] Open a sale that has NO Tracking Ref/Zone/Courier set → its
+      Invoice PDF still shows the "Delivery Info" box, but with only
+      "Warehouse: …" — no empty Tracking Ref/Zone/Courier lines.
+- [ ] Settings → Invoice PDF → Sales Invoice → Sections → turn off
+      "Delivery Info" → save → re-download the same invoice → the
+      whole box is gone.
+- [ ] Quotation and Purchase PDFs are unaffected (no Delivery Info
+      section there — Warehouse/Tracking/Zone/Courier are Sale-only
+      concepts).
+
+**Regression test:**
+`tests/Regression/build_m6_invoice_delivery_info.php`.

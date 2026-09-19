@@ -3580,3 +3580,66 @@ the Modern Sale Invoice's rendered HTML no longer contains "DELIVERY
 INFORMATION" or any of the removed CSS class names. Re-ran L3–L6 and M3
 regression gates plus M4 — all still pass, confirming the header/CSS
 changes didn't disturb anything else in these shared templates.
+
+---
+
+## Build M6 — Delivery Info (Warehouse / Tracking Ref / Zone / Courier) on the Sale Invoice PDF (2026-09-19)
+
+**Request:** the Sale Detail page's header card already shows Warehouse,
+Tracking Ref, Zone and Courier (see the red-boxed area in the user's
+screenshot) — the user asked whether the same four fields could also
+print on the downloadable/printable Sale Invoice PDF, and how.
+
+**What shipped:** a new "Delivery Info" block on the Sale Invoice PDF,
+on BOTH layouts (Modern and Classic), showing only the fields that are
+actually set on that sale:
+- **Warehouse** — always set (required on every sale).
+- **Tracking Ref**, **Zone**, **Courier** — optional; each line is
+  simply left out when the sale doesn't have one, so a sale with none
+  of the three still shows a clean "Warehouse: …" line and nothing
+  else.
+
+Gated by a new PDF customizer toggle, **Settings → Invoice PDF →
+Sections → "Delivery Info (Warehouse / Tracking Ref / Zone /
+Courier)"** (`show_delivery_info`, default **on**) — same place as the
+existing Previous Dues / Net Balance / Due Date toggles, sale-only
+(no effect on Quotation/Purchase PDFs, same as those three).
+
+**Where the block sits:**
+- Modern layout: a light bordered box between the Customer/Date-&-
+  Status row and the items table.
+- Classic layout: same position, styled to match Classic's existing
+  bordered-box language (grey header line + light background), with
+  its own translation keys so it can be translated like the rest of
+  the Classic PDF.
+
+**Files touched:**
+- `app/Models/PdfTemplate.php` — new `show_delivery_info` default
+  (`true`).
+- `app/Http/Controllers/SalesController.php` — `Sale_PDF()`,
+  `Sale_PDF_Inline()`, and `renderSaleInvoiceHtml()` (used by the bulk
+  "Print Invoices" action) each now eager-load `warehouse`, `zone`,
+  `courier` and add `$sale['warehouse']`, `$sale['tracking_ref']`,
+  `$sale['zone_name']`, `$sale['courier_name']` — same field names
+  already used by `show()` for the Sale Detail page, so both pull from
+  the exact same source fields on the `sales` table
+  (`tracking_ref`, `zone_id`, `courier_id`) and their relations.
+- `resources/views/pdf/sale_pdf_modern.blade.php`,
+  `resources/views/pdf/sale_pdf.blade.php` — new Delivery Info block.
+- `resources/lang/en/pdf.php` — new keys: `delivery_info`,
+  `tracking_ref`, `zone`, `courier` (`warehouse` already existed).
+- `resources/src/pages/settings/InvoicePdfSettings.vue` — new
+  `show_delivery_info` toggle in the Sections panel (sale-only) + a
+  matching line in the Classic layout's live preview.
+- New: `tests/Regression/build_m6_invoice_delivery_info.php`.
+
+**Verification:** a real, DB-backed test creates a sale with a real
+Warehouse, SaleZone and SaleCourier plus a Tracking Ref, and:
+1. Renders it on the Modern layout — confirms all four fields print.
+2. Renders it on the Classic layout — confirms the same, translated.
+3. Creates a second sale with only its (required) Warehouse set —
+   confirms only "Warehouse:" prints, no empty Tracking
+   Ref/Zone/Courier labels.
+4. Turns `show_delivery_info` off — confirms the whole block
+   disappears even though the sale has all four fields.
+Re-ran L3–L6, M3, M4 and M5 regression gates — all still pass.

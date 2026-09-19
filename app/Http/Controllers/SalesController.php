@@ -2824,7 +2824,7 @@ class SalesController extends BaseController
     private function renderSaleInvoiceHtml($id): string
     {
         $details = [];
-        $sale_data = Sale::with('details.product.unitSale')
+        $sale_data = Sale::with('details.product.unitSale', 'warehouse', 'zone', 'courier')
             ->where('deleted_at', '=', null)
             ->findOrFail($id);
 
@@ -2840,6 +2840,12 @@ class SalesController extends BaseController
         $sale['client_adr'] = $sale_data['client']->adresse;
         $sale['client_email'] = $sale_data['client']->email;
         $sale['client_tax'] = $sale_data['client']->tax_number;
+        // Delivery / Shipment info (Build M6) — same fields the Sale Detail
+        // page's header card shows; each is printed only when set.
+        $sale['warehouse'] = optional($sale_data->warehouse)->name;
+        $sale['tracking_ref'] = $sale_data->tracking_ref;
+        $sale['zone_name'] = optional($sale_data->zone)->name;
+        $sale['courier_name'] = optional($sale_data->courier)->name;
         $sale['TaxNet'] = number_format(SaleDocumentMath::convert($sale_data->TaxNet, $rate), helpers::price_decimals(), '.', '');
         $sale['discount_Method'] = $sale_data->discount_Method ?? '2';
         $sale['discount'] = number_format(SaleDocumentMath::discount($sale_data->discount, $sale['discount_Method'], $rate), helpers::price_decimals(), '.', '');
@@ -3224,7 +3230,7 @@ class SalesController extends BaseController
 
         $details = [];
         $helpers = new helpers;
-        $sale_data = Sale::with('details.product.unitSale')
+        $sale_data = Sale::with('details.product.unitSale', 'warehouse', 'zone', 'courier')
             ->where('deleted_at', '=', null)
             ->findOrFail($id);
 
@@ -3235,6 +3241,12 @@ class SalesController extends BaseController
         $sale['client_adr'] = $sale_data['client']->adresse;
         $sale['client_email'] = $sale_data['client']->email;
         $sale['client_tax'] = $sale_data['client']->tax_number;
+        // Delivery / Shipment info (Build M6) — same fields the Sale Detail
+        // page's header card shows; each is printed only when set.
+        $sale['warehouse'] = optional($sale_data->warehouse)->name;
+        $sale['tracking_ref'] = $sale_data->tracking_ref;
+        $sale['zone_name'] = optional($sale_data->zone)->name;
+        $sale['courier_name'] = optional($sale_data->courier)->name;
         $sale['TaxNet'] = number_format($sale_data->TaxNet * $docCurrency['rate'], helpers::price_decimals(), '.', '');
         // Percent discounts stay as-is; fixed amounts are shown in the document currency.
         $sale['discount'] = number_format(($sale_data->discount_Method ?? '2') == '1' ? $sale_data->discount : $sale_data->discount * $docCurrency['rate'], helpers::price_decimals(), '.', '');
@@ -3385,7 +3397,7 @@ class SalesController extends BaseController
     {
         $details = [];
         $helpers = new helpers;
-        $sale_data = Sale::with('details.product.unitSale')
+        $sale_data = Sale::with('details.product.unitSale', 'warehouse', 'zone', 'courier')
             ->where('deleted_at', '=', null)
             ->findOrFail($id);
 
@@ -3396,6 +3408,12 @@ class SalesController extends BaseController
         $sale['client_adr'] = $sale_data['client']->adresse;
         $sale['client_email'] = $sale_data['client']->email;
         $sale['client_tax'] = $sale_data['client']->tax_number;
+        // Delivery / Shipment info (Build M6) — same fields the Sale Detail
+        // page's header card shows; each is printed only when set.
+        $sale['warehouse'] = optional($sale_data->warehouse)->name;
+        $sale['tracking_ref'] = $sale_data->tracking_ref;
+        $sale['zone_name'] = optional($sale_data->zone)->name;
+        $sale['courier_name'] = optional($sale_data->courier)->name;
         $sale['TaxNet'] = number_format($sale_data->TaxNet * $docCurrency['rate'], helpers::price_decimals(), '.', '');
         // Percent discounts stay as-is; fixed amounts are shown in the document currency.
         $sale['discount'] = number_format(($sale_data->discount_Method ?? '2') == '1' ? $sale_data->discount : $sale_data->discount * $docCurrency['rate'], helpers::price_decimals(), '.', '');

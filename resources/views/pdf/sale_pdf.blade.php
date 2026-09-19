@@ -214,6 +214,28 @@
         </tr>
     </table>
 
+    @php
+        // Delivery / Shipment info (Build M6) — Warehouse / Tracking Ref /
+        // Zone / Courier, the same fields the Sale Detail page's header card
+        // shows. Only the ones actually set on this sale are printed.
+        $deliveryParts = [];
+        if (!empty($sale['warehouse'])) { $deliveryParts[] = [__('pdf.warehouse'), $sale['warehouse']]; }
+        if (!empty($sale['tracking_ref'])) { $deliveryParts[] = [__('pdf.tracking_ref'), $sale['tracking_ref']]; }
+        if (!empty($sale['zone_name'])) { $deliveryParts[] = [__('pdf.zone'), $sale['zone_name']]; }
+        if (!empty($sale['courier_name'])) { $deliveryParts[] = [__('pdf.courier'), $sale['courier_name']]; }
+    @endphp
+    @if(!empty($pdfT['show_delivery_info']) && count($deliveryParts))
+    <div dir="{{ $isRtl ? 'rtl' : 'ltr' }}" style="margin-bottom: 12px; border: 1px solid #e5e7eb; border-radius: 4px; padding: 6px 10px; background: #f9fafb; page-break-inside: avoid;">
+        <div style="font-size: 7.5pt; font-weight: bold; color: #6b7280; text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 3px;">{{ __('pdf.delivery_info') }}</div>
+        <div style="font-size: 8pt; color: {{ $pdfT['text_color'] }};">
+            @foreach($deliveryParts as $i => $part)
+                @if($i > 0)<span style="color: #d1d5db;">&nbsp;&nbsp;|&nbsp;&nbsp;</span>@endif
+                <strong>{{ $part[0] }}:</strong> {{ $part[1] }}
+            @endforeach
+        </div>
+    </div>
+    @endif
+
     <!-- Products Table: in RTL, columns order right-to-left -->
     <table style="width: 100%; border-collapse: collapse; margin-bottom: 10px; border: {{ $pdfT['table_borders'] ? '1px solid #e5e7eb' : 'none' }};" cellpadding="0" cellspacing="0" {{ $isRtl ? 'dir="rtl"' : '' }}>
         <thead>
