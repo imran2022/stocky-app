@@ -1463,3 +1463,47 @@ tracking, failed/permission-denied action tracking, and a full pre-delete
 snapshot captured directly on the `deleted` log entry (currently
 reconstructable from prior `updated` entries, but not guaranteed complete
 if a record was never edited before being deleted).
+
+---
+
+## 17. Build L1 — Public Invoice: parity with Sale Detail page
+
+**What it does:** The public, no-login invoice page (`/invoice/:token`,
+Build J2) only showed Item/Qty/Price/Total and a short totals box. This
+build brings it up to parity with what the authenticated Sale Detail page
+shows: per-line Box Qty (only when the company's `enable_box_qty` setting
+is on), per-line Discount and Tax, IMEI/batch numbers, pack quantity
+breakdown, order-level Discount from Points, Previous Dues, and Net
+Balance. Also removes the customer's own email from the page (no reason
+to show it back to them) and reformats the company header block to
+Name / Address / VAT/BIN / Phone / Mail / Website, one per line.
+
+**Files touched:**
+- `app/Http/Controllers/PublicInvoiceController.php`
+- `resources/src/pages/public/PublicInvoice.vue`
+
+**How to verify:**
+- [ ] Open a sale's public invoice link. The item table must show a
+      "Box" column (only if "Enable Box Qty" is on in Settings), Discount
+      and Tax columns per line, matching the authenticated Sale Detail
+      page's numbers for the same sale.
+- [ ] If the sold product has an IMEI/serial number or is batch-tracked,
+      it must appear under the item name, same as Sale Detail.
+- [ ] Totals box must show Order Tax, Discount (with % shown when the
+      sale used a percent discount), Discount from Points (if any),
+      Shipping, Total, Paid, Balance due, and — if the client had any
+      prior outstanding balance — Previous Dues and Net Balance, all
+      matching the authenticated page's numbers exactly.
+- [ ] Turn "Enable Box Qty" off in Settings — the Box column must
+      disappear from the public invoice page entirely.
+- [ ] The customer's email must not appear anywhere on the page.
+- [ ] Company header (top-left) must read, one line each, in this order:
+      Company Name, Address, VAT/BIN, Phone, Mail, Website.
+
+**Regression test:** `tests/Regression/build_l1_public_invoice_parity.php`.
+
+**Deliberately not added (flagged, not built without asking):** tracking
+reference, consignment ID, sales agent name, zone, courier — internal
+routing/ops fields shown on the authenticated page but not typically
+meant for a customer-facing document. Say the word if you want any of
+these on the public page too.

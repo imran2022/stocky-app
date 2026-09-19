@@ -19,19 +19,17 @@
           <div class="brand-text">
             <div class="brand-name">{{ data.company.name || 'Invoice' }}</div>
             <div class="brand-detail" v-if="data.company.address">{{ data.company.address }}</div>
-            <div class="brand-detail">
-              <span v-if="data.company.phone">{{ data.company.phone }}</span>
-              <span v-if="data.company.phone && data.company.email"> · </span>
-              <span v-if="data.company.email">{{ data.company.email }}</span>
-            </div>
             <div class="brand-detail" v-if="data.company.vat_number">VAT/BIN: {{ data.company.vat_number }}</div>
-            <div class="brand-detail" v-if="data.company.website">{{ data.company.website }}</div>
+            <div class="brand-detail" v-if="data.company.phone">Phone: {{ data.company.phone }}</div>
+            <div class="brand-detail" v-if="data.company.email">Mail: {{ data.company.email }}</div>
+            <div class="brand-detail" v-if="data.company.website">Website: {{ data.company.website }}</div>
           </div>
         </div>
         <div class="invoice-meta">
           <div class="invoice-label">Invoice</div>
           <div class="invoice-ref">{{ data.invoice.ref }}</div>
           <div class="invoice-date">{{ formatDate(data.invoice.date) }}</div>
+          <div class="invoice-date" v-if="data.invoice.warehouse">{{ data.invoice.warehouse }}</div>
           <span class="status-pill" :class="statusClass">{{ statusLabel }}</span>
         </div>
       </header>
@@ -40,11 +38,8 @@
         <div class="bill-to-label">Billed to</div>
         <div class="bill-to-name">{{ data.client.name }}</div>
         <div class="bill-to-detail" v-if="data.client.address">{{ data.client.address }}</div>
-        <div class="bill-to-detail">
-          <span v-if="data.client.phone">{{ data.client.phone }}</span>
-          <span v-if="data.client.phone && data.client.email"> · </span>
-          <span v-if="data.client.email">{{ data.client.email }}</span>
-        </div>
+        <div class="bill-to-detail" v-if="data.client.phone">{{ data.client.phone }}</div>
+        <div class="bill-to-detail" v-if="data.client.tax_number">Tax #: {{ data.client.tax_number }}</div>
       </section>
 
       <section class="items">
@@ -52,8 +47,11 @@
           <thead>
             <tr>
               <th class="col-item">Item</th>
-              <th class="col-num">Qty</th>
               <th class="col-num">Price</th>
+              <th class="col-num" v-if="data.enable_box_qty">Box</th>
+              <th class="col-num">Qty</th>
+              <th class="col-num">Discount</th>
+              <th class="col-num">Tax</th>
               <th class="col-num">Total</th>
             </tr>
           </thead>
@@ -62,9 +60,21 @@
               <td class="col-item">
                 <div class="item-name">{{ item.name }}</div>
                 <div class="item-code" v-if="item.code">{{ item.code }}</div>
+                <div class="item-code" v-if="item.is_imei && item.imei_number">SN: {{ item.imei_number }}</div>
+                <div class="item-code item-batches" v-if="item.is_batch_tracked && item.batches?.length">
+                  <span v-for="(b, bi) in item.batches" :key="bi" class="batch-tag">{{ b.batch_number || b.batch_no || b }}</span>
+                </div>
               </td>
-              <td class="col-num">{{ formatQty(item.quantity) }}</td>
               <td class="col-num">{{ formatMoney(item.price) }}</td>
+              <td class="col-num" v-if="data.enable_box_qty">{{ item.box_qty !== null && item.box_qty !== undefined ? formatQty(item.box_qty) : '—' }}</td>
+              <td class="col-num">
+                {{ formatQty(item.quantity) }} {{ item.pack_name || item.unit }}
+                <div class="item-code" v-if="item.pack_name && item.pack_multiplier > 1">
+                  (×{{ item.pack_multiplier }}) = {{ formatQty(item.quantity * item.pack_multiplier) }} {{ item.unit }}
+                </div>
+              </td>
+              <td class="col-num">{{ formatMoney(item.discount) }}</td>
+              <td class="col-num">{{ formatMoney(item.tax) }}</td>
               <td class="col-num">{{ formatMoney(item.total) }}</td>
             </tr>
           </tbody>
@@ -74,12 +84,20 @@
       <section class="totals">
         <div class="totals-box">
           <div class="totals-row"><span>Subtotal</span><span>{{ formatMoney(data.totals.subtotal) }}</span></div>
-          <div class="totals-row" v-if="data.totals.discount"><span>Discount</span><span>−{{ formatMoney(data.totals.discount) }}</span></div>
-          <div class="totals-row" v-if="data.totals.tax"><span>Tax</span><span>{{ formatMoney(data.totals.tax) }}</span></div>
+          <div class="totals-row"><span>Order Tax</span><span>{{ formatMoney(data.totals.tax) }}</span></div>
+          <div class="totals-row" v-if="data.totals.discount">
+            <span>Discount</span>
+            <span>
+              −{{ data.totals.discount_method === '1' ? `${formatQty(data.totals.discount_percent)}% (${formatMoney(data.totals.discount)})` : formatMoney(data.totals.discount) }}
+            </span>
+          </div>
+          <div class="totals-row" v-if="data.totals.discount_from_points"><span>Discount from Points</span><span>−{{ formatMoney(data.totals.discount_from_points) }}</span></div>
           <div class="totals-row" v-if="data.totals.shipping"><span>Shipping</span><span>{{ formatMoney(data.totals.shipping) }}</span></div>
           <div class="totals-row totals-grand"><span>Total</span><span>{{ formatMoney(data.totals.grand_total) }}</span></div>
           <div class="totals-row"><span>Paid</span><span>{{ formatMoney(data.totals.paid) }}</span></div>
           <div class="totals-row totals-due"><span>Balance due</span><span>{{ formatMoney(data.totals.due) }}</span></div>
+          <div class="totals-row" v-if="data.totals.previous_dues"><span>Previous Dues</span><span>{{ formatMoney(data.totals.previous_dues) }}</span></div>
+          <div class="totals-row totals-net" v-if="data.totals.previous_dues"><span>Net Balance</span><span>{{ formatMoney(data.totals.net_balance) }}</span></div>
         </div>
       </section>
 
@@ -106,6 +124,13 @@
  * in the sale's stored currency; the "Download PDF" button's PDF is the
  * authoritative, fully currency-converted document via the existing
  * Sale_PDF, unchanged from before this page existed).
+ *
+ * Build L1 (2026-09-19) — brought this page's fields up to parity with
+ * the authenticated Sale Detail page: Box Qty column (shown only when
+ * the company's "enable_box_qty" setting is on, same as SaleDetails.vue),
+ * per-line Discount/Tax, IMEI/batch numbers, pack quantity breakdown,
+ * order-level Discount from Points, Previous Dues and Net Balance.
+ * Customer email is intentionally not shown (see controller note).
  *
  * Plain English labels throughout (no i18n "t()" calls) — this project's own
  * documented lesson: an unadded translation key renders as its raw key
@@ -348,6 +373,15 @@ tbody td.col-num {
 
 .item-name { font-weight: 500; }
 .item-code { font-size: 12px; color: #94A3B8; margin-top: 2px; }
+.item-batches { display: flex; gap: 4px; flex-wrap: wrap; }
+.batch-tag {
+  display: inline-block;
+  border: 1px solid #E2E8F0;
+  border-radius: 4px;
+  padding: 0 6px;
+  font-size: 11px;
+  color: #64748B;
+}
 
 .totals {
   padding: 20px 32px 0;
@@ -381,6 +415,14 @@ tbody td.col-num {
 .totals-due {
   font-weight: 700;
   color: #DC2626;
+}
+
+.totals-net {
+  border-top: 1px solid #E2E8F0;
+  margin-top: 4px;
+  padding-top: 10px;
+  font-weight: 700;
+  color: #0F172A;
 }
 
 .download-bar {

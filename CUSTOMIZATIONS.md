@@ -2875,3 +2875,56 @@ entries log only the description, not the record's last-known values —
 they can still be reconstructed from the record's own `updated` history
 in the log, but not in one row). Flagged in the audit report as ideas,
 not requested for this build.
+
+## Build L1 — Public Invoice: parity with Sale Detail page (2026-09-19)
+
+**Why:** The public, no-login invoice page (`/invoice/:token`) showed only
+Item/Qty/Price/Total and a short totals box — far less than the
+authenticated Sale Detail page shows for the same sale (per-line Discount
+and Tax, Box Qty, Previous Dues, Net Balance, Discount from Points, IMEI/
+batch numbers, pack quantity breakdown). Customers viewing their own
+invoice via the shared link were seeing a stripped-down document.
+
+**What changed:**
+- `app/Http/Controllers/PublicInvoiceController.php` — `show()` rebuilt to
+  compute the same per-line Discount/Tax figures as `SalesController::
+  show()` (same DiscountNet/tax_method math), added Box Qty (only emitted
+  when the company's `enable_box_qty` setting is on — the same flag the
+  authenticated page reads), IMEI number, batch numbers, pack name/
+  multiplier, and unit resolution (sale_unit_id, falling back to the
+  product's own sale unit). Order-level totals gained Discount from
+  Points, Previous Dues, and Net Balance — the last two via a
+  `clientPreviousDues()` copied from `SalesController` (that method is
+  `private`, not shared; duplicating ~15 lines was judged lower-risk than
+  changing its visibility or extracting a shared service for one caller,
+  matching this controller's existing documented approach for `show()`
+  itself). Customer's own email removed from the response — the page is
+  reached via a link the customer already holds, so showing their email
+  back to them serves no purpose.
+- `resources/src/pages/public/PublicInvoice.vue` — item table gained Box
+  (conditional), Discount, and Tax columns, IMEI/batch display, and pack
+  quantity breakdown; totals gained Order Tax (unconditional, matching the
+  authenticated page), Discount from Points, Previous Dues, and Net
+  Balance rows; customer email no longer rendered; company header block
+  reordered to Name / Address / VAT/BIN / Phone / Mail / Website, each on
+  its own line (previously combined phone+email onto one line and put
+  VAT/BIN and website in a different order).
+- New: `tests/Regression/build_l1_public_invoice_parity.php`.
+
+**Verification:** the new regression test passes; the full existing
+regression suite (now including Build I3/I3b) was re-run with no new
+failures. Additionally, real runtime verification against a seeded
+SQLite database: created a sale with a 10% order discount, discount-from-
+points, a per-line fixed discount, a per-line tax, box_qty = 1.5, and a
+second completed/unpaid sale for the same client to produce real previous
+dues — confirmed every number in the JSON response (line discount 30,
+line tax 21.6, order discount 25, due 150, previous dues 600, net balance
+750) matched hand computation; confirmed box_qty comes back `null` in the
+payload when `enable_box_qty` is switched off; confirmed the response's
+`client` object carries no `email` key at all.
+
+**Not changed (kept off this page on purpose — flagged for the user to
+decide, not built without asking):** tracking reference, consignment ID,
+sales agent name, zone, and courier — these are internal routing/ops
+details shown on the authenticated Sale Detail page but not typically
+meant for a customer-facing document; can be added the same way if wanted.
