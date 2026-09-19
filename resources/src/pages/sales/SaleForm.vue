@@ -235,6 +235,35 @@
                   <a-input v-model:value="sale.tracking_ref" placeholder="Tracking Ref" />
                 </a-form-item>
               </a-col>
+              <!-- Payment Terms hierarchy, Level 3 (invoice override). "default"
+                   means no override: the resolved term falls back to the
+                   customer's own default, and finally the system default. -->
+              <a-col :xs="24" :md="8">
+                <a-form-item label="Payment Term">
+                  <a-select v-model:value="paymentTermPreset" style="width: 100%">
+                    <a-select-option value="default">
+                      {{ selectedClientPaymentTermDays !== null
+                        ? `Use customer default (${paymentTermLabel(selectedClientPaymentTermDays)})`
+                        : 'Use system default' }}
+                    </a-select-option>
+                    <a-select-option value="0">Immediate</a-select-option>
+                    <a-select-option value="7">7 Days</a-select-option>
+                    <a-select-option value="15">15 Days</a-select-option>
+                    <a-select-option value="30">30 Days</a-select-option>
+                    <a-select-option value="custom">Custom</a-select-option>
+                  </a-select>
+                </a-form-item>
+              </a-col>
+              <a-col v-if="paymentTermPreset === 'custom'" :xs="24" :md="8">
+                <a-form-item label="Custom term (days)">
+                  <a-input-number v-model:value="sale.payment_term_days" style="width: 100%" :min="0" :max="3650" />
+                </a-form-item>
+              </a-col>
+              <a-col :xs="24" :md="8">
+                <a-form-item label="Due Date">
+                  <a-input :value="dueDatePreview" disabled style="width: 100%" />
+                </a-form-item>
+              </a-col>
               <a-col :xs="24" :md="8">
                 <a-form-item label="Zone">
                   <CreatableSelect
@@ -622,6 +651,44 @@ const sale = ref({
   consignment_id: '',
   zone_id: undefined,
   courier_id: undefined,
+  // Payment Terms hierarchy, Level 3. null = no override (use customer's own
+  // default, or ultimately the system default) — resolved server-side.
+  payment_term_days: null,
+});
+
+// Payment Terms hierarchy, Level 2: the selected customer's own default term
+// (null = customer has no override either). Fetched in onClientChange().
+const selectedClientPaymentTermDays = ref(null);
+const PAYMENT_TERM_PRESETS = [0, 7, 15, 30];
+const PAYMENT_TERM_LABELS = { 0: 'Immediate', 7: '7 Days', 15: '15 Days', 30: '30 Days' };
+function paymentTermLabel(days) {
+  return PAYMENT_TERM_LABELS[days] ?? `${days} Days`;
+}
+const paymentTermPreset = computed({
+  get() {
+    const v = sale.value.payment_term_days;
+    if (v === null || v === undefined || v === '') return 'default';
+    if (PAYMENT_TERM_PRESETS.includes(Number(v))) return String(Number(v));
+    return 'custom';
+  },
+  set(val) {
+    if (val === 'default') {
+      sale.value.payment_term_days = null;
+    } else if (val === 'custom') {
+      sale.value.payment_term_days = sale.value.payment_term_days || 45;
+    } else {
+      sale.value.payment_term_days = Number(val);
+    }
+  },
+});
+// Live preview only — the authoritative due date is computed and snapshotted
+// server-side using the same 3-level hierarchy at save time.
+const dueDatePreview = computed(() => {
+  const days = sale.value.payment_term_days !== null && sale.value.payment_term_days !== undefined
+    ? Number(sale.value.payment_term_days)
+    : (selectedClientPaymentTermDays.value !== null ? Number(selectedClientPaymentTermDays.value) : 7);
+  const base = sale.value.date ? dayjs(sale.value.date) : dayjs();
+  return base.add(days, 'day').format('YYYY-MM-DD');
 });
 
 // Zone / Courier — small user-managed lookup lists (see CreatableSelect).
@@ -722,6 +789,7 @@ async function onClientChange(clientId) {
   sale.value.discount_Method = '2';
   selectedClientCreditLimit.value = 0;
   selectedClientNetBalance.value = 0;
+  selectedClientPaymentTermDays.value = null;
   if (!clientId) return;
 
   try {
@@ -737,7 +805,11 @@ async function onClientChange(clientId) {
     const brief = await http.get(`clients/${clientId}/brief`);
     selectedClientCreditLimit.value = parseFloat(brief?.credit_limit || 0);
     selectedClientNetBalance.value = parseFloat(brief?.netBalance || 0);
-  } catch (e) { /* treated as no limit */ }
+    // Payment Terms hierarchy, Level 2: the customer's own default (null = none).
+    selectedClientPaymentTermDays.value = (brief?.payment_term_days ?? null) !== null
+      ? Number(brief.payment_term_days)
+      : null;
+  } catch (e) { /* treated as no customer-level override */ }
 }
 
 /** Legacy clamps the input to whole points within the available balance. */
@@ -1354,6 +1426,9 @@ async function submit() {
     consignment_id: sale.value.consignment_id || '',
     zone_id: sale.value.zone_id || null,
     courier_id: sale.value.courier_id || null,
+    // Payment Terms hierarchy, Level 3 (invoice override). null = no override;
+    // the server resolves and snapshots the effective term + due date.
+    payment_term_days: sale.value.payment_term_days,
     // Multi-Currency snapshot ({} when the module is off)
     ...currencyPayload(),
   };
@@ -1457,6 +1532,7 @@ onMounted(async () => {
         consignment_id: '',
         zone_id: undefined,
         courier_id: undefined,
+        payment_term_days: null,
       };
       // The converted sale keeps the quotation's currency snapshot.
       setDocCurrency(q.currency_id, q.exchange_rate);
@@ -1512,6 +1588,7 @@ onMounted(async () => {
         consignment_id: s.consignment_id || '',
         zone_id: s.zone_id || undefined,
         courier_id: s.courier_id || undefined,
+        payment_term_days: s.payment_term_days ?? null,
       };
       pointsState.value = {
         discount_from_points: Number(s.discount_from_points) || 0,

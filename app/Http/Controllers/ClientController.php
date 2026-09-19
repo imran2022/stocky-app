@@ -206,6 +206,9 @@ class ClientController extends BaseController
             'is_royalty_eligible' => $is_royalty_eligible,
             'opening_balance' => $request['opening_balance'] ?? 0,
             'credit_limit' => $request['credit_limit'] ?? 0,
+            // Payment Terms hierarchy, Level 2 (Customer Default). Empty/omitted
+            // means "use the system default" — see app/Support/PaymentTerms.php.
+            'payment_term_days' => $request->filled('payment_term_days') ? (int) $request->payment_term_days : null,
         ]);
 
         return response()->json($client);
@@ -263,6 +266,7 @@ class ClientController extends BaseController
             'zip' => ['nullable', 'string', 'max:20'],
             'tax_number' => ['nullable', 'string', 'max:100'],
             'credit_limit' => ['nullable', 'numeric', 'min:0'],
+            'payment_term_days' => ['nullable', 'integer', 'min:0', 'max:3650'],
 
             // EcommerceClient-specific (optional)
             'username' => [
@@ -302,6 +306,11 @@ class ClientController extends BaseController
                 'tax_number' => $request->input('tax_number'),
                 'is_royalty_eligible' => $isRoyaltyEligible,
                 'credit_limit' => $request->input('credit_limit', 0),
+                // Payment Terms hierarchy, Level 2. Present-but-empty clears the
+                // override back to "use system default"; omitted preserves it.
+                'payment_term_days' => $request->has('payment_term_days')
+                    ? ($request->filled('payment_term_days') ? (int) $request->input('payment_term_days') : null)
+                    : ($activityLogOldClient['payment_term_days'] ?? null),
             ]);
 
             // --- Build I1 (Activity Log): log the update with an old/new diff.
@@ -1330,7 +1339,7 @@ class ClientController extends BaseController
         $this->authorizeForUser($request->user('api'), 'view', Client::class);
 
         $client = Client::query()
-            ->select('id', 'name', 'email', 'phone', 'code', 'adresse', 'country', 'city', 'state', 'zip', 'tax_number', 'opening_balance', 'credit_limit', 'points')
+            ->select('id', 'name', 'email', 'phone', 'code', 'adresse', 'country', 'city', 'state', 'zip', 'tax_number', 'opening_balance', 'credit_limit', 'points', 'payment_term_days')
             ->whereNull('deleted_at')
             ->findOrFail($id);
 

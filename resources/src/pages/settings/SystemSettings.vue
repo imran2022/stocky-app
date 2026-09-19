@@ -358,6 +358,32 @@
             </div>
             <div class="setting-row">
               <div>
+                <div class="setting-label">Default Payment Term</div>
+                <div class="setting-help">
+                  Days after a credit sale's date it's due (Invoice Date + Payment Term = Due
+                  Date). Used whenever a customer has no Payment Term of their own set on their
+                  profile — that customer default, and a per-invoice override, both win over
+                  this system default.
+                </div>
+              </div>
+              <a-space>
+                <a-radio-group v-model:value="paymentTermPreset" size="small">
+                  <a-radio-button value="0">Immediate</a-radio-button>
+                  <a-radio-button value="7">7 Days</a-radio-button>
+                  <a-radio-button value="15">15 Days</a-radio-button>
+                  <a-radio-button value="30">30 Days</a-radio-button>
+                  <a-radio-button value="custom">Custom</a-radio-button>
+                </a-radio-group>
+                <a-input-number
+                  v-if="paymentTermPreset === 'custom'"
+                  v-model:value="paymentTermCustom" :min="0" :max="3650" size="small" style="width: 100px"
+                  addon-after="days"
+                  @change="v => (setting.default_payment_term_days = v)"
+                />
+              </a-space>
+            </div>
+            <div class="setting-row">
+              <div>
                 <div class="setting-label">Vehicle Fitment &amp; My Garage</div>
                 <div class="setting-help">
                   Vehicle selector (Make / Model / Year) with a customer "My Garage" on the
@@ -1212,6 +1238,29 @@ const sessionTimeoutPreset = computed({
   },
 });
 
+/* -------------------------------------------------------- payment terms */
+const paymentTermCustom = ref(null);
+const PAYMENT_TERM_PRESETS = [0, 7, 15, 30];
+const paymentTermPreset = computed({
+  get() {
+    const v = setting.value.default_payment_term_days;
+    if (v == null || v === '') return '7';
+    if (PAYMENT_TERM_PRESETS.includes(Number(v))) return String(Number(v));
+    return 'custom';
+  },
+  set(val) {
+    if (val === 'custom') {
+      if (!paymentTermCustom.value) {
+        const current = Number(setting.value.default_payment_term_days);
+        paymentTermCustom.value = (!Number.isNaN(current) && current >= 0) ? current : 45;
+      }
+      setting.value.default_payment_term_days = paymentTermCustom.value;
+    } else {
+      setting.value.default_payment_term_days = Number(val);
+    }
+  },
+});
+
 /* ------------------------------------------------------------------ logo */
 function onLogoPicked(file) {
   logoFile.value = file;
@@ -1276,6 +1325,7 @@ async function save() {
   fd.append('show_serial_tracking', s.show_serial_tracking ? 1 : 0);
   fd.append('enable_multi_pack_selling', s.enable_multi_pack_selling ? 1 : 0);
   fd.append('enable_box_qty', s.enable_box_qty ? 1 : 0);
+  fd.append('default_payment_term_days', s.default_payment_term_days ?? 7);
   fd.append('enable_wholesale_pricing', s.enable_wholesale_pricing ? 1 : 0);
   fd.append('enable_multi_currency', s.enable_multi_currency ? 1 : 0);
   fd.append('enable_pos_salesperson_switch', s.enable_pos_salesperson_switch ? 1 : 0);
@@ -1434,6 +1484,8 @@ onMounted(() => {
       syncExportForm();
       const stm = Number(setting.value.session_timeout_minutes);
       if (!Number.isNaN(stm) && stm > 0 && !SESSION_TIMEOUT_PRESETS.includes(stm)) sessionTimeoutCustom.value = stm;
+      const ptd = Number(setting.value.default_payment_term_days);
+      if (!Number.isNaN(ptd) && ptd >= 0 && !PAYMENT_TERM_PRESETS.includes(ptd)) paymentTermCustom.value = ptd;
     })
     .catch(() => message.error(t('InvalidData')));
 

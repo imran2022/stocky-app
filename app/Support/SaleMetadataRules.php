@@ -54,6 +54,9 @@ final class SaleMetadataRules
             // sale_details.box_qty is DECIMAL(10,2) and informational. Keep
             // fractional values valid; only reject negative/out-of-range data.
             'details.*.box_qty' => ['nullable', 'numeric', 'min:0', 'max:99999999.99'],
+            // Payment Terms hierarchy, Level 3 (Invoice override). Omitted/null
+            // means "use the customer/system default" — see app/Support/PaymentTerms.php.
+            'payment_term_days' => ['nullable', 'integer', 'min:0', 'max:3650'],
         ];
     }
 

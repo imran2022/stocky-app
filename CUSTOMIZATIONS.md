@@ -3170,3 +3170,80 @@ visually compared side-by-side against a Modern invoice PDF rendered from
 the same sale — margins, header layout and typography now match. Checked
 both a sale with box quantities and one without. Full existing
 regression suite (L1–L5) re-run with no new failures.
+
+## Build M1 — Payment Terms & Due Dates (Phase A of Customer Ledger plan) (2026-09-19)
+
+**Why:** The user shared a 15-section spec for a full Customer Ledger +
+Payment Terms + Invoice-wise Payment Allocation system and asked what
+already exists and what's feasible. After a feasibility audit and a
+3-phase proposal (A: Payment Terms & Due Dates, B: Real Admin Customer
+Ledger, C: Invoice-wise Payment Allocation), the user confirmed:
+"Payment Terms & Due Dates cholo eta kori age" — Phase A first. Phases B
+and C are proposed future work, not started, and out of scope here.
+
+**What changed — a new 3-level Payment Term hierarchy:**
+- Level 1 **System Default** — `settings.default_payment_term_days`
+  (0/7/15/30/Custom, default 7).
+- Level 2 **Customer Default** — `clients.payment_term_days` (nullable;
+  overrides the system default for that customer).
+- Level 3 **Invoice Override** — chosen per sale; wins over both when
+  present.
+- A sale **snapshots** its resolved term (`sales.payment_term_days`) and
+  derived due date (`sales.due_date`) at create/edit time — it is never a
+  live reference to the current customer/system defaults, so a later
+  change to either never silently changes an already-issued invoice's due
+  date. Formula: `Invoice Date + Payment Term = Due Date`. A sale is
+  **Overdue** when `today > due_date AND outstanding balance > 0`.
+
+**Files touched:**
+- New: `database/migrations/2026_09_19_000001_add_payment_terms_and_due_dates.php`
+  — adds `settings.default_payment_term_days`, `clients.payment_term_days`,
+  `sales.payment_term_days`, `sales.due_date` (indexed).
+- New: `app/Support/PaymentTerms.php` — single source of truth for the
+  hierarchy resolution (`resolveDays()`), due-date math (`dueDate()`),
+  overdue detection (`isOverdue()`), and preset labels (`label()`).
+- `app/Models/Setting.php`, `app/Models/Client.php`, `app/Models/Sale.php`
+  — new fields added to `$fillable`/`$casts`.
+- `app/Support/SaleMetadataRules.php` — validation rule for the
+  invoice-level `payment_term_days` override.
+- `app/Http/Controllers/SalesController.php` — `store()` and `update()`
+  resolve and snapshot the term + due date on every save; `show()`,
+  `index()` and `edit()` expose `payment_term_days`, `payment_term_label`,
+  `due_date` and `is_overdue`.
+- `app/Http/Controllers/ClientController.php` — `store()`/`update()`
+  handle the customer-level override (omitted on update = preserved,
+  explicit empty = cleared); `clientBrief()` now also returns
+  `payment_term_days` so the Sale form can show the customer's default.
+- `app/Http/Controllers/SettingsController.php` — `update()` persists
+  `default_payment_term_days` (clamped 0–3650); both read-side endpoints
+  expose it.
+- `resources/src/pages/settings/SystemSettings.vue` — new "Default
+  Payment Term" control in the Features tab (Immediate/7/15/30/Custom).
+- `resources/src/pages/people/CustomerForm.vue` — new "Payment Term"
+  control on the customer form (Use system default/Immediate/7/15/30/
+  Custom).
+- `resources/src/pages/sales/SaleForm.vue` — new "Payment Term" selector
+  and a live **Due Date** preview on the sale create/edit form; selecting
+  a customer shows their own default term as the "default" option's
+  label; the resolved/overridden term is sent with the sale and reloaded
+  correctly when editing an existing sale.
+- New: `tests/Regression/build_m1_payment_terms_and_due_dates.php`.
+
+**Verification:** a real, DB-backed end-to-end test that calls
+`SalesController`, `ClientController` and `SettingsController` directly
+against the project database (not mocked) and covers: system default
+alone; customer default overriding system default; invoice override
+winning over both; re-resolution on `update()` when the override is
+cleared (falls back to the customer default, not the stale old
+override); **snapshot stability** — changing the system default
+afterwards does not retroactively change an already-created sale's
+stored term/due date; overdue detection via both `show()` and `index()`;
+Settings read/write round-trip; Client store/update round-trip
+(including "omitted preserves, explicit null clears").
+
+**Not yet done (deliberately, per the phased plan):** a Due Date /
+Overdue column on the Sales list page and the Sale Detail page (the
+backend already returns the data — this is pure frontend display, not
+started); surfacing due date on the Sale PDF templates or the Public
+Invoice page. Phases B (Real Admin Customer Ledger) and C (Invoice-wise
+Payment Allocation) from the original spec are proposed future work only.

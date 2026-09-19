@@ -25,6 +25,10 @@ class Sale extends Model
         'quickbooks_sync_error',
         // Multi-Currency snapshot; NULL = base currency, rate 1
         'currency_id', 'exchange_rate',
+        // Custom: Payment Terms hierarchy, Level 3 (Invoice) — the resolved term
+        // and its derived due date, snapshotted at create/edit time — see
+        // app/Support/PaymentTerms.php.
+        'payment_term_days', 'due_date',
     ];
 
     protected $casts = [
@@ -52,6 +56,7 @@ class Sale extends Model
         'woocommerce_order_id' => 'integer',
         'currency_id' => 'integer',
         'exchange_rate' => 'float',
+        'payment_term_days' => 'integer',
     ];
 
     public function currency()

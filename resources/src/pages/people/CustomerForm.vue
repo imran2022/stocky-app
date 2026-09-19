@@ -85,6 +85,23 @@
               <a-switch v-model:checked="form.is_royalty_eligible" />
             </a-form-item>
           </a-col>
+          <a-col :xs="24" :md="12">
+            <a-form-item label="Payment Term">
+              <a-select v-model:value="paymentTermPreset" style="width: 100%">
+                <a-select-option value="default">Use system default</a-select-option>
+                <a-select-option value="0">Immediate</a-select-option>
+                <a-select-option value="7">7 Days</a-select-option>
+                <a-select-option value="15">15 Days</a-select-option>
+                <a-select-option value="30">30 Days</a-select-option>
+                <a-select-option value="custom">Custom</a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+          <a-col :xs="24" :md="12" v-if="paymentTermPreset === 'custom'">
+            <a-form-item label="Custom term (days)">
+              <a-input-number v-model:value="form.payment_term_days" style="width: 100%" :min="0" :max="3650" />
+            </a-form-item>
+          </a-col>
         </a-row>
 
         <a-space style="margin-top: 8px">
@@ -126,8 +143,28 @@ const emptyForm = () => ({
   firstname: '', lastname: '', name: '', email: '', phone: '', tax_number: '',
   country: '', city: '', state: '', zip: '', adresse: '',
   opening_balance: 0, credit_limit: 0, is_royalty_eligible: false,
+  // Payment Terms hierarchy, Level 2. null = no override (use system default).
+  payment_term_days: null,
 });
 const form = ref(emptyForm());
+const PAYMENT_TERM_PRESETS = [0, 7, 15, 30];
+const paymentTermPreset = computed({
+  get() {
+    const v = form.value.payment_term_days;
+    if (v === null || v === undefined || v === '') return 'default';
+    if (PAYMENT_TERM_PRESETS.includes(Number(v))) return String(Number(v));
+    return 'custom';
+  },
+  set(val) {
+    if (val === 'default') {
+      form.value.payment_term_days = null;
+    } else if (val === 'custom') {
+      form.value.payment_term_days = form.value.payment_term_days || 45;
+    } else {
+      form.value.payment_term_days = Number(val);
+    }
+  },
+});
 // The clients update endpoint deliberately ignores opening_balance — it is
 // changed only via customers/{id}/adjust-opening-balance. Remember the loaded
 // value so an edit can push a "set" adjustment when (and only when) it changes.

@@ -270,6 +270,12 @@ class SettingsController extends Controller
             'enable_box_qty' => $request->has('enable_box_qty')
                 ? (($request['enable_box_qty'] == '1' || $request['enable_box_qty'] == 'true' || $request['enable_box_qty'] === 1 || $request['enable_box_qty'] === true) ? 1 : 0)
                 : (int) ($setting->enable_box_qty ?? 1),
+            // Payment Terms hierarchy, Level 1 (System Default) — see
+            // app/Support/PaymentTerms.php. Clamped so a stray value can't
+            // produce a nonsensical due date.
+            'default_payment_term_days' => $request->has('default_payment_term_days')
+                ? max(0, min(3650, (int) $request['default_payment_term_days']))
+                : (int) ($setting->default_payment_term_days ?? \App\Support\PaymentTerms::FALLBACK_SYSTEM_DEFAULT_DAYS),
             'enable_wholesale_pricing' => $request->has('enable_wholesale_pricing')
                 ? (($request['enable_wholesale_pricing'] == '1' || $request['enable_wholesale_pricing'] == 'true' || $request['enable_wholesale_pricing'] === 1 || $request['enable_wholesale_pricing'] === true) ? 1 : 0)
                 : (int) ($setting->enable_wholesale_pricing ?? 0),
@@ -971,6 +977,8 @@ class SettingsController extends Controller
             // Multi-pack selling toggle (default false)
             $item['enable_multi_pack_selling'] = (bool) ($settings->enable_multi_pack_selling ?? false);
             $item['enable_box_qty'] = (bool) ($settings->enable_box_qty ?? true);
+            // Payment Terms hierarchy, Level 1 (System Default) — see app/Support/PaymentTerms.php
+            $item['default_payment_term_days'] = (int) ($settings->default_payment_term_days ?? \App\Support\PaymentTerms::FALLBACK_SYSTEM_DEFAULT_DAYS);
             // Wholesale Pricing by Quantity toggle (default false) — must be
             // returned here or the System Settings form loads it undefined and
             // every save silently turns the feature off.
@@ -1744,6 +1752,8 @@ class SettingsController extends Controller
             // Multi-pack selling toggle (default false)
             $item['enable_multi_pack_selling'] = (bool) ($settings->enable_multi_pack_selling ?? false);
             $item['enable_box_qty'] = (bool) ($settings->enable_box_qty ?? true);
+            // Payment Terms hierarchy, Level 1 (System Default) — see app/Support/PaymentTerms.php
+            $item['default_payment_term_days'] = (int) ($settings->default_payment_term_days ?? \App\Support\PaymentTerms::FALLBACK_SYSTEM_DEFAULT_DAYS);
             // Wholesale Pricing by Quantity toggle (default false) — must be
             // returned here or the System Settings form loads it undefined and
             // every save silently turns the feature off.

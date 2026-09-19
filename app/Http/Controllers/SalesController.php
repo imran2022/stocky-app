@@ -35,6 +35,7 @@ use App\Models\User;
 use App\Models\UserWarehouse;
 use App\Models\Warehouse;
 use App\Support\SaleDocumentMath;
+use App\Support\PaymentTerms;
 use App\Support\SaleMetadataRules;
 use App\Support\ZatcaQr;
 use App\utils\helpers;
@@ -273,6 +274,9 @@ class SalesController extends BaseController
             $item['paid_amount'] = number_format($Sale['paid_amount'], helpers::price_decimals(), '.', '');
             $item['due'] = number_format($item['GrandTotal'] - $item['paid_amount'], helpers::price_decimals(), '.', '');
             $item['payment_status'] = $Sale['payment_statut'];
+            // Payment Terms / Due Date / Overdue (see app/Support/PaymentTerms.php)
+            $item['due_date'] = $Sale['due_date'];
+            $item['is_overdue'] = PaymentTerms::isOverdue($Sale['due_date'], (float) $item['due']);
             // Multi-Currency badge: resolve through Stocky's document-currency
             // helper so legacy/base-currency sales show the configured base code
             // instead of a blank cell. List monetary columns remain base-currency.
@@ -428,6 +432,15 @@ class SalesController extends BaseController
             $order->consignment_id = $request->filled('consignment_id') ? $request->consignment_id : null;
             $order->zone_id = $request->filled('zone_id') ? $request->zone_id : null;
             $order->courier_id = $request->filled('courier_id') ? $request->courier_id : null;
+            // Payment Terms hierarchy: resolve and snapshot the term + due date
+            // used for THIS invoice — see app/Support/PaymentTerms.php.
+            $termDays = PaymentTerms::resolveDays(
+                $request->filled('payment_term_days') ? (int) $request->payment_term_days : null,
+                optional(Client::find($request->client_id))->payment_term_days,
+                Setting::where('deleted_at', '=', null)->value('default_payment_term_days')
+            );
+            $order->payment_term_days = $termDays;
+            $order->due_date = PaymentTerms::dueDate($order->date, $termDays);
             $order->save();
 
             // Sale created from a quotation: remember the link so the
@@ -1129,6 +1142,12 @@ class SalesController extends BaseController
                     $payment_statut = 'unpaid';
                 }
 
+                $paymentTermDays = PaymentTerms::resolveDays(
+                    $request->filled('payment_term_days') ? (int) $request->payment_term_days : null,
+                    optional(Client::find($request['client_id']))->payment_term_days,
+                    Setting::where('deleted_at', '=', null)->value('default_payment_term_days')
+                );
+
                 $current_Sale->update([
                     'date' => $request['date'],
                     'client_id' => $request['client_id'],
@@ -1167,6 +1186,12 @@ class SalesController extends BaseController
                     'courier_id' => $request->has('courier_id')
                         ? ($request->courier_id ?: null)
                         : $current_Sale->courier_id,
+                    // Payment Terms hierarchy: re-resolve on every edit — a
+                    // changed date or an explicit override both need a fresh
+                    // due date; omitting the override just re-resolves against
+                    // the (possibly now-different) customer/system default.
+                    'payment_term_days' => $paymentTermDays,
+                    'due_date' => PaymentTerms::dueDate($request['date'], $paymentTermDays),
                 ] + helpers::resolve_request_currency($request, $current_Sale->currency_id, $current_Sale->exchange_rate));
             }
 
@@ -1649,6 +1674,11 @@ class SalesController extends BaseController
         $sale_details['date'] = $sale_data->date.' '.$sale_data->time;
         $sale_details['note'] = $sale_data->notes;
         $sale_details['statut'] = $sale_data->statut;
+        // Payment Terms / Due Date (see app/Support/PaymentTerms.php)
+        $sale_details['payment_term_days'] = $sale_data->payment_term_days;
+        $sale_details['payment_term_label'] = $sale_data->payment_term_days !== null
+            ? PaymentTerms::label($sale_data->payment_term_days) : null;
+        $sale_details['due_date'] = $sale_data->due_date;
         $sale_details['warehouse'] = $sale_data['warehouse']->name;
         // Multi-Currency: amounts below are converted into the document
         // currency — the page must render them with THIS symbol, not the base.
@@ -1673,6 +1703,7 @@ class SalesController extends BaseController
         $sale_details['GrandTotal'] = number_format($sale_data->GrandTotal * $docCurrency['rate'], helpers::price_decimals(), '.', '');
         $sale_details['paid_amount'] = number_format($sale_data->paid_amount * $docCurrency['rate'], helpers::price_decimals(), '.', '');
         $sale_details['due'] = number_format($sale_details['GrandTotal'] - $sale_details['paid_amount'], helpers::price_decimals(), '.', '');
+        $sale_details['is_overdue'] = PaymentTerms::isOverdue($sale_data->due_date, (float) $sale_details['due']);
         $sale_details['payment_status'] = $sale_data->payment_statut;
         $sale_details['discount_from_points'] = ($sale_data->discount_from_points ?? 0) * $docCurrency['rate'];
 
@@ -3613,6 +3644,10 @@ class SalesController extends BaseController
             $sale['consignment_id'] = $Sale_data->consignment_id;
             $sale['zone_id'] = $Sale_data->zone_id;
             $sale['courier_id'] = $Sale_data->courier_id;
+            // Payment Terms hierarchy, Level 3 snapshot (null = no invoice-level
+            // override was set; the effective term was still resolved and the
+            // due date snapshotted at save time — see show()/index()).
+            $sale['payment_term_days'] = $Sale_data->payment_term_days;
             // Multi-Currency snapshot (null = base currency)
             $sale['currency_id'] = $Sale_data->currency_id;
             $sale['exchange_rate'] = $Sale_data->exchange_rate;

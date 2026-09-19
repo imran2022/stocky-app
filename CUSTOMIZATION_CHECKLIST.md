@@ -1688,3 +1688,56 @@ exactly.
       wrap awkwardly onto two lines.
 
 **Regression test:** `tests/Regression/build_l6_packing_list_margin_fix.php`.
+
+## 23. Build M1 — Payment Terms & Due Dates (Phase A of Customer Ledger plan)
+
+**What it does:** Adds a 3-level Payment Term hierarchy (System Default →
+Customer Default → Invoice Override) and a snapshotted Due Date on every
+sale, so overdue invoices can be identified as
+`today > due_date AND outstanding > 0`. This is Phase A of a 3-phase plan
+(B: Real Admin Customer Ledger, C: Invoice-wise Payment Allocation — both
+still proposed future work, not built).
+
+**Files touched:**
+- `database/migrations/2026_09_19_000001_add_payment_terms_and_due_dates.php`
+- `app/Support/PaymentTerms.php`
+- `app/Models/Setting.php`, `app/Models/Client.php`, `app/Models/Sale.php`
+- `app/Support/SaleMetadataRules.php`
+- `app/Http/Controllers/SalesController.php`
+- `app/Http/Controllers/ClientController.php`
+- `app/Http/Controllers/SettingsController.php`
+- `resources/src/pages/settings/SystemSettings.vue`
+- `resources/src/pages/people/CustomerForm.vue`
+- `resources/src/pages/sales/SaleForm.vue`
+
+**How to verify:**
+- [ ] Settings → Features: set the Default Payment Term (try 15 Days).
+      Create a sale for a customer with no term of their own, leave the
+      Sale form's Payment Term on "Use system/customer default" — the Due
+      Date preview should be Sale Date + 15 days.
+- [ ] Edit a customer, set their Payment Term to 30 Days (Custom also
+      works). Create a new sale for that customer, leave the invoice's
+      Payment Term on default — the Due Date preview should now use 30
+      days, not the system default.
+- [ ] On that same sale, explicitly pick "7 Days" as the invoice's own
+      Payment Term — the Due Date preview should switch to 7 days,
+      overriding the customer's 30 and the system default.
+- [ ] Save the sale, then change the system default and/or the customer's
+      own default afterwards — reopen the already-saved sale and confirm
+      its Payment Term / Due Date did **not** change (it is snapshotted,
+      not recalculated live).
+- [ ] Edit that sale and clear the invoice-level override back to
+      "default" — the due date should re-resolve using the customer's
+      (or system's) *current* default.
+- [ ] Back-date a sale's due date past today with an unpaid balance and
+      confirm the API's `is_overdue` flag is true (no dedicated UI column
+      yet — this is available for a future list/detail-page enhancement).
+
+**Regression test:** `tests/Regression/build_m1_payment_terms_and_due_dates.php`
+(real, DB-backed — hierarchy resolution at all 3 levels, snapshot
+stability, overdue detection, Settings/Client/Sale field wiring).
+
+**Not yet done:** Due Date / Overdue display on the Sales list and Sale
+Detail pages (backend-ready, frontend not started); due date on PDF
+templates / Public Invoice. Phases B and C of the original spec remain
+proposed future work only, pending the user's go-ahead.

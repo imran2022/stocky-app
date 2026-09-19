@@ -14,6 +14,9 @@ class Client extends Model
         'is_royalty_eligible', 'points', 'opening_balance', 'credit_limit',
         'woocommerce_id',
         'sync_issue_type', 'sync_issue_message', 'sync_issue_source', 'sync_issue_at',
+        // Custom: Payment Terms hierarchy, Level 2 (Customer Default). NULL = use
+        // the system default — see app/Support/PaymentTerms.php.
+        'payment_term_days',
     ];
 
     protected $casts = [
@@ -23,6 +26,7 @@ class Client extends Model
         'opening_balance' => 'double',
         'credit_limit' => 'double',
         'sync_issue_at' => 'datetime',
+        'payment_term_days' => 'integer',
     ];
 
     /**

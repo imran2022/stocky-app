@@ -39,6 +39,8 @@ class Setting extends Model
         'pwa_display', 'pwa_orientation', 'pwa_theme_color', 'pwa_background_color',
         // Custom: "Box" quantity feature toggle (Create/Edit Sale, Sale Detail, invoice PDF)
         'enable_box_qty',
+        // Custom: Payment Terms hierarchy, Level 1 (System Default) — see app/Support/PaymentTerms.php
+        'default_payment_term_days',
     ];
 
     protected $casts = [
@@ -73,6 +75,7 @@ class Setting extends Model
         'enable_wholesale_pricing' => 'boolean',
         'enable_pos_salesperson_switch' => 'boolean',
         'enable_multi_currency' => 'boolean',
+        'default_payment_term_days' => 'integer',
         'session_timeout_minutes' => 'integer',
         'allow_overselling' => 'boolean',
         'vehicle_fitment_enabled' => 'boolean',
