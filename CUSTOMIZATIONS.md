@@ -3643,3 +3643,102 @@ Warehouse, SaleZone and SaleCourier plus a Tracking Ref, and:
 4. Turns `show_delivery_info` off — confirms the whole block
    disappears even though the sale has all four fields.
 Re-ran L3–L6, M3, M4 and M5 regression gates — all still pass.
+
+## Build M7 — Real-time Sales Counter bug fixes + Dashboard "Today's sales by hour" / "Sales by Warehouse" (2026-09-19)
+
+**Request:** on the Real-time Sales Counter page (Sales menu), the
+"Today's sales by hour" chart never updated — it always showed
+everything stuck at 00h — even though the table below it (Recent
+Sales) had the correct timestamps; and that same Recent Sales table's
+"Reference" column was always blank. The user also asked to bring the
+same "Today's sales by hour" chart, plus a new "Sales by Warehouse"
+breakdown, onto the main Dashboard.
+
+**Root causes found (both pre-existing bugs, not something a prior
+build introduced):**
+1. **Hourly chart stuck at 00h.** `sales.date` is a DATE-only column
+   (no time-of-day) and `sales.time` is a *separate* TIME column, but
+   the hourly-breakdown query grouped sales by `HOUR(sales.date)` —
+   `HOUR()` on a bare DATE value is always `0` in MySQL, so every sale
+   landed in the midnight bucket regardless of when it actually
+   happened. The Recent Sales table below it builds its displayed
+   timestamp from `date` **and** `time` together, which is why that
+   table looked correct while the chart above it didn't. Fixed to
+   derive the hour from `sales.time` instead, via a new
+   driver-portable `hourExpression()` helper (works the same way in
+   the live MySQL app and in this sandbox's SQLite tests).
+2. **Reference column blank.** The backend's `recent_sales` payload
+   returned the field as lowercase `'ref'`, but the Vue table's column
+   definition reads `dataIndex: 'Ref'` (capitalized, matching every
+   other invoice-reference field in this app) — a silent key-name
+   mismatch, not a missing/empty column. Fixed the backend to return
+   `'Ref'`.
+
+**What shipped:**
+- Both bugs above fixed in `real_time_sales_counter_data()`.
+- Two new Dashboard panels, matching what the user asked to see,
+  added to the main Dashboard page (new row between "Stock Alert /
+  Top Selling" and "Recent Sales"):
+  - **"Today's sales by hour"** — a bar chart, always today, same
+    hourly data source as the Real-time Sales Counter's chart (now
+    fixed).
+  - **"Sales by Warehouse"** — a small table (Name / Total Invoice /
+    Amount) respecting the Dashboard's own date-range filter
+    (defaults to the last 7 days when no range is picked, same as the
+    rest of the Dashboard).
+- Two new `DashboardController` methods backing these panels:
+  `HourlySalesToday()` and `SalesByWarehouse()`.
+
+**Note on the "Default dashboard widget order" setting (Dashboard
+Settings page):** while investigating where to add these two new
+panels, we found that this existing setting (which lets you drag-
+reorder dashboard sections) is not actually wired up anywhere in
+`Dashboard.vue` — it saves and loads, but nothing on the Dashboard
+reads it, so re-ordering there currently has no visible effect. This
+is a pre-existing gap in the vendor's own code, unrelated to anything
+this build changed, and the user didn't ask for it to be fixed, so it
+was left as-is. The two new panels were added as fixed-position
+sections (same pattern as the rest of the Dashboard's existing
+sections) rather than hooked into that non-functional reorder system.
+If reordering the Dashboard is something you'd like working properly,
+that would be a separate, larger fix — let us know.
+
+**Files touched:**
+- `app/Http/Controllers/DashboardController.php` — new
+  `hourExpression()` helper (driver-portable: SQLite vs MySQL); fixed
+  `real_time_sales_counter_data()`'s hourly grouping and its
+  `recent_sales` key name; fixed a related date-range bug (see below);
+  new `HourlySalesToday()` and `SalesByWarehouse()` methods; both
+  wired into `dashboard_data()`'s JSON response as
+  `hourly_sales_today` and `sales_by_warehouse`.
+- `database/seeders/translations/en.php` — new `Sales_by_Warehouse`
+  translation key.
+- `resources/src/pages/Dashboard.vue` — new "Today's sales by hour" /
+  "Sales by Warehouse" row, new chart/table computed properties, demo
+  data extended, `load()` extended to read the two new response keys.
+- New: `tests/Regression/build_m7_dashboard_hourly_warehouse_and_realtime_fixes.php`.
+
+**Secondary date-range bug found and fixed along the way:** the
+Real-time Sales Counter's "today" and "yesterday" filters compared
+`sales.date` (DATE-only) against full Carbon **datetime** bounds
+(`startOfDay()`/`endOfDay()`). This happens to work in MySQL (it
+widens the comparison automatically) but is not portable — worth
+knowing if this query is ever touched again. Switched to plain
+date-string bounds (`->toDateString()`), which is equivalent and
+correct on any DB driver. Applied the same safe pattern in the two new
+`HourlySalesToday()`/`SalesByWarehouse()` methods.
+
+**Verification:** a real, DB-backed test creates two real sales (via
+the actual `SalesController::store()` flow, on two different real
+warehouses) with their `time` column forced to known hours (02:15 and
+14:40), then confirms against the real rendered data:
+1. The Real-time Sales Counter's hourly chart data shows +1 at hour 2
+   and +1 at hour 14 — and confirms hour 0 (midnight) did **not**
+   absorb them (the original bug).
+2. The Recent Sales entries carry a non-empty `'Ref'` key matching the
+   sale's real reference, and the old lowercase `'ref'` key is gone.
+3. The Dashboard's `hourly_sales_today` shows the same +1/+1 at hours
+   2 and 14.
+4. The Dashboard's `sales_by_warehouse` shows +1 invoice on each of
+   the two warehouses used.
+Re-ran L3–L6, M3, M4, M5 and M6 regression gates — all still pass.

@@ -74,6 +74,15 @@ class DashboardController extends Controller
         // Stock Value: Only warehouse filter (no date range)
         $stock_value = $this->StockValue($warehouse_id, $array_warehouses_id);
 
+        // Build M7: same two panels the Real-time Sales Counter page shows,
+        // now also on the main Dashboard. "Today's sales by hour" is always
+        // today (that's what the name means, same as the counter page) —
+        // it ignores the header date-range filter on purpose. "Sales by
+        // Warehouse" follows the header date range + warehouse filter like
+        // every other Dashboard widget.
+        $hourly_sales_today = $this->HourlySalesToday($warehouse_id, $array_warehouses_id);
+        $sales_by_warehouse = $this->SalesByWarehouse($warehouse_id, $array_warehouses_id, $request->from, $request->to);
+
         return response()->json([
             'warehouses' => $warehouses,
             'sales' => $dataSales,
@@ -84,8 +93,131 @@ class DashboardController extends Controller
             'report_dashboard' => $report_dashboard,
             'sales_by_payment' => $sales_by_payment,
             'stock_value' => $stock_value,
+            'hourly_sales_today' => $hourly_sales_today,
+            'sales_by_warehouse' => $sales_by_warehouse,
         ]);
 
+    }
+
+    // ----------------- Today's Sales by Hour (Build M7) -----------------\\
+
+    /**
+     * Sale count + total per hour of TODAY (0-23), scoped by the same
+     * user/warehouse visibility rules as the rest of the dashboard. Always
+     * "today" regardless of the header date-range filter — same scope as
+     * the Real-time Sales Counter page's identical chart, which this
+     * mirrors on the main Dashboard.
+     */
+    public function HourlySalesToday($warehouse_id, $array_warehouses_id)
+    {
+        $user = Auth::user();
+        $view_records = $user->hasRecordView();
+
+        // sales.date is a DATE-only column — comparing it against plain
+        // 'Y-m-d' strings (rather than full Carbon/datetime bounds) is both
+        // simpler and portable across DB drivers (MySQL implicitly widens a
+        // DATE column for a datetime-formatted bound so either style works
+        // there, but sqlite stores dates as plain text and compares
+        // lexicographically, so a '2026-09-19 00:00:00' bound never matches
+        // a bare '2026-09-19' column value).
+        $today = Carbon::today()->toDateString();
+
+        $base = Sale::query()
+            ->whereBetween('sales.date', [$today, $today])
+            ->where('sales.deleted_at', null)
+            ->where(function ($q) use ($view_records) {
+                if (! $view_records) {
+                    $q->where('sales.user_id', Auth::id());
+                }
+            })
+            ->where(function ($q) use ($warehouse_id, $array_warehouses_id) {
+                if ($warehouse_id !== 0) {
+                    $q->where('sales.warehouse_id', $warehouse_id);
+                } else {
+                    $q->whereIn('sales.warehouse_id', $array_warehouses_id);
+                }
+            });
+
+        $hourExpr = $this->hourExpression();
+        $rows = (clone $base)
+            ->select(
+                DB::raw($hourExpr.' as hour'),
+                DB::raw('count(*) as count'),
+                DB::raw('COALESCE(SUM(GrandTotal),0) as total')
+            )
+            ->groupBy(DB::raw($hourExpr))
+            ->get();
+
+        $hourly = [];
+        for ($h = 0; $h < 24; $h++) {
+            $hourly[$h] = ['hour' => $h, 'count' => 0, 'total' => 0.0];
+        }
+        foreach ($rows as $row) {
+            $h = (int) $row->hour;
+            if ($h >= 0 && $h < 24) {
+                $hourly[$h]['count'] = (int) $row->count;
+                $hourly[$h]['total'] = (float) $row->total;
+            }
+        }
+
+        return array_values($hourly);
+    }
+
+    // ----------------- Sales by Warehouse (Build M7) -----------------\\
+
+    /**
+     * Per-warehouse invoice count + amount for the header date range,
+     * scoped by the same user/warehouse visibility rules as the rest of
+     * the dashboard. Same shape as the Real-time Sales Counter page's
+     * "Sales by Location" panel, but respecting the selected date range
+     * instead of always being today.
+     */
+    public function SalesByWarehouse($warehouse_id, $array_warehouses_id, $from = null, $to = null)
+    {
+        $user = Auth::user();
+        $view_records = $user->hasRecordView();
+
+        if (! empty($from) && ! empty($to)) {
+            $start = Carbon::parse($from)->startOfDay();
+            $end = Carbon::parse($to)->endOfDay();
+        } else {
+            $end = Carbon::today()->endOfDay();
+            $start = $end->copy()->subDays(6)->startOfDay();
+        }
+
+        return Sale::query()
+            ->whereBetween('sales.date', [$start->toDateString(), $end->toDateString()])
+            ->where('sales.deleted_at', null)
+            ->where(function ($q) use ($view_records) {
+                if (! $view_records) {
+                    $q->where('sales.user_id', Auth::id());
+                }
+            })
+            ->where(function ($q) use ($warehouse_id, $array_warehouses_id) {
+                if ($warehouse_id !== 0) {
+                    $q->where('sales.warehouse_id', $warehouse_id);
+                } else {
+                    $q->whereIn('sales.warehouse_id', $array_warehouses_id);
+                }
+            })
+            ->leftJoin('warehouses', 'sales.warehouse_id', '=', 'warehouses.id')
+            ->select(
+                'sales.warehouse_id',
+                'warehouses.name as warehouse_name',
+                DB::raw('COUNT(*) as total_invoice'),
+                DB::raw('COALESCE(SUM(sales.GrandTotal),0) as amount')
+            )
+            ->groupBy('sales.warehouse_id', 'warehouses.name')
+            ->orderByDesc('amount')
+            ->get()
+            ->map(function ($r) {
+                return [
+                    'warehouse_id' => $r->warehouse_id,
+                    'name' => $r->warehouse_name ?: '—',
+                    'total_invoice' => (int) $r->total_invoice,
+                    'amount' => (float) $r->amount,
+                ];
+            });
     }
 
     // ----------------- Sales Chart js -----------------------\\
@@ -1051,6 +1183,26 @@ class DashboardController extends Controller
     }
 
     /**
+     * Driver-portable SQL for "the hour of day a sale happened, 0-23".
+     *
+     * `sales.date` is a DATE-only column (no time-of-day) and `sales.time`
+     * is a separate TIME column — the vendor's original hourly-breakdown
+     * queries here used `HOUR(sales.date)`, which is always 0 on a DATE
+     * value, so every sale landed in the midnight bucket regardless of when
+     * it actually happened (Build M7 bug fix). The hour has to come from
+     * `sales.time` instead. MySQL (production) has HOUR(); the sqlite test
+     * sandbox needs strftime() instead, hence the driver check.
+     */
+    private function hourExpression(): string
+    {
+        $driver = DB::connection()->getDriverName();
+
+        return $driver === 'sqlite'
+            ? "CAST(strftime('%H', COALESCE(sales.time, '00:00:00')) AS INTEGER)"
+            : "HOUR(COALESCE(sales.time, '00:00:00'))";
+    }
+
+    /**
      * Real-time sales counter: today's count, total, last sale, hourly breakdown,
      * recent sales, top products, payment-status split and yesterday's total for trend.
      */
@@ -1073,10 +1225,13 @@ class DashboardController extends Controller
             $warehouse_id = 0;
         }
 
-        $todayStart = Carbon::today()->startOfDay();
-        $todayEnd = Carbon::today()->endOfDay();
-        $yesterdayStart = Carbon::yesterday()->startOfDay();
-        $yesterdayEnd = Carbon::yesterday()->endOfDay();
+        // sales.date is a DATE-only column — plain 'Y-m-d' bounds (Build M7)
+        // instead of full Carbon/datetime bounds, same reasoning as
+        // HourlySalesToday()'s $today above.
+        $todayStart = Carbon::today()->toDateString();
+        $todayEnd = $todayStart;
+        $yesterdayStart = Carbon::yesterday()->toDateString();
+        $yesterdayEnd = $yesterdayStart;
 
         $applyScope = function ($query) use ($view_records, $warehouse_id, $array_warehouses_id) {
             $query->where('sales.deleted_at', null)
@@ -1121,13 +1276,14 @@ class DashboardController extends Controller
                 : ($lastSale->created_at ? $lastSale->created_at->toIso8601String() : null);
         }
 
+        $hourExpr = $this->hourExpression();
         $hourlyRows = (clone $todayBase)
             ->select(
-                DB::raw('HOUR(sales.date) as hour'),
+                DB::raw($hourExpr.' as hour'),
                 DB::raw('count(*) as count'),
                 DB::raw('COALESCE(SUM(GrandTotal),0) as total')
             )
-            ->groupBy(DB::raw('HOUR(sales.date)'))
+            ->groupBy(DB::raw($hourExpr))
             ->get();
 
         $hourly = [];
@@ -1169,7 +1325,12 @@ class DashboardController extends Controller
                 : null;
             return [
                 'id' => $s->id,
-                'ref' => $s->Ref,
+                // Frontend table column reads dataIndex 'Ref' (capitalized,
+                // matching the sales.Ref column and every other invoice
+                // reference field in this app) — this used to be lowercase
+                // 'ref', so the Reference column always rendered blank
+                // (Build M7 bug fix).
+                'Ref' => $s->Ref,
                 'date' => $dateTime,
                 'grand_total' => $grand,
                 'paid_amount' => $paid,

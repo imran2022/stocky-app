@@ -1918,3 +1918,29 @@ optional; the line just doesn't render when empty).
 
 **Regression test:**
 `tests/Regression/build_m6_invoice_delivery_info.php`.
+
+---
+
+## Build M7 — Real-time Sales Counter fixes + Dashboard hourly/warehouse panels
+
+**How to verify:**
+- [ ] Sales menu → Real-time Sales Counter → make a new sale → the
+      "Today's sales by hour" chart now shows a bar in the hour the
+      sale was actually made (not stuck at 00h).
+- [ ] Same page → Recent Sales table → the "Reference" column now
+      shows the invoice reference (not blank) for new and existing
+      sales.
+- [ ] Main Dashboard → a new row appears with "Today's sales by hour"
+      (bar chart) and "Sales by Warehouse" (table) — make a sale and
+      confirm the hour chart updates and the warehouse table shows the
+      correct warehouse with +1 invoice and the right amount.
+- [ ] Dashboard's date-range filter still changes "Sales by
+      Warehouse" (it respects the picked range, like the rest of the
+      Dashboard); "Today's sales by hour" always stays "today"
+      regardless of the range picked (same as the Real-time Sales
+      Counter page).
+- [ ] All other Dashboard/Real-time Sales Counter figures (stat cards,
+      top selling, stock alert, etc.) are unaffected.
+
+**Regression test:**
+`tests/Regression/build_m7_dashboard_hourly_warehouse_and_realtime_fixes.php`.

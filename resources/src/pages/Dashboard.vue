@@ -216,6 +216,30 @@
         </a-col>
       </a-row>
 
+      <!-- ================= Today's sales by hour + Sales by Warehouse (Build M7) ================= -->
+      <a-row :gutter="[16, 16]" style="margin-top: 16px">
+        <a-col :xs="24" :xl="14">
+          <a-card class="chart-card" :title="$t('Hourly_Sales_Today')">
+            <apexchart v-if="hourlyChart.series[0]?.data.length" :key="'hourly-' + loadCount" type="bar" height="300" :options="hourlyChart.options" :series="hourlyChart.series" />
+            <a-empty v-else :description="$t('No_sales_today')" style="padding: 48px 0" />
+          </a-card>
+        </a-col>
+        <a-col :xs="24" :xl="10">
+          <a-card :title="$t('Sales_by_Warehouse')" style="height: 100%">
+            <a-table
+              :columns="warehouseColumns" :data-source="salesByWarehouse"
+              size="small" :pagination="false" :row-key="(_r, i) => i"
+              :locale="{ emptyText: $t('No_data_available') }"
+            >
+              <template #bodyCell="{ column, record, index }">
+                <template v-if="column.key === 'sn'">{{ index + 1 }}</template>
+                <template v-else-if="column.key === 'amount'">{{ money(record.amount) }}</template>
+              </template>
+            </a-table>
+          </a-card>
+        </a-col>
+      </a-row>
+
       <!-- ================= Recent sales ================= -->
       <a-card style="margin-top: 16px" :title="$t('Recent_Sales')">
         <template #extra>
@@ -286,6 +310,9 @@ const salesChart = ref({ series: [], options: {} });
 const donutChart = ref({ series: [], options: {} });
 const paymentChart = ref({ series: [], options: {} });
 const customerChart = ref({ series: [], options: {} });
+// Build M7: same two panels as the Real-time Sales Counter page.
+const hourlySalesToday = ref([]); // [{ hour, count, total }] x24
+const salesByWarehouse = ref([]);
 
 // Computed so the labels follow a live locale switch (Settings saves one).
 const periodOptions = computed(() => [
@@ -447,6 +474,33 @@ const GRID = { borderColor: 'rgba(128,128,128,0.2)', strokeDashArray: 4 };
 // Cohesive, modern categorical palette shared across every dashboard chart.
 const PALETTE = ['#6366f1', '#22d3ee', '#f59e0b', '#ec4899', '#10b981', '#8b5cf6', '#0ea5e9', '#f43f5e'];
 
+// Today's Sales by Hour — same bar chart as the Real-time Sales Counter page.
+const hourlyChart = computed(() => {
+  const totals = hourlySalesToday.value.map(h => Number(h.total) || 0);
+  return {
+    series: [{ name: t('Sales'), data: hourlySalesToday.value.map(h => Number(h.count) || 0) }],
+    options: {
+      chart: { ...CHART_BASE, type: 'bar' },
+      plotOptions: { bar: { columnWidth: '55%', borderRadius: 6 } },
+      dataLabels: { enabled: false },
+      colors: ['#6d28d9'],
+      xaxis: {
+        categories: Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, '0')}h`),
+        axisBorder: { show: false }, axisTicks: { show: false },
+      },
+      yaxis: { labels: { formatter: v => Math.round(v) } },
+      grid: GRID,
+      tooltip: { theme: 'light', y: { formatter: (val, { dataPointIndex }) => `${val} (${money(totals[dataPointIndex] || 0)})` } },
+    },
+  };
+});
+const warehouseColumns = computed(() => [
+  { title: 'S/N', key: 'sn', width: 50 },
+  { title: t('Name'), dataIndex: 'name', key: 'name' },
+  { title: t('Total_Invoice'), dataIndex: 'total_invoice', key: 'total_invoice', align: 'right' },
+  { title: t('Amount'), key: 'amount', align: 'right' },
+]);
+
 function buildCharts(days, salesData, purchasesData, products, customers, pay) {
   salesChart.value = {
     series: [
@@ -564,6 +618,15 @@ const DEMO = {
     { Ref: 'SL-2938', client_name: 'James Chen', warehouse_name: 'Main', statut: 'ordered', GrandTotal: 452.75, paid_amount: 0, due: 452.75, payment_status: 'unpaid' },
     { Ref: 'SL-2937', client_name: 'Fatima Zahra', warehouse_name: 'Depot 2', statut: 'cancelled', GrandTotal: 61.9, paid_amount: 61.9, due: 0, payment_status: 'paid' },
   ],
+  hourly: Array.from({ length: 24 }, (_, h) => {
+    const count = [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20].includes(h)
+      ? Math.max(0, Math.round(Math.sin((h - 9) / 11 * Math.PI) * 6) + 1) : 0;
+    return { hour: h, count, total: count * 145 };
+  }),
+  salesByWarehouse: [
+    { warehouse_id: 1, name: 'Main', total_invoice: 24, amount: 7120 },
+    { warehouse_id: 2, name: 'Depot 2', total_invoice: 13, amount: 3980 },
+  ],
 };
 
 function applyDemo() {
@@ -574,6 +637,8 @@ function applyDemo() {
   sales.value = DEMO.lastSales;
   stockAlerts.value = DEMO.stockAlerts;
   topProducts.value = DEMO.topProducts;
+  hourlySalesToday.value = DEMO.hourly;
+  salesByWarehouse.value = DEMO.salesByWarehouse;
   buildCharts(
     DEMO.days, DEMO.sales, DEMO.purchases, DEMO.products, DEMO.customers,
     { days: DEMO.days, sent: DEMO.paymentSent, received: DEMO.paymentReceived }
@@ -620,6 +685,8 @@ async function load() {
         by_wholesale: Number(data.stock_value.by_wholesale) || 0,
       };
     }
+    hourlySalesToday.value = Array.isArray(data.hourly_sales_today) ? data.hourly_sales_today : [];
+    salesByWarehouse.value = Array.isArray(data.sales_by_warehouse) ? data.sales_by_warehouse : [];
     const pay = data.payments?.original || {};
     buildCharts(
       data.sales.original.days,

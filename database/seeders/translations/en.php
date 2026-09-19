@@ -2270,6 +2270,7 @@ return [
 'vs' => 'vs',
 'yesterday' => 'yesterday',
 'Hourly_Sales_Today' => "Today's sales by hour",
+'Sales_by_Warehouse' => 'Sales by Warehouse',
 'Top_Products_Today' => 'Top products today',
 'just_now' => 'just now',
 'units' => 'units',
