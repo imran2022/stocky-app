@@ -98,6 +98,9 @@
                 <a-menu-item key="ledger">
                   <ProfileOutlined /> {{ $t('Customer_Ledger') }}
                 </a-menu-item>
+                <a-menu-item key="statement">
+                  <FileTextOutlined /> {{ $t('Customer_Statement') }}
+                </a-menu-item>
                 <a-menu-item
                   v-if="record.client_ecommerce === 'yes' && auth.can('Customers_edit')"
                   key="online-store"
@@ -335,7 +338,7 @@ import {
   PlusOutlined, EditOutlined, DeleteOutlined, DollarOutlined, RollbackOutlined,
   EyeOutlined, ProfileOutlined, MoreOutlined, TeamOutlined, CreditCardOutlined,
   ShopOutlined, StarOutlined, CalculatorOutlined, KeyOutlined,
-  UserOutlined, LockOutlined, MailOutlined,
+  UserOutlined, LockOutlined, MailOutlined, FileTextOutlined,
 } from '@ant-design/icons-vue';
 import PageHeader from '../../components/PageHeader.vue';
 import DataTable from '../../components/DataTable.vue';
@@ -410,6 +413,7 @@ watch(() => crud.total.value, () => { if (!initialLoading.value) loadTotals(); }
 function onAction(key, record) {
   const go = {
     ledger: () => router.push(`/customers/${record.id}/ledger`),
+    statement: () => router.push(`/customers/${record.id}/statement`),
     'online-store': () => openStore(record),
     'pay-due': () => openPay(record, 'due'),
     'pay-return': () => openPay(record, 'return'),

@@ -1793,3 +1793,41 @@ Invoice PDF customizer (mirrors "Previous Dues").
 `tests/Regression/build_m2_payment_terms_fixes_and_due_date_display.cjs`
 (run with `node`) and
 `tests/Regression/build_m3_due_date_pdf_and_toggle_backend.php`.
+
+## Build M4 — Customer Statement (admin)
+
+**Files:**
+- New: `app/Services/ClientStatementService.php`,
+  `app/Http/Controllers/ClientStatementController.php`,
+  `app/Exports/ClientStatementExport.php`,
+  `resources/views/pdf/customer_statement_modern.blade.php`,
+  `resources/src/pages/people/CustomerStatement.vue`,
+  `tests/Regression/build_m4_customer_statement.php`
+- `app/Http/Controllers/Api/Portal/PortalStatementController.php`
+- `routes/api.php`, `resources/src/router/index.js`
+- `resources/src/pages/people/Customers.vue`,
+  `resources/src/pages/people/CustomerDetails.vue`
+- `resources/lang/en/messages.php`
+
+**How to verify:**
+- [ ] Customers list > row action menu (⋮): a new "Customer Statement"
+      item opens `/customers/{id}/statement` — a page with an Opening
+      Balance / Total Debit / Closing Balance card row, a date-range
+      filter, and a Date/Type/Ref/Description/Debit/Credit/Balance table.
+- [ ] The numbers on this page must match the SAME customer's statement
+      in the client portal (Account Statement page) exactly — same
+      entries, same closing balance.
+- [ ] Customer Details page: "Pay Due" button is now followed by a
+      "View Statement" button; the customer's Address now shows next to
+      Phone (previously missing even though the data was already there).
+- [ ] "Download PDF" produces a Modern-invoice-styled statement PDF;
+      "Download Excel" produces an .xlsx with the same rows plus a
+      header block (customer/period/opening/closing balance).
+- [ ] Applying a date range (From/To) narrows the table and both
+      downloads to that period; "Reset" clears it back to all-time.
+- [ ] The existing "Customer Ledger" menu item/page is untouched — this
+      is a new, additional item, not a replacement.
+
+**Regression test:**
+`tests/Regression/build_m4_customer_statement.php` (real DB; also
+cross-checks the portal and admin statements are identical).

@@ -3337,3 +3337,120 @@ new HTTP request would), confirming the Due Date + Overdue line appears,
 hides when the PDF toggle is off, and never appears at all for a sale
 that has no due date. Full existing regression suite (L1–L6, M1) re-run
 with no new failures.
+
+## Build M4 — Customer Statement (admin) (2026-09-19)
+
+**What was asked:** an admin-side "Customer Statement" page — the same
+unified, running-balance ledger (Date / Type / Ref / Description / Debit
+/ Credit / Balance, with Opening/Closing balance cards) the client
+portal already shows the customer — reachable from a new "Customer
+Statement" menu item, plus a "View Statement" button on the Customer
+Details page (after "Pay Due"), downloadable as PDF (styled like the
+Modern Sale Invoice) or Excel, and a fix for the Customer Details page
+not showing the customer's address.
+
+**Better-plan note (asked for, and applied):** the app already had
+THREE different things in this area, easy to confuse with each other:
+1. The client portal's own statement (`PortalStatementController`) —
+   the correct unified ledger format, but only the customer could see it.
+2. The existing admin "Customer Ledger" page/PDF (`CustomerLedger.vue`,
+   `ClientController::export()`, `pdf/customer_ledger.blade.php`) — a
+   *different* design (KPI tiles + four tabbed lists of everything,
+   unfiltered). Left exactly as-is; nothing about it changed.
+3. What was actually being asked for: the portal's ledger *format*,
+   made available to admins, as a *separate, additional* page — not a
+   replacement for #2.
+
+Rather than write the 7-source ledger-building query a third time (sales
++ payments + opening-balance payments + returns + refunds + service jobs
++ service payments — already duplicated once between the portal and the
+existing "Customer Ledger" PDF), that logic was extracted out of
+`PortalStatementController::index()` into a single new service,
+`App\Services\ClientStatementService::build()`. The portal was refactored
+to call it (same response shape, verified byte-for-byte in the test
+below); the new admin endpoints call the exact same service. This means
+the admin's new Statement page and the customer's own portal statement
+can never show different numbers for the same customer — they are
+provably the same calculation, not two copies that started identical and
+will eventually drift (the risk this engagement flagged earlier about
+`clientPreviousDues()`).
+
+**New backend:**
+- `App\Services\ClientStatementService` — the shared ledger builder
+  (moved out of the portal controller, logic unchanged).
+- `App\Http\Controllers\ClientStatementController` — three admin,
+  `auth:api`-protected endpoints, all gated the same way
+  `clients/{id}/brief` already is (`authorizeForUser(..., 'view', Client::class)`):
+  - `GET clients/{id}/statement` — same JSON shape as the portal.
+  - `GET clients/{id}/statement/pdf` — server-rendered PDF, Modern-invoice
+    styled (`resources/views/pdf/customer_statement_modern.blade.php`;
+    same slate/blue palette and header layout as
+    `sale_pdf_modern.blade.php`, RTL-shaped the same way the existing
+    "Customer Ledger" PDF export already is).
+  - `GET clients/{id}/statement/excel` — server-rendered `.xlsx` via
+    `App\Exports\ClientStatementExport` (Maatwebsite/Laravel-Excel,
+    already a dependency — used elsewhere for `StockExport`), with a
+    header block (customer, period, opening/closing balance) above the
+    same seven columns the screen and PDF show.
+- `PortalStatementController::index()` — refactored to call the shared
+  service instead of building the ledger inline; response shape
+  unchanged (one small addition: `client.id` is now included, which the
+  existing portal page does not read).
+- New routes in `routes/api.php`, next to the existing
+  `clients/{id}/brief` route.
+
+**New frontend:**
+- `resources/src/pages/people/CustomerStatement.vue` — new page: hero
+  banner (matches `CustomerLedger.vue`'s style), 3 KPI cards (Opening /
+  Total Debit / Closing Balance), a date-range filter, the ledger table,
+  and Download PDF / Download Excel buttons.
+- New route `customers/:id/statement` (same `Customers_view` permission
+  as Details/Ledger).
+- `Customers.vue` — new "Customer Statement" row-action menu item,
+  alongside (not replacing) the existing "Customer Ledger" item.
+- `CustomerDetails.vue`:
+  - new "View Statement" button in the page header, right after "Pay Due".
+  - **Address fix**: the page was already receiving the client's
+    `adresse` field from `GET clients/{id}` (confirmed in the test
+    below) — it just wasn't in the template. Added as a new
+    Descriptions row next to Phone.
+
+**Files touched:**
+- New: `app/Services/ClientStatementService.php`,
+  `app/Http/Controllers/ClientStatementController.php`,
+  `app/Exports/ClientStatementExport.php`,
+  `resources/views/pdf/customer_statement_modern.blade.php`,
+  `resources/src/pages/people/CustomerStatement.vue`.
+- `app/Http/Controllers/Api/Portal/PortalStatementController.php` —
+  refactored to use the shared service.
+- `routes/api.php` — 3 new routes.
+- `resources/src/router/index.js` — new route.
+- `resources/src/pages/people/Customers.vue` — new menu item.
+- `resources/src/pages/people/CustomerDetails.vue` — "View Statement"
+  button, Address field.
+- `resources/lang/en/messages.php` — new keys (`Customer_Statement`,
+  `View_Statement`, `Closing_Balance`, `Debit`, `Credit`, `Type`,
+  `From_Date`, `To_Date`, `Download_Excel`, and a few more — English
+  only; other locales fall back to English for these new strings, same
+  as any other locale gap in this app).
+- New: `tests/Regression/build_m4_customer_statement.php`.
+
+**Verification:** a real, DB-backed test creates a customer with an
+opening balance, a completed sale, and a partial payment, then: (1)
+calls `ClientStatementService::build()` directly and checks the entries
+list, ordering, and the running balance math (500 opening + 300 invoice
+− 100 payment = 700 closing); (2) calls the portal controller and the
+new admin controller for the *same* customer and asserts their
+`entries` and `closing_balance` are byte-identical — proving the
+shared-service refactor didn't change portal behavior and that admin
+and portal can't drift; (3) renders the real
+`customer_statement_modern.blade.php` template with real data and
+checks it shows the customer name, "ACCOUNT STATEMENT", the correct
+closing balance, and the address; (4) exercises
+`ClientStatementExport`'s header/row mapping directly; (5) confirms
+`ClientController::show()` already returns `adresse`. Existing
+regression suite spot-checked (M1, M2, M3, L1, L4) with no new
+failures; DB confirmed back to its 7-client/16-sale baseline after the
+test run (test cleans up after itself; a first run that failed on a
+missing `user_id` on the payment fixture left one orphan client, fixed
+in the test and cleaned up by hand before the final passing run).

@@ -13,6 +13,10 @@
           <template #icon><DollarOutlined /></template>
           {{ $t('Pay_Due') }}
         </a-button>
+        <a-button @click="$router.push(`/customers/${id}/statement`)">
+          <template #icon><FileTextOutlined /></template>
+          {{ $t('View_Statement') }}
+        </a-button>
       </template>
     </PageHeader>
 
@@ -26,6 +30,7 @@
           <a-descriptions-item :label="$t('Code')">{{ client.code }}</a-descriptions-item>
           <a-descriptions-item :label="$t('Email')">{{ client.email || '-' }}</a-descriptions-item>
           <a-descriptions-item :label="$t('Phone')">{{ client.phone || '-' }}</a-descriptions-item>
+          <a-descriptions-item :label="$t('Address')">{{ client.adresse || '-' }}</a-descriptions-item>
           <a-descriptions-item :label="$t('City')">{{ client.city || '-' }}</a-descriptions-item>
           <a-descriptions-item :label="$t('Country')">{{ client.country || '-' }}</a-descriptions-item>
           <a-descriptions-item :label="$t('Tax_Number')">{{ client.tax_number || '-' }}</a-descriptions-item>
@@ -183,7 +188,7 @@ import { ref, reactive, computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { message } from 'ant-design-vue';
 import { useI18n } from 'vue-i18n';
-import { LeftOutlined, DollarOutlined } from '@ant-design/icons-vue';
+import { LeftOutlined, DollarOutlined, FileTextOutlined } from '@ant-design/icons-vue';
 import PageHeader from '../../components/PageHeader.vue';
 import PayDueModal from '../../components/PayDueModal.vue';
 import { useAuthStore } from '../../stores/auth';

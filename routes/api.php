@@ -621,6 +621,13 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     Route::post('clients/{id}/portal-disable', [\App\Http\Controllers\Api\Portal\PortalAdminController::class, 'disable']);
     Route::get('/client_ledger_pdf', 'ClientController@export');
 
+    // Customer Account Statement (Build M4) — unified running-balance ledger,
+    // same shape as the client portal's statement, shared via
+    // App\Services\ClientStatementService.
+    Route::get('clients/{id}/statement', 'ClientStatementController@index');
+    Route::get('clients/{id}/statement/pdf', 'ClientStatementController@pdf');
+    Route::get('clients/{id}/statement/excel', 'ClientStatementController@excel');
+
     // ------------------------------- CLIENTS Ecommerce--------------------------\\
     // ------------------------------------------------------------------\\
 

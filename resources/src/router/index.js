@@ -323,6 +323,7 @@ const KnowledgeBaseArticleForm = lazy('KnowledgeBaseArticleForm', () => import('
 const Profile = lazy('Profile', () => import('../pages/profile/Profile.vue'));
 const CustomerDetails = lazy('CustomerDetails', () => import('../pages/people/CustomerDetails.vue'));
 const CustomerLedger = lazy('CustomerLedger', () => import('../pages/people/CustomerLedger.vue'));
+const CustomerStatement = lazy('CustomerStatement', () => import('../pages/people/CustomerStatement.vue'));
 // --- Projects (Wave C) ---
 const Projects = lazy('Projects', () => import('../pages/projects/Projects.vue'));
 const ProjectForm = lazy('ProjectForm', () => import('../pages/projects/ProjectForm.vue'));
@@ -497,6 +498,7 @@ const routes = [
             { path: 'customers/:id/edit', name: 'customer-edit', component: CustomerForm, meta: { title: 'Edit Customer', permission: 'Customers_view' } },
             { path: 'customers/:id/details', name: 'customer-details', component: CustomerDetails, meta: { title: 'Customer Details', permission: 'Customers_view' } },
             { path: 'customers/:id/ledger', name: 'customer-ledger', component: CustomerLedger, meta: { title: 'Customer Ledger', permission: 'Customers_view' } },
+            { path: 'customers/:id/statement', name: 'customer-statement', component: CustomerStatement, meta: { title: 'Customer Statement', permission: 'Customers_view' } },
             { path: 'suppliers', name: 'suppliers', component: Suppliers, meta: { title: 'Suppliers', permission: 'Suppliers_view' } },
             { path: 'suppliers/import', name: 'suppliers-import', component: ImportSuppliers, meta: { title: 'Import Suppliers', permission: 'Suppliers_import' } },
             { path: 'suppliers/create', name: 'supplier-create', component: SupplierForm, meta: { title: 'Add Supplier', permission: 'Suppliers_add' } },
