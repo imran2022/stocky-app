@@ -2973,3 +2973,61 @@ actual **rendered PDF bytes** (text extracted with `pdftotext`) all agree
 for three combinations — both lines on, both off, and Previous Dues on
 with Net Balance off. The new regression test and the full existing suite
 (including L1) pass.
+
+## Build L3 — Sales Invoice: multiple selectable PDF templates (2026-09-19)
+
+**Why:** Only one A4 invoice layout existed. The user supplied a
+ready-made, fully-styled alternate design (a modern layout with a
+built-in shipping-label/COD section) and asked for a way to pick between
+the two, like the POS receipt's own settings already let you turn
+sections on/off — but for the whole layout, not just sections.
+
+**What changed:**
+- `app/Models/PdfTemplate.php` — new `layout` key in `DEFAULTS` (default
+  `'classic'`, so nothing changes unless you switch it), and a new
+  `LAYOUTS` map (`doc_type => [key => label]`) — currently only `sale`
+  has a second option, `'modern'`.
+- `app/Http/Controllers/PdfTemplateController.php` — validates `layout`
+  against the doc type's allowed values; `show()` now also returns the
+  available layouts so the settings page can list them.
+- New: `resources/views/pdf/sale_pdf_modern.blade.php` — the
+  user-supplied "Modern (with Shipping Label)" design, used as-is except
+  for one addition: the Build L2 Previous Dues/Net Balance toggle was
+  wired in so both layouts stay in sync with that setting. Unlike
+  Classic, this layout is self-styled (its own colors/fonts) and does not
+  read the Colors/Typography/Layout/Items-table panels of the Invoice PDF
+  customizer.
+- `app/Http/Controllers/SalesController.php` — added
+  `saleInvoiceViewName()`, which resolves the saved `layout` setting to a
+  Blade view name (falling back to Classic for any unrecognized value —
+  can never 404 from a bad/old setting). All three places that used to
+  hardcode `view('pdf.sale_pdf', ...)` — `Sale_PDF()`,
+  `Sale_PDF_Inline()`, and the bulk-download `renderSaleInvoiceHtml()`
+  helper — now go through this one method, so the chosen template applies
+  everywhere the Sales Invoice PDF is produced, including the public
+  invoice page's Download button (which delegates to `Sale_PDF()`).
+- `resources/src/pages/settings/InvoicePdfSettings.vue` — a Template
+  picker appears above the customizer, only when the current doc type has
+  more than one layout (today, only Sales Invoice). Choosing a non-Classic
+  layout shows a notice that the Colors/Typography/etc. panels don't apply
+  to it, and replaces the live preview (which only approximates Classic's
+  markup) with a plain "save and check a real PDF" message rather than
+  showing a misleading preview.
+- New: `tests/Regression/build_l3_multi_template_sale_pdf.php`.
+
+**Verification:** real PDF render test — switched the setting to
+`'modern'`, called the actual `Sale_PDF()` controller method, and
+confirmed (via `pdftotext` on the real output bytes) the Modern layout's
+distinctive shipping-label section ("DELIVERY INFORMATION", "CASH ON
+DELIVERY") appears, and that Previous Dues/Net Balance still honor the
+Build L2 toggle inside this layout. Switched back to `'classic'` and
+confirmed the shipping-label section is gone and Previous Dues/Net
+Balance still render correctly (no regression). New regression test and
+the full existing suite pass.
+
+**How to add a third template later:** drop a new Blade file in
+`resources/views/pdf/`, add its key/label to
+`PdfTemplate::LAYOUTS['sale']`, and it appears in the Template picker
+automatically — no other changes needed unless the new template needs its
+own extra data beyond what `$sale`/`$details`/`$setting`/`$symbol`
+already carry (the Modern layout needed none).

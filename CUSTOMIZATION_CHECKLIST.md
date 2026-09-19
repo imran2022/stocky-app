@@ -1540,3 +1540,41 @@ existing Invoice PDF customizer rather than a new settings mechanism.
       numbers.
 
 **Regression test:** `tests/Regression/build_l2_previous_dues_toggle.php`.
+
+---
+
+## 19. Build L3 — Sales Invoice: multiple selectable PDF templates
+
+**What it does:** Settings → Invoice PDF → Sales Invoice now has a
+**Template** picker: "Classic" (the original, fully customizable via the
+Colors/Typography/etc. panels) and "Modern (with Shipping Label)" (a
+user-supplied, fully self-styled design with a built-in COD/shipping
+label section). Whichever is selected is used everywhere a Sales Invoice
+PDF is produced — download, inline view, bulk download, and the public
+invoice page's Download button.
+
+**Files touched:**
+- `app/Models/PdfTemplate.php`, `app/Http/Controllers/PdfTemplateController.php`
+- New: `resources/views/pdf/sale_pdf_modern.blade.php`
+- `app/Http/Controllers/SalesController.php`
+- `resources/src/pages/settings/InvoicePdfSettings.vue`
+
+**How to verify:**
+- [ ] Settings → Invoice PDF → Sales Invoice must show a Template picker
+      with "Classic" and "Modern (with Shipping Label)".
+- [ ] Switch to Modern, save. Download any sale's PDF — it must be the
+      new design, with the shipping-label/COD section at the bottom.
+- [ ] The public invoice link's Download button must also produce the
+      Modern PDF once selected (it shares the same rendering path).
+- [ ] Previous Dues / Net Balance (Build L2) must still honor their
+      on/off toggle inside the Modern layout.
+- [ ] Switch back to Classic, save — everything must return to exactly
+      how it looked before this build.
+- [ ] Quotation and Purchase Order settings must NOT show a Template
+      picker (they only have one layout).
+
+**Regression test:** `tests/Regression/build_l3_multi_template_sale_pdf.php`.
+
+**How to add another template later:** drop a new Blade file, add it to
+`PdfTemplate::LAYOUTS['sale']` — no other code changes needed unless the
+new design needs data the current templates don't already receive.

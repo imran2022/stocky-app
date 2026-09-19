@@ -17,6 +17,7 @@ class PdfTemplateController extends Controller
         return response()->json([
             'settings' => PdfTemplate::settingsFor($type),
             'defaults' => PdfTemplate::DEFAULTS,
+            'layouts' => PdfTemplate::LAYOUTS[$type] ?? ['classic' => 'Classic'],
         ]);
     }
 
@@ -48,6 +49,12 @@ class PdfTemplateController extends Controller
             'show_thank_you' => 'required|boolean',
             'show_previous_dues' => 'required|boolean',
             'show_net_balance' => 'required|boolean',
+            'layout' => ['required', 'string', function ($attribute, $value, $fail) use ($type) {
+                $allowed = array_keys(PdfTemplate::LAYOUTS[$type] ?? ['classic' => 'Classic']);
+                if (! in_array($value, $allowed, true)) {
+                    $fail("This document type only supports: ".implode(', ', $allowed).'.');
+                }
+            }],
             'labels' => 'nullable|array',
             'labels.title' => 'nullable|string|max:120',
             'labels.thank_you' => 'nullable|string|max:190',

@@ -2764,6 +2764,19 @@ class SalesController extends BaseController
      * methods and are left untouched to avoid any risk of regression; this is
      * a parallel copy for the new bulk feature only.
      */
+    /**
+     * Which Blade view renders the Sales Invoice PDF/print HTML — picked
+     * from Settings → Invoice PDF → Sales Invoice → Template
+     * (`PdfTemplate::LAYOUTS['sale']`). Falls back to the Classic view for
+     * any unrecognized value, so an old/corrupt setting can never 404.
+     */
+    private function saleInvoiceViewName(): string
+    {
+        $layout = PdfTemplate::settingsFor('sale')['layout'] ?? 'classic';
+
+        return $layout === 'modern' ? 'pdf.sale_pdf_modern' : 'pdf.sale_pdf';
+    }
+
     private function renderSaleInvoiceHtml($id): string
     {
         $details = [];
@@ -2869,7 +2882,7 @@ class SalesController extends BaseController
         $pos_setting_pdf = PosSetting::where('deleted_at', '=', null)->first();
         $show_items_tax = $pos_setting_pdf ? (int) ($pos_setting_pdf->show_items_tax ?? 0) : 0;
 
-        $html = view('pdf.sale_pdf', [
+        $html = view($this->saleInvoiceViewName(), [
             'symbol' => $symbol,
             'setting' => $settings,
             'sale' => $sale,
@@ -3275,7 +3288,7 @@ class SalesController extends BaseController
         $pos_setting_pdf = PosSetting::where('deleted_at', '=', null)->first();
         $show_items_tax = $pos_setting_pdf ? (int) ($pos_setting_pdf->show_items_tax ?? 0) : 0;
 
-        $Html = view('pdf.sale_pdf', [
+        $Html = view($this->saleInvoiceViewName(), [
             'symbol' => $symbol,
             'setting' => $settings,
             'sale' => $sale,
@@ -3430,7 +3443,7 @@ class SalesController extends BaseController
         $pos_setting_pdf = PosSetting::where('deleted_at', '=', null)->first();
         $show_items_tax = $pos_setting_pdf ? (int) ($pos_setting_pdf->show_items_tax ?? 0) : 0;
 
-        $Html = view('pdf.sale_pdf', [
+        $Html = view($this->saleInvoiceViewName(), [
             'symbol' => $symbol,
             'setting' => $settings,
             'sale' => $sale,

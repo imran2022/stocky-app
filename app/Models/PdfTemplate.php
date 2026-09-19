@@ -52,9 +52,24 @@ class PdfTemplate extends Model
             'thank_you' => '',
         ],
         'footer_text' => '',       // '' = use System Settings invoice footer
+        // Which Blade file renders this doc type's PDF/print HTML. Only
+        // 'sale' currently has a second option — 'modern' picks
+        // resources/views/pdf/sale_pdf_modern.blade.php (a self-styled
+        // layout with its own colors/fonts; the Colors/Typography/Layout &
+        // logo/Items table panels above only affect 'classic'). Unknown
+        // values fall back to 'classic' wherever the layout is resolved.
+        'layout' => 'classic',
     ];
 
     public const TYPES = ['sale', 'quotation', 'purchase'];
+
+    /** doc_type => [layout key => display label]. Types not listed only have 'classic'. */
+    public const LAYOUTS = [
+        'sale' => [
+            'classic' => 'Classic',
+            'modern' => 'Modern (with Shipping Label)',
+        ],
+    ];
 
     /** Saved settings for a document type, merged over the defaults. */
     public static function settingsFor(string $type): array

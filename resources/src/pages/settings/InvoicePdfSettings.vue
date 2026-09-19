@@ -17,6 +17,19 @@
         </a-space>
       </div>
 
+      <!-- Template — only shown when this doc type has more than one layout -->
+      <div v-if="layoutOptions.length > 1" class="pdfc-top" style="margin-top: -8px">
+        <a-radio-group v-model:value="form.layout" button-style="solid">
+          <a-radio-button v-for="opt in layoutOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</a-radio-button>
+        </a-radio-group>
+        <a-alert
+          v-if="form.layout !== 'classic'"
+          type="info" show-icon banner
+          message="The Colors, Typography, Layout & logo, and Items table panels below only apply to the Classic template — this one comes fully styled on its own."
+          style="flex: 1; margin-left: 12px"
+        />
+      </div>
+
       <a-row :gutter="16">
         <!-- ============================ Controls ============================ -->
         <a-col :xs="24" :lg="10" :xl="9">
@@ -110,7 +123,13 @@
 
         <!-- ============================ Live preview ============================ -->
         <a-col :xs="24" :lg="14" :xl="15">
-          <div class="pdfc-preview-wrap">
+          <div v-if="form.layout !== 'classic'" class="pdfc-preview-wrap">
+            <div class="pdfc-preview-bar">
+              <EyeOutlined /> Live preview
+            </div>
+            <a-empty style="padding: 64px 24px" description="No live preview for this template — save your changes, then open a real Sale PDF to see it." />
+          </div>
+          <div v-else class="pdfc-preview-wrap">
             <div class="pdfc-preview-bar">
               <EyeOutlined /> Live preview — updates as you edit
             </div>
@@ -212,6 +231,13 @@
  * sale | quotation | purchase. Every option here is consumed by the real
  * DomPDF blades (colors, fonts, margins, logo, section toggles, labels); the
  * right-hand preview is an instant HTML approximation of the rendered PDF.
+ *
+ * Build L3 (2026-09-19) — Sales Invoice can now pick between two Blade
+ * templates ('layout': 'classic' | 'modern', see PdfTemplate::LAYOUTS).
+ * The live preview only approximates the Classic template's markup, so it's
+ * replaced with a plain message when a non-classic layout is selected —
+ * showing the Classic preview while editing a differently-styled template
+ * would be actively misleading.
  */
 import { ref, computed, onMounted } from 'vue';
 import { message } from 'ant-design-vue';
@@ -229,6 +255,9 @@ const docType = ref('sale');
 const openPanels = ref(['colors', 'type', 'layout', 'table', 'sections', 'text']);
 const defaults = ref(null);
 const form = ref(null);
+const layouts = ref({ classic: 'Classic' });
+
+const layoutOptions = computed(() => Object.entries(layouts.value).map(([value, label]) => ({ value, label })));
 
 const typeOptions = [
   { value: 'sale', label: 'Sales Invoice' },
@@ -291,6 +320,8 @@ async function load() {
     const data = await http.get(`pdf_templates/${docType.value}`);
     form.value = data.settings;
     defaults.value = data.defaults;
+    layouts.value = data.layouts || { classic: 'Classic' };
+    if (!form.value.layout) form.value.layout = 'classic';
   } catch (e) {
     message.error(t('InvalidData'));
   } finally {
