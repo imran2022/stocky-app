@@ -13,6 +13,7 @@
       :empty-text="$t('no_contracts')"
       empty-icon="file-certificate"
       :filters="filters"
+      mobile-scrollable
       @query="fetch"
       @reset="resetFilters"
     >

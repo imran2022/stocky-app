@@ -19,19 +19,23 @@
       <EmptyState icon="calendar-off" :title="$t('appointment_not_found')" :subtitle="$t('appointment_not_found_text')" />
     </div>
 
-    <div v-else class="card">
-      <div class="card-header">
-        <div>
+    <div v-else class="card pc-service-detail-card">
+      <div class="card-header pc-service-detail-head">
+        <div class="pc-service-detail-identity">
+          <span class="pc-service-detail-icon bg-purple-lt"><i class="ti ti-calendar-event"></i></span>
+          <div>
+          <div class="pc-eyebrow">{{ $t('appointment') }}</div>
           <h3 class="card-title mb-0">{{ appointment.service_item || appointment.Ref }}</h3>
           <p v-if="appointment.scheduled_date" class="card-subtitle mb-0">{{ $t('scheduled_on', { date: appointment.scheduled_date }) }}</p>
+          </div>
         </div>
-        <div class="card-actions d-flex align-items-center gap-3">
+        <div class="card-actions pc-service-detail-value">
           <span :class="badge(appointmentTone(appointment.status))">{{ statusLabel(appointment.status || 'pending') }}</span>
           <span v-if="appointment.total_amount" class="h2 mb-0 font-monospace">{{ money(appointment.total_amount) }}</span>
         </div>
       </div>
-      <div class="card-body">
-        <div class="datagrid">
+      <div class="card-body pc-service-detail-body">
+        <div class="datagrid pc-service-datagrid">
           <div class="datagrid-item"><div class="datagrid-title">{{ $t('reference') }}</div><div class="datagrid-content font-monospace">{{ appointment.Ref || '—' }}</div></div>
           <div class="datagrid-item"><div class="datagrid-title">{{ $t('service') }}</div><div class="datagrid-content">{{ appointment.service_item || '—' }}</div></div>
           <div class="datagrid-item"><div class="datagrid-title">{{ $t('type') }}</div><div class="datagrid-content">{{ enumLabel('job_', appointment.job_type) || '—' }}</div></div>
@@ -45,7 +49,7 @@
           <div class="datagrid-item"><div class="datagrid-title">{{ $t('paid') }}</div><div class="datagrid-content">{{ appointment.paid_amount != null ? money(appointment.paid_amount) : '—' }}</div></div>
           <div class="datagrid-item"><div class="datagrid-title">{{ $t('payment_status') }}</div><div class="datagrid-content">{{ statusLabel(appointment.payment_status) || '—' }}</div></div>
         </div>
-        <div v-for="block in blocks" :key="block.key" class="mt-4">
+        <div v-for="block in blocks" :key="block.key" class="mt-4 pc-service-copy-block">
           <h3 class="card-title mb-2">{{ block.label }}</h3>
           <div class="p-3 rounded border rst-surface-2" style="white-space: pre-wrap">{{ block.text }}</div>
         </div>

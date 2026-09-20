@@ -4,14 +4,14 @@
       <router-link to="/appointments" class="btn btn-outline-secondary"><i class="ti ti-arrow-left me-1"></i>{{ $t('back_to_appointments') }}</router-link>
     </PageActions>
 
-    <form class="card" @submit.prevent="submit">
+    <form class="card pc-service-form" @submit.prevent="submit">
       <div class="card-header">
         <div>
           <h3 class="card-title mb-0">{{ $t('book_an_appointment') }}</h3>
           <p class="card-subtitle mb-0">{{ $t('book_subtitle') }}</p>
         </div>
       </div>
-      <div class="card-body">
+      <div class="card-body pc-service-form-body">
         <div class="mb-3">
           <label class="form-label required">{{ $t('service_item') }}</label>
           <input v-model="form.service_item" type="text" class="form-control" required maxlength="190" :placeholder="$t('service_item_placeholder')" />

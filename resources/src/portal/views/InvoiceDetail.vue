@@ -1,19 +1,39 @@
 <template>
   <div>
-    <PageActions>
-      <span v-if="invoice" :class="badge(invoiceTone(invoice.payment_status))">{{ statusLabel(invoice.payment_status) }}</span>
-      <router-link to="/invoices" class="btn btn-outline-secondary"><i class="ti ti-arrow-left me-1"></i>{{ $t('back_to_invoices') }}</router-link>
-      <a v-if="invoice" :href="`/api/portal/invoices/${invoice.id}/pdf`" target="_blank" rel="noopener" class="btn btn-primary">
-        <i class="ti ti-download me-1"></i>{{ $t('download_pdf') }}
-      </a>
-    </PageActions>
-
     <div v-if="loading" class="text-center py-6">
       <div class="spinner-border text-primary" role="status"></div>
       <div class="text-secondary mt-2">{{ $t('loading_invoice') }}</div>
     </div>
 
     <template v-else-if="invoice">
+      <section class="card pc-invoice-desktop-hero d-none d-md-block">
+        <div class="pc-invoice-desktop-head">
+          <div class="pc-invoice-desktop-identity">
+            <span class="pc-invoice-desktop-icon"><i class="ti ti-file-invoice"></i></span>
+            <div>
+              <div class="pc-eyebrow">{{ $t('invoice') }}</div>
+              <div class="pc-invoice-desktop-title-row">
+                <h1 class="font-monospace">{{ invoice.Ref }}</h1>
+                <span :class="badge(invoiceTone(invoice.payment_status))">{{ statusLabel(invoice.payment_status) }}</span>
+              </div>
+              <div class="pc-invoice-desktop-sub"><i class="ti ti-calendar"></i>{{ invoice.date }}<template v-if="invoice.warehouse_name"><span></span><i class="ti ti-building-warehouse"></i>{{ invoice.warehouse_name }}</template></div>
+            </div>
+          </div>
+          <div class="pc-invoice-desktop-actions">
+            <router-link to="/invoices" class="btn btn-outline-secondary"><i class="ti ti-arrow-left me-1"></i>{{ $t('back_to_invoices') }}</router-link>
+            <a :href="`/api/portal/invoices/${invoice.id}/pdf`" target="_blank" rel="noopener" class="btn btn-primary">
+              <i class="ti ti-download me-1"></i>{{ $t('download_pdf') }}
+            </a>
+          </div>
+        </div>
+        <div class="pc-invoice-desktop-metrics">
+          <div><span>{{ $t('total') }}</span><strong>{{ money(invoice.GrandTotal) }}</strong></div>
+          <div><span>{{ $t('paid') }}</span><strong class="text-success">{{ money(invoice.paid_amount) }}</strong></div>
+          <div><span>{{ $t('amount_due') }}</span><strong :class="Number(invoice.due) > 0 ? 'text-danger' : 'text-success'">{{ money(invoice.due) }}</strong></div>
+          <div><span>{{ $t('items') }}</span><strong>{{ (invoice.details || []).length }}</strong></div>
+        </div>
+      </section>
+
       <section class="card pc-invoice-mobile-summary d-md-none">
         <div class="pc-invoice-mobile-head">
           <router-link to="/invoices" class="pc-invoice-mobile-back" :aria-label="$t('back_to_invoices')"><i class="ti ti-arrow-left"></i></router-link>
@@ -32,13 +52,6 @@
           <i class="ti ti-download me-1"></i>{{ $t('download_pdf') }}
         </a>
       </section>
-
-      <div class="row row-deck row-cards mb-3 pc-invoice-stats d-none d-md-flex">
-        <div class="col-md-6 col-xl-3"><StatCard :label="$t('total')" :value="money(invoice.GrandTotal)" icon="receipt" tone="blue" :sub="invoice.date" /></div>
-        <div class="col-md-6 col-xl-3"><StatCard :label="$t('paid')" :value="money(invoice.paid_amount)" icon="check" tone="green" /></div>
-        <div class="col-md-6 col-xl-3"><StatCard :label="$t('due')" :value="money(invoice.due)" icon="alert-circle" :tone="Number(invoice.due) > 0 ? 'red' : 'teal'" /></div>
-        <div class="col-md-6 col-xl-3"><StatCard :label="$t('date')" :value="invoice.date" icon="calendar" tone="purple" :sub="invoice.warehouse_name || ''" /></div>
-      </div>
 
       <div class="row row-cards align-items-start pc-invoice-detail-grid">
         <div class="col-xl-8">
@@ -98,13 +111,11 @@
 
 <script>
 import http from '../lib/http';
-import PageActions from '../components/PageActions.vue';
 import { money, badge, invoiceTone } from '../lib/ui';
-import StatCard from '../components/StatCard.vue';
 import EmptyState from '../components/EmptyState.vue';
 
 export default {
-  components: { PageActions, StatCard, EmptyState },
+  components: { EmptyState },
   data() { return { invoice: null, loading: true }; },
   mounted() { this.fetch(); },
   methods: {

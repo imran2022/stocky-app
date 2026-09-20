@@ -9,19 +9,23 @@
       <div class="text-secondary mt-2">{{ $t('loading') }}</div>
     </div>
 
-    <div v-else class="card">
-      <div class="card-header">
-        <div>
-          <h3 class="card-title mb-0">{{ quotation.Ref }}</h3>
-          <p v-if="quotation.date" class="card-subtitle mb-0">{{ $t('created_on', { date: quotation.date }) }}</p>
+    <div v-else class="card pc-service-detail-card">
+      <div class="card-header pc-service-detail-head">
+        <div class="pc-service-detail-identity">
+          <span class="pc-service-detail-icon bg-blue-lt"><i class="ti ti-file-description"></i></span>
+          <div>
+            <div class="pc-eyebrow">{{ $t('quotation') }}</div>
+            <h3 class="card-title mb-0 font-monospace">{{ quotation.Ref }}</h3>
+            <p v-if="quotation.date" class="card-subtitle mb-0">{{ $t('created_on', { date: quotation.date }) }}</p>
+          </div>
         </div>
-        <div class="card-actions d-flex align-items-center gap-3">
+        <div class="card-actions pc-service-detail-value">
           <span :class="badge(quotationTone(quotation.statut))">{{ statusLabel(quotation.statut) }}</span>
           <span class="h2 mb-0 font-monospace">{{ money(quotation.GrandTotal) }}</span>
         </div>
       </div>
-      <div class="card-body">
-        <div class="datagrid">
+      <div class="card-body pc-service-detail-body">
+        <div class="datagrid pc-service-datagrid">
           <div class="datagrid-item"><div class="datagrid-title">{{ $t('warehouse') }}</div><div class="datagrid-content">{{ quotation.warehouse_name || '—' }}</div></div>
           <div class="datagrid-item"><div class="datagrid-title">{{ $t('discount') }}</div><div class="datagrid-content">{{ money(quotation.discount) }}</div></div>
           <div class="datagrid-item"><div class="datagrid-title">{{ $t('shipping') }}</div><div class="datagrid-content">{{ money(quotation.shipping) }}</div></div>
@@ -34,7 +38,7 @@
       </div>
       <template v-if="quotation.details && quotation.details.length">
         <div class="card-header"><h3 class="card-title">{{ $t('items') }}</h3></div>
-        <div class="table-responsive">
+        <div class="table-responsive pc-service-items-table">
           <table class="table table-vcenter card-table">
             <thead><tr><th>{{ $t('product') }}</th><th class="text-end">{{ $t('qty') }}</th><th class="text-end">{{ $t('price') }}</th><th class="text-end">{{ $t('total') }}</th></tr></thead>
             <tbody>

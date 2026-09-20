@@ -4502,6 +4502,130 @@ body.rst-app {
 
 .pc-invoice-mobile-summary { display: none; }
 
+.pc-invoice-desktop-hero {
+    margin-bottom: 1rem;
+    overflow: hidden;
+    border-color: color-mix(in srgb, var(--accent) 16%, var(--tblr-border-color));
+    border-radius: calc(var(--rst-radius) + 0.15rem);
+    background:
+        radial-gradient(circle at 3% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 27%),
+        var(--tblr-bg-surface);
+    box-shadow: 0 10px 30px rgb(15 23 42 / 0.055);
+}
+
+.pc-invoice-desktop-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.25rem;
+    padding: 1.15rem 1.25rem;
+}
+
+.pc-invoice-desktop-identity { display: flex; min-width: 0; align-items: center; gap: 0.85rem; }
+.pc-invoice-desktop-icon {
+    display: grid;
+    width: 3.2rem;
+    height: 3.2rem;
+    flex: 0 0 auto;
+    place-items: center;
+    border-radius: 0.9rem;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--accent);
+    font-size: 1.45rem;
+}
+.pc-invoice-desktop-title-row { display: flex; align-items: center; gap: 0.7rem; }
+.pc-invoice-desktop-title-row h1 { margin: 0.1rem 0; font-size: 1.65rem; line-height: 1.1; letter-spacing: -0.035em; }
+.pc-invoice-desktop-sub { display: flex; align-items: center; gap: 0.35rem; color: var(--tblr-secondary-color); font-size: 0.78rem; }
+.pc-invoice-desktop-sub > span { width: 0.25rem; height: 0.25rem; margin-inline: 0.2rem; border-radius: 50%; background: var(--tblr-border-color); }
+.pc-invoice-desktop-actions { display: flex; flex: 0 0 auto; gap: 0.6rem; }
+
+.pc-invoice-desktop-metrics {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    border-top: 1px solid color-mix(in srgb, var(--accent) 10%, var(--tblr-border-color));
+    background: color-mix(in srgb, var(--tblr-bg-surface) 97%, var(--accent));
+}
+.pc-invoice-desktop-metrics > div { min-width: 0; padding: 0.8rem 1.25rem; border-inline-end: 1px solid var(--tblr-border-color); }
+.pc-invoice-desktop-metrics > div:last-child { border-inline-end: 0; }
+.pc-invoice-desktop-metrics span,
+.pc-invoice-desktop-metrics strong { display: block; }
+.pc-invoice-desktop-metrics span { color: var(--tblr-secondary-color); font-size: 0.72rem; }
+.pc-invoice-desktop-metrics strong { margin-top: 0.12rem; font-size: 1.12rem; font-variant-numeric: tabular-nums; }
+
+/* Phase 4A: shared presentation for quotation, appointment and contract flows. */
+.pc-service-detail-card,
+.pc-service-form {
+    overflow: hidden;
+    border-color: color-mix(in srgb, var(--accent) 11%, var(--tblr-border-color));
+    border-radius: var(--rst-radius);
+    box-shadow: 0 9px 28px rgb(15 23 42 / 0.05);
+}
+.pc-service-detail-head {
+    min-height: 5.5rem;
+    padding: 1rem 1.15rem;
+    background:
+        radial-gradient(circle at 2% 0%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 30%),
+        var(--tblr-bg-surface);
+}
+.pc-service-detail-identity { display: flex; min-width: 0; align-items: center; gap: 0.8rem; }
+.pc-service-detail-icon {
+    display: grid;
+    width: 2.8rem;
+    height: 2.8rem;
+    flex: 0 0 auto;
+    place-items: center;
+    border-radius: 0.8rem;
+    font-size: 1.3rem;
+}
+.pc-service-detail-identity .card-title { margin-top: 0.08rem; font-size: 1.15rem; }
+.pc-service-detail-identity .card-subtitle { margin-top: 0.18rem; }
+.pc-service-detail-value { display: flex; align-items: center; gap: 0.8rem; }
+.pc-service-detail-value .h2 { font-size: 1.25rem; font-variant-numeric: tabular-nums; }
+.pc-service-detail-body { padding: 1.15rem; }
+.pc-service-datagrid { gap: 0.7rem; }
+.pc-service-datagrid .datagrid-item {
+    padding: 0.75rem;
+    border: 1px solid var(--tblr-border-color);
+    border-radius: 0.65rem;
+    background: color-mix(in srgb, var(--tblr-bg-surface) 97%, var(--accent));
+}
+.pc-service-datagrid .datagrid-title { margin-bottom: 0.2rem; }
+.pc-service-copy-block > div {
+    border-color: color-mix(in srgb, var(--accent) 12%, var(--tblr-border-color)) !important;
+    background: color-mix(in srgb, var(--tblr-bg-surface) 97%, var(--accent)) !important;
+    line-height: 1.55;
+}
+.pc-service-items-table thead th { background: var(--tblr-bg-surface-secondary); color: var(--tblr-secondary-color); font-size: 0.7rem; letter-spacing: 0.05em; text-transform: uppercase; }
+.pc-service-form { max-width: 62rem; margin-inline: auto; }
+.pc-service-form > .card-header { min-height: 5rem; background: linear-gradient(180deg, color-mix(in srgb, var(--tblr-bg-surface) 96%, var(--accent)), var(--tblr-bg-surface)); }
+.pc-service-form-body { padding: 1.25rem; }
+.pc-service-form .form-control,
+.pc-service-form .form-select { min-height: 2.65rem; }
+.pc-service-form textarea.form-control { min-height: auto; }
+
+@media (max-width: 767.98px) {
+    .pc-service-detail-head { min-height: 0; padding: 0.8rem; align-items: flex-start; }
+    .pc-service-detail-icon { width: 2.35rem; height: 2.35rem; border-radius: 0.65rem; font-size: 1.1rem; }
+    .pc-service-detail-identity { align-items: flex-start; gap: 0.6rem; }
+    .pc-service-detail-identity .card-title { font-size: 1rem; line-height: 1.3; }
+    .pc-service-detail-value { flex-direction: column; align-items: flex-end; gap: 0.35rem; }
+    .pc-service-detail-value .h2 { font-size: 1rem; }
+    .pc-service-detail-body { padding: 0.8rem; }
+    .pc-service-datagrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.45rem; }
+    .pc-service-datagrid .datagrid-item { min-width: 0; padding: 0.6rem; }
+    .pc-service-datagrid .datagrid-title { font-size: 0.65rem; }
+    .pc-service-datagrid .datagrid-content { overflow-wrap: anywhere; font-size: 0.78rem; }
+    .pc-service-copy-block { margin-top: 0.8rem !important; }
+    .pc-service-copy-block > div { padding: 0.75rem !important; font-size: 0.8rem; }
+    .pc-service-attachments { margin-top: 0.8rem !important; }
+    .pc-service-attachments .list-group-item { padding: 0.65rem; gap: 0.55rem !important; }
+    .pc-service-attachments .btn { padding-inline: 0.55rem; }
+    .pc-service-form { border-radius: var(--rst-radius-sm); }
+    .pc-service-form > .card-header { min-height: 0; padding: 0.8rem; }
+    .pc-service-form-body { padding: 0.8rem; }
+    .pc-service-form > .card-footer { display: grid !important; grid-template-columns: 1fr 1fr; padding: 0.75rem; }
+}
+
 @media (max-width: 767.98px) {
     .pc-desktop-table.is-mobile-scrollable {
         display: block;

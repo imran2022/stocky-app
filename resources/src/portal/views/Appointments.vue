@@ -6,6 +6,10 @@
       </router-link>
     </PageActions>
 
+    <router-link to="/appointments/new" class="btn btn-primary w-100 mb-2 d-md-none">
+      <i class="ti ti-calendar-plus me-1"></i>{{ $t('book_appointment') }}
+    </router-link>
+
     <DataTable
       ref="table"
       :title="$t('appointments')"
@@ -19,6 +23,7 @@
       :empty-text="$t('no_appointments_yet')"
       empty-icon="calendar-event"
       :filters="filters"
+      mobile-scrollable
       @query="fetch"
       @reset="resetFilters"
     >

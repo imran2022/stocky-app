@@ -136,7 +136,7 @@
       </header>
 
       <!-- ── Page header: pretitle, title, breadcrumbs, actions ── -->
-      <div v-if="!isDashboard" class="page-header d-print-none">
+      <div v-if="!isHeaderlessPage" class="page-header d-print-none">
         <div class="container-xl">
           <div class="row g-2 align-items-center">
             <div class="col">
@@ -250,7 +250,9 @@ export default {
   },
   computed: {
     initials() { return initials(this.clientName || 'A'); },
-    isDashboard() { return this.$route.path === '/dashboard'; },
+    isHeaderlessPage() {
+      return this.$route.path === '/dashboard' || this.$route.name === 'PortalInvoiceDetail';
+    },
     sidenavOpen() { return this.isDesktop ? !this.theme.collapsed : this.drawerOpen; },
     toggleLabel() {
       if (!this.isDesktop) return this.tr('open_menu', 'Open menu');

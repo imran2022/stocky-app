@@ -6,6 +6,10 @@
       </router-link>
     </PageActions>
 
+    <router-link to="/quotations/new" class="btn btn-primary w-100 mb-2 d-md-none">
+      <i class="ti ti-plus me-1"></i>{{ $t('request_quotation') }}
+    </router-link>
+
     <DataTable
       ref="table"
       :title="$t('quotations')"
@@ -19,6 +23,7 @@
       :empty-text="$t('no_quotations_yet')"
       empty-icon="file-description"
       :filters="filters"
+      mobile-scrollable
       @query="fetch"
       @reset="resetFilters"
     >

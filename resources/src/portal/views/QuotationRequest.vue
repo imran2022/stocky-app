@@ -4,14 +4,14 @@
       <router-link to="/quotations" class="btn btn-outline-secondary"><i class="ti ti-arrow-left me-1"></i>{{ $t('back_to_quotations') }}</router-link>
     </PageActions>
 
-    <form class="card" @submit.prevent="submit">
+    <form class="card pc-service-form" @submit.prevent="submit">
       <div class="card-header">
         <div>
           <h3 class="card-title mb-0">{{ $t('request_a_quotation') }}</h3>
           <p class="card-subtitle mb-0">{{ $t('quotation_request_subtitle') }}</p>
         </div>
       </div>
-      <div class="card-body">
+      <div class="card-body pc-service-form-body">
         <div class="mb-3">
           <label class="form-label">{{ $t('subject') }} <span class="form-label-description">{{ $t('optional') }}</span></label>
           <input v-model="form.subject" type="text" class="form-control" maxlength="190" :placeholder="$t('subject_placeholder')" />
