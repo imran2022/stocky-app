@@ -30,7 +30,7 @@
         </div>
       </section>
 
-      <div class="mb-3 d-md-none">
+      <div class="pc-dashboard-mobile-welcome mb-3 d-md-none">
         <div class="h3 mb-0">{{ greeting }}, {{ firstName || d.client.name }}</div>
         <div class="text-secondary">{{ today }}</div>
       </div>
@@ -47,13 +47,16 @@
 
       <!-- ══ Headline figures ═══════════════════════════════════════ -->
       <div class="row row-deck row-cards mb-3 pc-dashboard-stats">
-        <div class="col-6 col-md-4">
+        <div class="col-6 col-md-3">
           <StatCard :label="tr('invoiced_this_month', 'Invoiced this month')" :value="money(d.month.invoiced)" icon="receipt" tone="blue" :change="d.month.change_invoiced" :sub="d.month.label" />
         </div>
-        <div class="col-6 col-md-4">
+        <div class="col-6 col-md-3">
           <StatCard :label="tr('paid_this_month', 'Paid this month')" :value="money(d.month.paid)" icon="chart-bar" tone="teal" :change="d.month.change_paid" :sub="d.month.label" />
         </div>
-        <div class="col-12 col-md-4">
+        <div class="col-6 col-md-3">
+          <StatCard :label="$t('total_paid')" :value="money(d.total_paid)" icon="wallet" tone="primary" :sub="tr('all_time', 'All time')" />
+        </div>
+        <div class="col-6 col-md-3">
           <StatCard :label="$t('total_invoices')" :value="number(d.total_invoices)" icon="file-invoice" tone="green"
             :sub="tr('average_invoice_sub', 'average {amount}', { amount: money(d.average_invoice) })" />
         </div>
