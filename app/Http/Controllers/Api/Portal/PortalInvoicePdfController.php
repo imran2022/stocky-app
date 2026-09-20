@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Portal;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Models\ProductVariant;
+use App\Models\PdfTemplate;
 use App\Models\Sale;
 use App\Models\Setting;
 use App\Models\Unit;
@@ -107,7 +108,13 @@ class PortalInvoicePdfController extends Controller
             $details[] = $data;
         }
 
-        $Html = view('pdf.sale_pdf', [
+        // Respect the same template selected in Settings → Invoice PDF as the
+        // admin Sales download. The portal used to hard-code the Classic view,
+        // which made its PDF disagree with every other invoice download.
+        $layout = PdfTemplate::settingsFor('sale')['layout'] ?? 'classic';
+        $invoiceView = $layout === 'modern' ? 'pdf.sale_pdf_modern' : 'pdf.sale_pdf';
+
+        $Html = view($invoiceView, [
             'symbol' => $symbol,
             'setting' => $settings,
             'sale' => $sale,

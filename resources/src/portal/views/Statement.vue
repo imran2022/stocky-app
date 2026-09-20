@@ -19,6 +19,9 @@
               {{ $t('apply') }}
             </button>
             <button v-if="fromDate || toDate" type="button" class="btn btn-ghost-secondary" @click="fromDate = ''; toDate = ''; fetch()">{{ $t('reset_filters') }}</button>
+            <a :href="statementPdfUrl" target="_blank" rel="noopener" class="btn btn-primary">
+              <i class="ti ti-download me-1"></i>{{ $t('download_pdf') }}
+            </a>
           </form>
         </div>
       </div>
@@ -90,6 +93,13 @@ export default {
     statementEntries() { return (this.data && Array.isArray(this.data.entries)) ? this.data.entries : []; },
     totalDebit() { return this.statementEntries.filter((e) => e.type !== 'opening').reduce((sum, e) => sum + (Number(e.debit) || 0), 0); },
     totalCredit() { return this.statementEntries.filter((e) => e.type !== 'opening').reduce((sum, e) => sum + (Number(e.credit) || 0), 0); },
+    statementPdfUrl() {
+      const query = new URLSearchParams();
+      if (this.fromDate) query.set('from_date', this.fromDate);
+      if (this.toDate) query.set('to_date', this.toDate);
+      const suffix = query.toString();
+      return `/api/portal/statement/pdf${suffix ? `?${suffix}` : ''}`;
+    },
   },
   mounted() { this.fetch(); },
   methods: {

@@ -51,6 +51,7 @@ Route::prefix('api/portal')->middleware(['web', 'portal.locale', 'portal.auth', 
         Route::get('invoices/{id}/pdf', [PortalInvoicePdfController::class, 'download']);
         Route::get('payments', [PortalPaymentsController::class, 'index']);
         Route::get('statement', [PortalStatementController::class, 'index']);
+        Route::get('statement/pdf', [PortalStatementController::class, 'pdf']);
         Route::get('profile', [PortalProfileController::class, 'show']);
         Route::put('profile/password', [PortalProfileController::class, 'updatePassword']);
         // Self-service account closure (deletes the portal login only).
