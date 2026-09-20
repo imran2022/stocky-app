@@ -160,19 +160,24 @@
 
     <a-modal
       v-model:open="displaySetupOpen"
-      title="Live Sales Display"
+      title="Live Sales Displays"
+      :width="1080"
       :confirm-loading="displayGenerating"
-      :ok-text="displayUrl ? 'Generate new token' : 'Generate display link'"
+      ok-text="Create display"
+      cancel-text="Close"
       @ok="generateDisplayToken"
     >
       <a-alert
         type="info"
         show-icon
-        message="Creates a read-only, 24-hour display link. Generating a new link revokes the previous one."
+        message="Create independent, read-only display links. Each display can be opened, copied, regenerated, or revoked without affecting the others."
         style="margin-bottom: 16px"
       />
       <a-alert v-if="displayError" type="error" show-icon :message="displayError" style="margin-bottom: 16px" />
-      <a-form layout="vertical">
+      <a-form layout="vertical" class="display-create-grid">
+        <a-form-item label="Display name" required>
+          <a-input v-model:value="displayName" :maxlength="100" placeholder="e.g. Dhaka TV or Manager Screen" />
+        </a-form-item>
         <a-form-item label="Warehouse scope">
           <a-select
             v-model:value="displayWarehouseId"
@@ -187,20 +192,51 @@
             :options="[10, 30, 60, 120].map(s => ({ value: s, label: s + ' seconds' }))"
           />
         </a-form-item>
-        <a-form-item style="margin-bottom: 8px">
+        <a-form-item class="display-customer-toggle" style="margin-bottom: 8px">
           <a-checkbox v-model:checked="displayShowCustomerNames">Show customer names on the public display</a-checkbox>
         </a-form-item>
       </a-form>
-      <a-spin :spinning="displayLoadingActive">
-        <div v-if="displayUrl" class="display-link-result">
-          <a-input :value="displayUrl" readonly @focus="event => event.target.select()" />
-          <a-space>
-            <a-button @click="copyDisplayUrl">Copy link</a-button>
-            <a-button type="primary" @click="openDisplay">Open display</a-button>
-          </a-space>
-          <small>Active link · Expires: {{ displayExpiresLabel }}</small>
-        </div>
-      </a-spin>
+
+      <div class="display-list-heading">
+        <div><strong>Managed displays</strong><small>{{ displayRows.length }} records · expired/revoked records are retained for audit</small></div>
+        <a-button size="small" :loading="displayLoadingActive" @click="loadDisplays">Refresh list</a-button>
+      </div>
+      <a-table
+        size="small" row-key="id" :columns="displayColumns" :data-source="displayRows"
+        :loading="displayLoadingActive" :pagination="false" :scroll="{ x: 980, y: 360 }"
+        :locale="{ emptyText: 'No display links created yet' }"
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'name'">
+            <strong>{{ record.name }}</strong>
+            <small class="display-cell-note">{{ record.refresh_seconds }}s refresh{{ record.show_customer_names ? ' · customer names on' : '' }}</small>
+          </template>
+          <template v-else-if="column.key === 'status'">
+            <a-tag :color="displayStatusColor(record.status)">{{ displayStatusLabel(record.status) }}</a-tag>
+          </template>
+          <template v-else-if="column.key === 'created'">
+            <span>{{ record.created_by }}</span><small class="display-cell-note">{{ formatDateTime(record.created_at) }}</small>
+          </template>
+          <template v-else-if="column.key === 'expires_at'">
+            <span>{{ formatDateTime(record.expires_at) }}</span>
+          </template>
+          <template v-else-if="column.key === 'last_seen_at'">
+            <span>{{ record.last_seen_at ? relativeFromNow(record.last_seen_at) + ' ago' : 'Not opened yet' }}</span>
+          </template>
+          <template v-else-if="column.key === 'actions'">
+            <a-space :size="4">
+              <a-button type="link" size="small" :disabled="!record.url" @click="copyDisplayUrl(record.url)">Copy</a-button>
+              <a-button type="link" size="small" :disabled="!record.url" @click="openDisplay(record.url)">Open</a-button>
+              <a-popconfirm title="Regenerate this link? Its previous URL will stop working." @confirm="regenerateDisplay(record)">
+                <a-button type="link" size="small" :loading="displayActionId === record.id">Regenerate</a-button>
+              </a-popconfirm>
+              <a-popconfirm v-if="record.active" title="Revoke this display link?" @confirm="revokeDisplay(record)">
+                <a-button type="link" danger size="small" :loading="displayActionId === record.id">Revoke</a-button>
+              </a-popconfirm>
+            </a-space>
+          </template>
+        </template>
+      </a-table>
     </a-modal>
   </div>
 </template>
@@ -239,11 +275,12 @@ const soundEnabled = ref(false);
 const displaySetupOpen = ref(false);
 const displayGenerating = ref(false);
 const displayLoadingActive = ref(false);
+const displayActionId = ref(null);
+const displayName = ref('');
 const displayWarehouseId = ref(undefined);
 const displayRefreshSeconds = ref(30);
 const displayShowCustomerNames = ref(false);
-const displayUrl = ref('');
-const displayExpiresAt = ref('');
+const displayRows = ref([]);
 const displayError = ref('');
 
 const todayCount = ref(0);
@@ -278,11 +315,15 @@ let audioCtx = null;
 
 const warehouseOptions = computed(() => warehouses.value.map(w => ({ value: w.id, label: w.name })));
 const averageSale = computed(() => (todayCount.value ? todayTotal.value / todayCount.value : 0));
-const displayExpiresLabel = computed(() => {
-  if (!displayExpiresAt.value) return '';
-  const date = new Date(displayExpiresAt.value);
-  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString();
-});
+const displayColumns = [
+  { title: 'Display', key: 'name', width: 190 },
+  { title: 'Warehouse', dataIndex: 'warehouse_name', key: 'warehouse_name', width: 155 },
+  { title: 'Status', key: 'status', width: 90 },
+  { title: 'Created by / time', key: 'created', width: 175 },
+  { title: 'Expires', key: 'expires_at', width: 165 },
+  { title: 'Last seen', key: 'last_seen_at', width: 115 },
+  { title: 'Actions', key: 'actions', width: 270, fixed: 'right' },
+];
 
 const serverClock = computed(() => {
   if (serverTimeAt.value && serverTimeFetchedAt.value) {
@@ -495,59 +536,58 @@ async function openDisplaySetup() {
   displayRefreshSeconds.value = refreshSeconds.value;
   displayError.value = '';
   displaySetupOpen.value = true;
+  await loadDisplays();
+}
+
+async function loadDisplays() {
   displayLoadingActive.value = true;
   try {
-    const data = await http.get('real-time-sales-display/current') || {};
-    if (data.active && data.url) {
-      displayUrl.value = data.url;
-      displayExpiresAt.value = data.expires_at || '';
-      displayWarehouseId.value = Number(data.warehouse_id) || undefined;
-      displayRefreshSeconds.value = Number(data.refresh_seconds) || 30;
-      displayShowCustomerNames.value = !!data.show_customer_names;
-    } else {
-      displayUrl.value = '';
-      displayExpiresAt.value = '';
-    }
+    const data = await http.get('real-time-sales-display/list') || {};
+    displayRows.value = Array.isArray(data.displays) ? data.displays : [];
   } catch (error) {
-    displayError.value = error?.data?.message || 'Could not check the active display link.';
+    displayError.value = error?.data?.message || 'Could not load the display list.';
   } finally {
     displayLoadingActive.value = false;
   }
 }
 
 async function generateDisplayToken() {
+  if (!displayName.value.trim()) {
+    message.warning('Enter a display name.');
+    return;
+  }
   displayGenerating.value = true;
   displayError.value = '';
   try {
-    const data = await http.post('real-time-sales-display/generate', {
+    await http.post('real-time-sales-display/generate', {
+      name: displayName.value.trim(),
       warehouse_id: displayWarehouseId.value || 0,
       refresh_seconds: displayRefreshSeconds.value,
       show_customer_names: displayShowCustomerNames.value,
     });
-    displayUrl.value = data?.url || '';
-    displayExpiresAt.value = data?.expires_at || '';
+    message.success('Display link created');
+    displayName.value = '';
+    await loadDisplays();
   } catch (error) {
-    displayUrl.value = '';
-    displayExpiresAt.value = '';
-    displayError.value = error?.data?.message || 'Could not generate the display link.';
+    displayError.value = error?.data?.errors?.name?.[0] || error?.data?.message || 'Could not create the display link.';
   } finally {
     displayGenerating.value = false;
   }
 }
 
-async function copyDisplayUrl() {
-  if (!displayUrl.value) return;
+async function copyDisplayUrl(url) {
+  if (!url) return;
   let copied = false;
   try {
     if (window.isSecureContext && navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(displayUrl.value);
+      await navigator.clipboard.writeText(url);
       copied = true;
     }
   } catch (e) { /* use the HTTP-compatible fallback below */ }
 
   if (!copied) {
     const textarea = document.createElement('textarea');
-    textarea.value = displayUrl.value;
+    textarea.value = url;
     textarea.setAttribute('readonly', '');
     textarea.style.position = 'fixed';
     textarea.style.left = '-9999px';
@@ -561,8 +601,44 @@ async function copyDisplayUrl() {
   else message.error('Copy failed. Select the link and copy it manually.');
 }
 
-function openDisplay() {
-  if (displayUrl.value) window.open(displayUrl.value, '_blank', 'noopener');
+function openDisplay(url) {
+  if (url) window.open(url, '_blank', 'noopener');
+}
+
+async function regenerateDisplay(record) {
+  displayActionId.value = record.id;
+  displayError.value = '';
+  try {
+    await http.post(`real-time-sales-display/${record.id}/regenerate`, {});
+    message.success(`${record.name} link regenerated`);
+    await loadDisplays();
+  } catch (error) {
+    displayError.value = error?.data?.message || 'Could not regenerate the display link.';
+  } finally {
+    displayActionId.value = null;
+  }
+}
+
+async function revokeDisplay(record) {
+  displayActionId.value = record.id;
+  displayError.value = '';
+  try {
+    await http.post(`real-time-sales-display/${record.id}/revoke`, {});
+    message.success(`${record.name} revoked`);
+    await loadDisplays();
+  } catch (error) {
+    displayError.value = error?.data?.message || 'Could not revoke the display link.';
+  } finally {
+    displayActionId.value = null;
+  }
+}
+
+function displayStatusColor(status) {
+  return { online: 'success', active: 'processing', idle: 'warning', expired: 'default', revoked: 'error' }[status] || 'default';
+}
+
+function displayStatusLabel(status) {
+  return { online: 'Online', active: 'Ready', idle: 'Idle', expired: 'Expired', revoked: 'Revoked' }[status] || status;
 }
 
 onMounted(() => {
@@ -608,13 +684,29 @@ onBeforeUnmount(() => {
   100% { transform: scale(1); }
 }
 :deep(.row-new) td { background: rgba(109, 40, 217, 0.08) !important; }
-.display-link-result {
-  padding: 12px;
+.display-create-grid {
   display: grid;
-  gap: 10px;
-  border: 1px solid rgba(109, 40, 217, 0.2);
-  border-radius: 8px;
-  background: rgba(109, 40, 217, 0.04);
+  grid-template-columns: minmax(220px, 1.4fr) minmax(190px, 1fr) minmax(150px, .7fr);
+  column-gap: 14px;
+  padding: 14px 14px 6px;
+  border: 1px solid rgba(109, 40, 217, 0.16);
+  border-radius: 9px;
+  background: rgba(109, 40, 217, 0.035);
 }
-.display-link-result small { color: #8c8c8c; }
+.display-customer-toggle { grid-column: 1 / -1; }
+.display-list-heading {
+  margin: 18px 0 10px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+.display-list-heading>div { display: flex; flex-direction: column; gap: 2px; }
+.display-list-heading strong { font-size: 14px; }
+.display-list-heading small,.display-cell-note { color: #8c8c8c; font-size: 11px; }
+.display-cell-note { margin-top: 3px; display: block; }
+@media (max-width: 760px) {
+  .display-create-grid { grid-template-columns: 1fr; }
+  .display-customer-toggle { grid-column: auto; }
+}
 </style>

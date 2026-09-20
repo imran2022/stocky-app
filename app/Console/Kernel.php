@@ -47,6 +47,20 @@ class Kernel extends ConsoleKernel
         // peak hours; full-tab rewrites can take a while on big datasets).
         $schedule->command('google-sheets:auto-export')->dailyAt('02:30')->withoutOverlapping();
 
+        // Display records remain available for audit after expiry/revocation,
+        // then are purged after 90 days. Public access stops immediately.
+        $schedule->call(function () {
+            if (! \Illuminate\Support\Facades\Schema::hasTable('real_time_sales_displays')) {
+                return;
+            }
+            \App\Models\RealTimeSalesDisplay::query()
+                ->where(function ($query) {
+                    $query->where('expires_at', '<', now()->subDays(90))
+                        ->orWhere('revoked_at', '<', now()->subDays(90));
+                })
+                ->delete();
+        })->dailyAt('02:45')->name('real-time-sales-displays:cleanup')->withoutOverlapping();
+
         // WooCommerce push (Stocky -> Woo): push only not-yet-linked products
         // nightly; stock changes often, so sync it hourly.
         $schedule->command('woocommerce:sync --scope=products --only-unsynced')

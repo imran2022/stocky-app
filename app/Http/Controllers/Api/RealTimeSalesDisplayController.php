@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Sale;
 use App\Models\SaleDetail;
+use App\Models\RealTimeSalesDisplay;
 use App\Models\Setting;
 use App\Models\UserWarehouse;
 use App\Models\Warehouse;
@@ -17,19 +18,36 @@ use Illuminate\Support\Str;
 
 class RealTimeSalesDisplayController extends Controller
 {
-    private const TOKEN_KEY = 'real_time_sales_display:active';
+    private const LEGACY_TOKEN_KEY = 'real_time_sales_display:active';
+
+    public function index(Request $request)
+    {
+        $user = $this->authorizedUser($request);
+        $this->migrateLegacyDisplay($user);
+        $query = RealTimeSalesDisplay::with(['creator:id,firstname,lastname,username', 'warehouse:id,name'])
+            ->latest('id')
+            ->limit(50);
+        $this->applyDisplayVisibility($query, $user);
+
+        return response()->json([
+            'displays' => $query->get()->map(fn (RealTimeSalesDisplay $display) => $this->displayResource($display))->values(),
+        ]);
+    }
 
     public function generate(Request $request)
     {
-        $user = $request->user('api');
-        $role = $user ? $user->roles()->first() : null;
-        if (! $user || ! $role || ! $role->inRole('real_time_sales_counter')) {
-            return response()->json(['message' => 'Unauthorized'], 403);
-        }
+        $user = $this->authorizedUser($request);
+        $request->validate([
+            'name' => ['required', 'string', 'max:100'],
+            'warehouse_id' => ['nullable', 'integer'],
+            'refresh_seconds' => ['nullable', 'integer', 'min:10', 'max:120'],
+            'show_customer_names' => ['nullable', 'boolean'],
+        ]);
 
-        $allowedWarehouseIds = $user->is_all_warehouses
-            ? Warehouse::whereNull('deleted_at')->pluck('id')->map(fn ($id) => (int) $id)->all()
-            : UserWarehouse::where('user_id', $user->id)->pluck('warehouse_id')->map(fn ($id) => (int) $id)->all();
+        $allowedWarehouseIds = $this->allowedWarehouseIds($user);
+        if (empty($allowedWarehouseIds)) {
+            return response()->json(['message' => 'No warehouse is available to this user.'], 422);
+        }
 
         $warehouseId = (int) $request->input('warehouse_id', 0);
         if ($warehouseId !== 0 && ! in_array($warehouseId, $allowedWarehouseIds, true)) {
@@ -38,19 +56,20 @@ class RealTimeSalesDisplayController extends Controller
 
         $token = Str::random(64);
         $expiresAt = now()->addDay();
-        Cache::put(self::TOKEN_KEY, [
-            'hash' => hash('sha256', $token),
-            'token_ciphertext' => Crypt::encryptString($token),
-            'expires_at' => $expiresAt->toIso8601String(),
+        $display = RealTimeSalesDisplay::create([
+            'name' => trim((string) $request->input('name')),
+            'token_hash' => hash('sha256', $token),
+            'token_encrypted' => Crypt::encryptString($token),
             'warehouse_ids' => $warehouseId ? [$warehouseId] : $allowedWarehouseIds,
-            'selected_warehouse_id' => $warehouseId,
+            'warehouse_id' => $warehouseId ?: null,
             'show_customer_names' => $request->boolean('show_customer_names', false),
             'refresh_seconds' => min(120, max(10, (int) $request->input('refresh_seconds', 30))),
             'created_by' => (int) $user->id,
-            // Preserve the authenticated report's record-level visibility.
+            'scope_user_id' => (int) $user->id,
             'view_all_records' => (bool) $user->hasRecordView(),
-            'user_id' => (int) $user->id,
-        ], $expiresAt);
+            'expires_at' => $expiresAt,
+        ]);
+        $display->load(['creator:id,firstname,lastname,username', 'warehouse:id,name']);
 
         $url = url('/real-time-sales-display').'?token='.$token;
         $qrSvg = null;
@@ -63,18 +82,27 @@ class RealTimeSalesDisplayController extends Controller
             'url' => $url,
             'qr' => $qrSvg,
             'expires_at' => $expiresAt->toIso8601String(),
+            'display' => $this->displayResource($display, $token),
         ]);
     }
 
     public function current(Request $request)
     {
-        $user = $request->user('api');
-        $role = $user ? $user->roles()->first() : null;
-        if (! $user || ! $role || ! $role->inRole('real_time_sales_counter')) {
-            return response()->json(['message' => 'Unauthorized'], 403);
+        $user = $this->authorizedUser($request);
+        $this->migrateLegacyDisplay($user);
+        $query = RealTimeSalesDisplay::with(['creator:id,firstname,lastname,username', 'warehouse:id,name'])
+            ->whereNull('revoked_at')
+            ->where('expires_at', '>', now())
+            ->latest('id');
+        $this->applyDisplayVisibility($query, $user);
+        $display = $query->first();
+        if ($display) {
+            return response()->json(['active' => true] + $this->displayResource($display));
         }
 
-        $config = Cache::get(self::TOKEN_KEY);
+        // Backward compatibility for the one cache-only token created before
+        // Phase 4. It remains usable until its original expiry.
+        $config = Cache::get(self::LEGACY_TOKEN_KEY);
         if (! is_array($config) || empty($config['token_ciphertext']) || empty($config['expires_at'])) {
             return response()->json(['active' => false]);
         }
@@ -82,7 +110,7 @@ class RealTimeSalesDisplayController extends Controller
         try {
             $expiresAt = Carbon::parse($config['expires_at']);
             if ($expiresAt->isPast()) {
-                Cache::forget(self::TOKEN_KEY);
+                Cache::forget(self::LEGACY_TOKEN_KEY);
                 return response()->json(['active' => false]);
             }
             $token = Crypt::decryptString($config['token_ciphertext']);
@@ -94,10 +122,43 @@ class RealTimeSalesDisplayController extends Controller
             'active' => true,
             'url' => url('/real-time-sales-display').'?token='.$token,
             'expires_at' => $expiresAt->toIso8601String(),
+            'name' => 'Legacy display',
             'warehouse_id' => (int) ($config['selected_warehouse_id'] ?? 0),
             'refresh_seconds' => (int) ($config['refresh_seconds'] ?? 30),
             'show_customer_names' => (bool) ($config['show_customer_names'] ?? false),
         ]);
+    }
+
+    public function regenerate(Request $request, int $id)
+    {
+        $user = $this->authorizedUser($request);
+        $display = $this->visibleDisplay($id, $user);
+        $token = Str::random(64);
+        $expiresAt = now()->addDay();
+        $display->update([
+            'token_hash' => hash('sha256', $token),
+            'token_encrypted' => Crypt::encryptString($token),
+            'expires_at' => $expiresAt,
+            'last_seen_at' => null,
+            'revoked_at' => null,
+        ]);
+        $display->load(['creator:id,firstname,lastname,username', 'warehouse:id,name']);
+
+        return response()->json([
+            'message' => 'Display link regenerated.',
+            'display' => $this->displayResource($display, $token),
+        ]);
+    }
+
+    public function revoke(Request $request, int $id)
+    {
+        $user = $this->authorizedUser($request);
+        $display = $this->visibleDisplay($id, $user);
+        if (! $display->revoked_at) {
+            $display->update(['revoked_at' => now()]);
+        }
+
+        return response()->json(['message' => 'Display access revoked.']);
     }
 
     public function page(Request $request)
@@ -132,12 +193,150 @@ class RealTimeSalesDisplayController extends Controller
             return null;
         }
 
-        $config = Cache::get(self::TOKEN_KEY);
-        if (! is_array($config) || empty($config['hash'])) {
+        $display = RealTimeSalesDisplay::where('token_hash', hash('sha256', $token))->first();
+        if ($display) {
+            if (! $display->isAccessible()) {
+                return null;
+            }
+
+            if (! $display->last_seen_at || $display->last_seen_at->lte(now()->subMinute())) {
+                RealTimeSalesDisplay::whereKey($display->id)->update(['last_seen_at' => now()]);
+            }
+
+            return [
+                'display_id' => (int) $display->id,
+                'warehouse_ids' => array_map('intval', $display->warehouse_ids ?: []),
+                'selected_warehouse_id' => (int) ($display->warehouse_id ?: 0),
+                'show_customer_names' => (bool) $display->show_customer_names,
+                'refresh_seconds' => (int) $display->refresh_seconds,
+                'view_all_records' => (bool) $display->view_all_records,
+                'user_id' => (int) $display->scope_user_id,
+                'expires_at' => $display->expires_at?->toIso8601String(),
+            ];
+        }
+
+        $legacy = Cache::get(self::LEGACY_TOKEN_KEY);
+        if (! is_array($legacy) || empty($legacy['hash'])) {
             return null;
         }
 
-        return hash_equals((string) $config['hash'], hash('sha256', $token)) ? $config : null;
+        return hash_equals((string) $legacy['hash'], hash('sha256', $token)) ? $legacy : null;
+    }
+
+    private function authorizedUser(Request $request)
+    {
+        $user = $request->user('api');
+        $role = $user ? $user->roles()->first() : null;
+        abort_unless($user && $role && $role->inRole('real_time_sales_counter'), 403, 'Unauthorized');
+
+        return $user;
+    }
+
+    private function migrateLegacyDisplay($user): void
+    {
+        $legacy = Cache::get(self::LEGACY_TOKEN_KEY);
+        if (! is_array($legacy) || empty($legacy['hash']) || empty($legacy['token_ciphertext']) || empty($legacy['expires_at'])) {
+            return;
+        }
+
+        try {
+            $expiresAt = Carbon::parse($legacy['expires_at']);
+            if ($expiresAt->isPast()) {
+                Cache::forget(self::LEGACY_TOKEN_KEY);
+                return;
+            }
+
+            RealTimeSalesDisplay::firstOrCreate(
+                ['token_hash' => (string) $legacy['hash']],
+                [
+                    'name' => 'Existing display',
+                    'token_encrypted' => (string) $legacy['token_ciphertext'],
+                    'warehouse_id' => ! empty($legacy['selected_warehouse_id']) ? (int) $legacy['selected_warehouse_id'] : null,
+                    'warehouse_ids' => array_map('intval', $legacy['warehouse_ids'] ?? []),
+                    'refresh_seconds' => (int) ($legacy['refresh_seconds'] ?? 30),
+                    'show_customer_names' => (bool) ($legacy['show_customer_names'] ?? false),
+                    'created_by' => (int) ($legacy['created_by'] ?? $user->id),
+                    'scope_user_id' => (int) ($legacy['user_id'] ?? $user->id),
+                    'view_all_records' => (bool) ($legacy['view_all_records'] ?? false),
+                    'expires_at' => $expiresAt,
+                ]
+            );
+            Cache::forget(self::LEGACY_TOKEN_KEY);
+        } catch (\Throwable $error) {
+            // Leave the legacy cache entry intact so the old public link keeps
+            // working if migration is temporarily unavailable.
+        }
+    }
+
+    private function allowedWarehouseIds($user): array
+    {
+        return $user->is_all_warehouses
+            ? Warehouse::whereNull('deleted_at')->pluck('id')->map(fn ($id) => (int) $id)->all()
+            : UserWarehouse::where('user_id', $user->id)->pluck('warehouse_id')->map(fn ($id) => (int) $id)->all();
+    }
+
+    private function applyDisplayVisibility($query, $user): void
+    {
+        if ($user->is_all_warehouses) {
+            return;
+        }
+
+        // Limited users manage only links they created. This prevents one
+        // cashier from retrieving another user's encrypted display URL or
+        // regenerating a link that carries a broader record-view snapshot.
+        $query->where('created_by', $user->id);
+    }
+
+    private function visibleDisplay(int $id, $user): RealTimeSalesDisplay
+    {
+        $query = RealTimeSalesDisplay::query()->whereKey($id);
+        $this->applyDisplayVisibility($query, $user);
+
+        return $query->firstOrFail();
+    }
+
+    private function displayResource(RealTimeSalesDisplay $display, ?string $plainToken = null): array
+    {
+        $active = $display->isAccessible();
+        $status = 'active';
+        if ($display->revoked_at) {
+            $status = 'revoked';
+        } elseif (! $display->expires_at || $display->expires_at->isPast()) {
+            $status = 'expired';
+        } elseif ($display->last_seen_at) {
+            $onlineWindow = max(90, ((int) $display->refresh_seconds * 3));
+            $status = $display->last_seen_at->gte(now()->subSeconds($onlineWindow)) ? 'online' : 'idle';
+        }
+
+        if ($active && ! $plainToken) {
+            try {
+                $plainToken = Crypt::decryptString($display->token_encrypted);
+            } catch (\Throwable $error) {
+                $plainToken = null;
+            }
+        }
+
+        $creatorName = trim(($display->creator?->firstname ?? '').' '.($display->creator?->lastname ?? ''));
+        if ($creatorName === '') {
+            $creatorName = $display->creator?->username ?: '—';
+        }
+
+        return [
+            'id' => (int) $display->id,
+            'name' => $display->name,
+            'url' => $active && $plainToken ? url('/real-time-sales-display').'?token='.$plainToken : null,
+            'warehouse_id' => (int) ($display->warehouse_id ?: 0),
+            'warehouse_name' => $display->warehouse?->name ?: 'All permitted warehouses',
+            'refresh_seconds' => (int) $display->refresh_seconds,
+            'show_customer_names' => (bool) $display->show_customer_names,
+            'created_by' => $creatorName,
+            'created_at' => $display->created_at?->toIso8601String(),
+            'expires_at' => $display->expires_at?->toIso8601String(),
+            'last_seen_at' => $display->last_seen_at?->toIso8601String(),
+            'revoked_at' => $display->revoked_at?->toIso8601String(),
+            'status' => $status,
+            'active' => $active,
+        ];
     }
 
     private function buildPayload(array $config): array
