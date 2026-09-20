@@ -11,6 +11,7 @@ use App\Models\Warehouse;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -39,6 +40,8 @@ class RealTimeSalesDisplayController extends Controller
         $expiresAt = now()->addDay();
         Cache::put(self::TOKEN_KEY, [
             'hash' => hash('sha256', $token),
+            'token_ciphertext' => Crypt::encryptString($token),
+            'expires_at' => $expiresAt->toIso8601String(),
             'warehouse_ids' => $warehouseId ? [$warehouseId] : $allowedWarehouseIds,
             'selected_warehouse_id' => $warehouseId,
             'show_customer_names' => $request->boolean('show_customer_names', false),
@@ -60,6 +63,40 @@ class RealTimeSalesDisplayController extends Controller
             'url' => $url,
             'qr' => $qrSvg,
             'expires_at' => $expiresAt->toIso8601String(),
+        ]);
+    }
+
+    public function current(Request $request)
+    {
+        $user = $request->user('api');
+        $role = $user ? $user->roles()->first() : null;
+        if (! $user || ! $role || ! $role->inRole('real_time_sales_counter')) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $config = Cache::get(self::TOKEN_KEY);
+        if (! is_array($config) || empty($config['token_ciphertext']) || empty($config['expires_at'])) {
+            return response()->json(['active' => false]);
+        }
+
+        try {
+            $expiresAt = Carbon::parse($config['expires_at']);
+            if ($expiresAt->isPast()) {
+                Cache::forget(self::TOKEN_KEY);
+                return response()->json(['active' => false]);
+            }
+            $token = Crypt::decryptString($config['token_ciphertext']);
+        } catch (\Throwable $error) {
+            return response()->json(['active' => false]);
+        }
+
+        return response()->json([
+            'active' => true,
+            'url' => url('/real-time-sales-display').'?token='.$token,
+            'expires_at' => $expiresAt->toIso8601String(),
+            'warehouse_id' => (int) ($config['selected_warehouse_id'] ?? 0),
+            'refresh_seconds' => (int) ($config['refresh_seconds'] ?? 30),
+            'show_customer_names' => (bool) ($config['show_customer_names'] ?? false),
         ]);
     }
 
@@ -251,6 +288,7 @@ class RealTimeSalesDisplayController extends Controller
                 : 'All Warehouses',
             'show_customer_names' => (bool) ($config['show_customer_names'] ?? false),
             'refresh_seconds' => (int) ($config['refresh_seconds'] ?? 30),
+            'expires_at' => $config['expires_at'] ?? null,
             'currency' => optional($setting?->Currency)->symbol ?: optional($setting?->Currency)->code ?: '',
             'server_time' => Carbon::now()->toIso8601String(),
         ];

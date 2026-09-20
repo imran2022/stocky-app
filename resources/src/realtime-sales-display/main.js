@@ -1,4 +1,7 @@
 import { createApp } from 'vue';
+import VueApexCharts from 'vue3-apexcharts';
 import RealTimeSalesDisplay from './RealTimeSalesDisplay.vue';
 
-createApp(RealTimeSalesDisplay).mount('#real-time-sales-display');
+createApp(RealTimeSalesDisplay)
+    .component('apexchart', VueApexCharts)
+    .mount('#real-time-sales-display');

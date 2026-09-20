@@ -7,6 +7,7 @@
       </div>
       <div class="header-meta">
         <span class="live" :class="{ offline: hasError }"><i></i>{{ hasError ? 'CONNECTION LOST' : 'LIVE' }}</span>
+        <span v-if="accessExpiresAt" class="expiry" :class="{ warning: tokenExpiresSoon }">{{ tokenExpiryText }}</span>
         <button class="theme-toggle" :class="{ active: soundEnabled }" type="button" :title="soundEnabled ? 'Mute new sale sound' : 'Enable new sale sound'" @click="toggleSound">
           <svg v-if="soundEnabled" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18 6a8.5 8.5 0 0 1 0 12"/></svg>
           <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="m16 10 5 5M21 10l-5 5"/></svg>
@@ -61,18 +62,19 @@
       <template v-else>
         <section class="grid top-grid">
           <article class="panel chart-panel">
-            <div class="panel-title"><h2>Hourly sales today</h2><span>24 hours</span></div>
-            <div class="chart">
-              <svg viewBox="0 0 1000 250" role="img" aria-label="Hourly sales chart">
-                <line v-for="line in [30,80,130,180]" :key="line" x1="34" :y1="line" x2="985" :y2="line" class="grid-line"/>
-                <g v-for="point in hourly" :key="point.hour">
-                  <title>{{ hourName(point.hour) }} — {{ point.count }} sales · {{ money(point.total) }}</title>
-                  <rect :x="46 + point.hour * 39" :y="svgBarY(point.count)" width="20" :height="svgBarHeight(point.count)" rx="5" class="chart-bar"/>
-                  <text v-if="point.count" :x="56 + point.hour * 39" :y="svgBarY(point.count) - 7" text-anchor="middle" class="bar-label">{{ point.count }}</text>
-                  <text v-if="point.hour % 3 === 0" :x="56 + point.hour * 39" y="225" text-anchor="middle" class="axis-label">{{ String(point.hour).padStart(2, '0') }}</text>
-                </g>
-              </svg>
+            <div class="panel-title">
+              <h2>Hourly sales today</h2>
+              <div class="chart-actions">
+                <div class="metric-switch" aria-label="Chart metric">
+                  <button type="button" :class="{ active: chartMetric === 'count' }" @click="chartMetric = 'count'">Count</button>
+                  <button type="button" :class="{ active: chartMetric === 'amount' }" @click="chartMetric = 'amount'">Amount</button>
+                </div>
+                <button class="refresh-button" :class="{ spinning: fetching }" type="button" title="Refresh now" :disabled="fetching" @click="fetchData">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg>
+                </button>
+              </div>
             </div>
+            <div class="chart"><apexchart type="bar" height="250" :options="hourlyChartOptions" :series="hourlyChartSeries" /></div>
           </article>
 
           <article class="panel products">
@@ -128,6 +130,7 @@ export default {
       todayCount: 0, todayTotal: 0, todayPaid: 0, todayDue: 0, yesterdayTotal: 0, lastSaleAt: null,
       statuses: { paid: 0, partial: 0, unpaid: 0 }, hourly: [], recentSales: [], topProducts: [], locations: [],
       warehouseName: 'All Warehouses', currency: '', showCustomerNames: false, lastUpdatedAt: null,
+      chartMetric: 'count', accessExpiresAt: null,
       knownIds: new Set(), newSaleIds: new Set(), bumpCount: false, bumpTotal: false,
       timer: null, clockTimer: null, freshTimer: null, noticeTimer: null, nextRefreshAt: null,
       isFullscreen: false, newSaleNotice: null, audioContext: null,
@@ -143,6 +146,43 @@ export default {
     lastSaleAbsolute() { return this.lastSaleAt ? new Date(this.lastSaleAt).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) : 'No sales yet'; },
     updatedRelative() { return this.relative(this.lastUpdatedAt); },
     nextRefreshSeconds() { return this.nextRefreshAt ? Math.max(0, Math.ceil((this.nextRefreshAt - this.now) / 1000)) : 0; },
+    tokenExpiresSoon() { return this.accessExpiresAt && (new Date(this.accessExpiresAt).getTime() - this.now) <= 3600000; },
+    tokenExpiryText() {
+      if (!this.accessExpiresAt) return '';
+      const seconds = Math.max(0, Math.floor((new Date(this.accessExpiresAt).getTime() - this.now) / 1000));
+      if (seconds < 60) return `Link expires in ${seconds}s`;
+      if (seconds < 3600) return `Link expires in ${Math.floor(seconds / 60)}m`;
+      return `Link expires in ${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+    },
+    hourlyChartSeries() {
+      const key = this.chartMetric === 'amount' ? 'total' : 'count';
+      return [{ name: this.chartMetric === 'amount' ? 'Sales amount' : 'Sales count', data: this.hourly.map(item => Number(item[key] || 0)) }];
+    },
+    hourlyChartOptions() {
+      const isAmount = this.chartMetric === 'amount', dark = this.theme === 'dark';
+      const totals = this.hourly.map(item => Number(item.total || 0)), counts = this.hourly.map(item => Number(item.count || 0));
+      return {
+        chart: { id:'live-hourly-sales', toolbar:{ show:false }, zoom:{ enabled:false }, animations:{ enabled:true, speed:300 }, fontFamily:'inherit', background:'transparent' },
+        theme: { mode: dark ? 'dark' : 'light' },
+        plotOptions: { bar:{ columnWidth:'55%', borderRadius:6, borderRadiusApplication:'end' } },
+        dataLabels: { enabled:false }, colors:['#6d28d9'],
+        grid: { borderColor:dark ? 'rgba(148,163,184,.17)' : '#ededf2', strokeDashArray:4, padding:{ left:4, right:8 } },
+        xaxis: {
+          categories:Array.from({ length:24 }, (_, hour) => `${String(hour).padStart(2, '0')}h`), tickAmount:8,
+          labels:{ rotate:0, hideOverlappingLabels:true, style:{ colors:dark ? '#98a6ba' : '#8c8c9c', fontSize:'11px' } },
+          axisBorder:{ show:false }, axisTicks:{ show:false }, tooltip:{ enabled:false },
+        },
+        yaxis: { min:0, forceNiceScale:true, labels:{ style:{ colors:dark ? '#98a6ba' : '#8c8c9c', fontSize:'11px' }, formatter:value => isAmount ? this.compactMoney(value) : Math.round(value) } },
+        tooltip: {
+          theme:dark ? 'dark' : 'light',
+          y:{ formatter:(value, context) => isAmount
+            ? `${this.money(value)} · ${counts[context.dataPointIndex] || 0} sales`
+            : `${Math.round(value)} sales · ${this.money(totals[context.dataPointIndex] || 0)}` },
+        },
+        states:{ hover:{ filter:{ type:'lighten', value:.06 } }, active:{ filter:{ type:'none' } } },
+        responsive:[{ breakpoint:620, options:{ chart:{ height:220 }, plotOptions:{ bar:{ columnWidth:'68%', borderRadius:4 } }, xaxis:{ tickAmount:6 } } }],
+      };
+    },
   },
   methods: {
     money(value) {
@@ -150,6 +190,10 @@ export default {
       return this.currency ? `${this.currency} ${formatted}` : formatted;
     },
     quantity(value) { const n = Number(value || 0); return Number.isInteger(n) ? n : n.toFixed(2); },
+    compactMoney(value) {
+      const formatted = new Intl.NumberFormat(undefined, { notation:'compact', maximumFractionDigits:1 }).format(Number(value || 0));
+      return this.currency ? `${this.currency} ${formatted}` : formatted;
+    },
     relative(value) {
       if (!value) return '—';
       const seconds = Math.max(0, Math.floor((this.now - new Date(value).getTime()) / 1000));
@@ -157,9 +201,6 @@ export default {
       if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
       return `${Math.floor(seconds / 3600)}h ago`;
     },
-    hourName(hour) { return `${String(hour).padStart(2, '0')}:00`; },
-    svgBarHeight(count) { const max = Math.max(1, ...this.hourly.map(item => Number(item.count || 0))); return count ? Math.max(6, Number(count) / max * 165) : 3; },
-    svgBarY(count) { return 198 - this.svgBarHeight(count); },
     productWidth(product) { const max = Math.max(1, ...this.topProducts.map(item => Number(item.quantity || 0))); return Math.max(5, Number(product.quantity || 0) / max * 100); },
     saleTime(date) { return date ? new Date(date).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) : '—'; },
     locationDateTime(date) {
@@ -220,6 +261,7 @@ export default {
         this.hourly = Array.isArray(data.hourly) ? data.hourly : []; this.recentSales = Array.isArray(data.recent_sales) ? data.recent_sales : [];
         this.topProducts = Array.isArray(data.top_products) ? data.top_products : []; this.locations = Array.isArray(data.sales_by_location) ? data.sales_by_location : [];
         this.warehouseName = data.selected_warehouse_name || 'All Warehouses'; this.currency = data.currency || '';
+        this.accessExpiresAt = data.expires_at || this.accessExpiresAt;
         this.showCustomerNames = !!data.show_customer_names; this.refreshSeconds = Math.max(10, Number(data.refresh_seconds || 30));
         const ids = new Set(this.recentSales.map(sale => sale.id));
         const fresh = previousIds.size ? this.recentSales.filter(sale => !previousIds.has(sale.id)).map(sale => sale.id) : [];
@@ -316,6 +358,9 @@ header {
 .live { color:#389e0d;border-color:#b7eb8f;background:#f6ffed; }
 .live i { background:#52c41a;box-shadow:0 0 0 4px rgba(82,196,26,.12); }
 .dark .live { color:#6ee7b7;border-color:rgba(52,211,153,.24);background:rgba(16,185,129,.08); }
+.expiry { color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap; }
+.expiry.warning { padding:5px 8px;border:1px solid #ffe58f;border-radius:6px;color:#d48806;background:#fffbe6; }
+.dark .expiry.warning { border-color:rgba(245,158,11,.3);color:#fde68a;background:rgba(245,158,11,.1); }
 main { padding:20px clamp(20px,2vw,32px) 28px; }
 .kpis { gap:16px; }
 .kpis article,.panel,.payment-strip {
@@ -340,15 +385,25 @@ main { padding:20px clamp(20px,2vw,32px) 28px; }
 .panel-title h2 { color:var(--text);font-size:16px;font-weight:600;letter-spacing:0; }
 .panel-title>span { color:var(--muted);font-size:12px; }
 .chart {
-  height:260px;padding:0;border:0;display:block;
-  background-image:linear-gradient(to bottom,transparent calc(100% - 1px),var(--line) 1px);
+  height:260px;padding:0;border:0;display:block;background:none;
 }
-.chart svg { width:100%;height:100%;overflow:visible; }
-.grid-line { stroke:var(--line);stroke-width:1;stroke-dasharray:4 5; }
-.chart-bar { fill:#6d28d9; }
-.dark .chart-bar { fill:#8b6cf0; }
-.bar-label { fill:var(--muted);font-size:10px;font-weight:600; }
-.axis-label { fill:var(--muted);font-size:10px; }
+.chart :deep(.apexcharts-canvas),.chart :deep(.apexcharts-svg) { max-width:100%; }
+.chart-actions,.metric-switch { display:flex;align-items:center; }
+.chart-actions { gap:8px; }
+.metric-switch { padding:2px;border:1px solid var(--line);border-radius:7px;background:var(--bg); }
+.metric-switch button {
+  min-width:58px;padding:4px 9px;border:0;border-radius:5px;color:var(--muted);background:transparent;
+  font:inherit;font-size:11px;cursor:pointer;
+}
+.metric-switch button.active { color:#fff;background:#6d28d9;box-shadow:0 1px 2px rgba(109,40,217,.22); }
+.refresh-button {
+  width:30px;height:30px;padding:0;display:grid;place-items:center;border:1px solid var(--line);border-radius:7px;
+  color:var(--muted);background:var(--panel);cursor:pointer;
+}
+.refresh-button:hover { border-color:#6d28d9;color:#6d28d9; }
+.refresh-button:disabled { cursor:default;opacity:.6; }
+.refresh-button svg { width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round; }
+.refresh-button.spinning svg { animation:spin .8s linear infinite; }
 .product { min-height:47px;padding:10px 2px; }
 .product>b { font-size:12px; }
 .product div>strong { color:var(--text);font-size:13px;font-weight:500; }
@@ -425,11 +480,13 @@ main { padding:20px clamp(20px,2vw,32px) 28px; }
   .kpis article{min-height:90px;padding:14px}
   .kpis strong{font-size:19px}
   .panel{padding:15px}
-  .chart{height:210px;overflow-x:auto}
-  .chart svg{min-width:760px}
+  .chart{height:220px;overflow:hidden}
+  .chart :deep(svg){min-width:0}
   .theme-toggle{width:32px;height:32px}
   .header-meta{gap:6px}
   .clock{margin-left:2px}
+  .expiry{display:none}
+  .metric-switch button{min-width:52px;padding:4px 7px}
   .sale-notice{top:78px;right:12px;left:12px;min-width:0}
 }
 </style>

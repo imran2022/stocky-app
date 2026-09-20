@@ -191,14 +191,16 @@
           <a-checkbox v-model:checked="displayShowCustomerNames">Show customer names on the public display</a-checkbox>
         </a-form-item>
       </a-form>
-      <div v-if="displayUrl" class="display-link-result">
-        <a-input :value="displayUrl" readonly @focus="event => event.target.select()" />
-        <a-space>
-          <a-button @click="copyDisplayUrl">Copy link</a-button>
-          <a-button type="primary" @click="openDisplay">Open display</a-button>
-        </a-space>
-        <small>Expires: {{ displayExpiresLabel }}</small>
-      </div>
+      <a-spin :spinning="displayLoadingActive">
+        <div v-if="displayUrl" class="display-link-result">
+          <a-input :value="displayUrl" readonly @focus="event => event.target.select()" />
+          <a-space>
+            <a-button @click="copyDisplayUrl">Copy link</a-button>
+            <a-button type="primary" @click="openDisplay">Open display</a-button>
+          </a-space>
+          <small>Active link · Expires: {{ displayExpiresLabel }}</small>
+        </div>
+      </a-spin>
     </a-modal>
   </div>
 </template>
@@ -215,6 +217,7 @@
  */
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { message } from 'ant-design-vue';
 import {
   PauseOutlined, CaretRightOutlined, ReloadOutlined, SoundOutlined, RiseOutlined, FallOutlined,
 } from '@ant-design/icons-vue';
@@ -235,6 +238,7 @@ const hasError = ref(false);
 const soundEnabled = ref(false);
 const displaySetupOpen = ref(false);
 const displayGenerating = ref(false);
+const displayLoadingActive = ref(false);
 const displayWarehouseId = ref(undefined);
 const displayRefreshSeconds = ref(30);
 const displayShowCustomerNames = ref(false);
@@ -486,11 +490,29 @@ function toggleSound() {
   if (soundEnabled.value) playBeep();
 }
 
-function openDisplaySetup() {
+async function openDisplaySetup() {
   displayWarehouseId.value = warehouseId.value;
   displayRefreshSeconds.value = refreshSeconds.value;
   displayError.value = '';
   displaySetupOpen.value = true;
+  displayLoadingActive.value = true;
+  try {
+    const data = await http.get('real-time-sales-display/current') || {};
+    if (data.active && data.url) {
+      displayUrl.value = data.url;
+      displayExpiresAt.value = data.expires_at || '';
+      displayWarehouseId.value = Number(data.warehouse_id) || undefined;
+      displayRefreshSeconds.value = Number(data.refresh_seconds) || 30;
+      displayShowCustomerNames.value = !!data.show_customer_names;
+    } else {
+      displayUrl.value = '';
+      displayExpiresAt.value = '';
+    }
+  } catch (error) {
+    displayError.value = error?.data?.message || 'Could not check the active display link.';
+  } finally {
+    displayLoadingActive.value = false;
+  }
 }
 
 async function generateDisplayToken() {
@@ -515,7 +537,28 @@ async function generateDisplayToken() {
 
 async function copyDisplayUrl() {
   if (!displayUrl.value) return;
-  try { await navigator.clipboard.writeText(displayUrl.value); } catch (e) { /* browser may block clipboard */ }
+  let copied = false;
+  try {
+    if (window.isSecureContext && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(displayUrl.value);
+      copied = true;
+    }
+  } catch (e) { /* use the HTTP-compatible fallback below */ }
+
+  if (!copied) {
+    const textarea = document.createElement('textarea');
+    textarea.value = displayUrl.value;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.select();
+    try { copied = document.execCommand('copy'); } catch (e) { copied = false; }
+    document.body.removeChild(textarea);
+  }
+
+  if (copied) message.success('Display link copied');
+  else message.error('Copy failed. Select the link and copy it manually.');
 }
 
 function openDisplay() {

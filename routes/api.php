@@ -1731,6 +1731,7 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     Route::post('customer-display/generate', [CustomerDisplayController::class, 'generate']);
 
     // Real-time Sales Display: permission-scoped, read-only display token.
+    Route::get('real-time-sales-display/current', [\App\Http\Controllers\Api\RealTimeSalesDisplayController::class, 'current']);
     Route::post('real-time-sales-display/generate', [\App\Http\Controllers\Api\RealTimeSalesDisplayController::class, 'generate']);
 
     // ------------------------------- QuickBooks Integration ------------------------\\
