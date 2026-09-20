@@ -10,7 +10,7 @@
         <h3 class="card-title mb-0">{{ title }}</h3>
         <span v-if="totalRows" class="badge bg-secondary-lt">{{ totalRows }}</span>
 
-        <form class="ms-auto d-flex flex-wrap align-items-center gap-2 d-print-none" @submit.prevent>
+        <form class="pc-filterbar ms-auto d-flex flex-wrap align-items-center gap-2 d-print-none" @submit.prevent>
           <div class="input-icon">
             <span class="input-icon-addon"><i class="ti ti-search"></i></span>
             <input
@@ -23,15 +23,22 @@
             />
           </div>
 
-          <slot name="filters" :state="state" />
-
-          <select class="form-select w-auto" :value="state.pageSize" :aria-label="tr('entries', 'entries')" @change="setPageSize($event.target.value)">
-            <option v-for="n in pageSizes" :key="n" :value="n">{{ n }} / {{ tr('page', 'page') }}</option>
-          </select>
-
-          <button v-if="hasActiveFilters" type="button" class="btn btn-outline-secondary" @click="$emit('reset')">
-            <i class="ti ti-x me-1"></i>{{ tr('reset_filters', 'Reset') }}
+          <button type="button" class="btn btn-outline-primary pc-mobile-filter-toggle d-md-none" :aria-expanded="mobileFiltersOpen ? 'true' : 'false'" @click="mobileFiltersOpen = !mobileFiltersOpen">
+            <i class="ti ti-adjustments-horizontal me-1"></i>{{ tr('filters', 'Filters') }}
+            <span v-if="hasActiveFilters" class="pc-filter-dot"></span>
           </button>
+
+          <div class="pc-filter-extras" :class="{ 'is-open': mobileFiltersOpen }">
+            <slot name="filters" :state="state" />
+
+            <select class="form-select w-auto" :value="state.pageSize" :aria-label="tr('entries', 'entries')" @change="setPageSize($event.target.value)">
+              <option v-for="n in pageSizes" :key="n" :value="n">{{ n }} / {{ tr('page', 'page') }}</option>
+            </select>
+
+            <button v-if="hasActiveFilters" type="button" class="btn btn-outline-secondary" @click="$emit('reset')">
+              <i class="ti ti-x me-1"></i>{{ tr('reset_filters', 'Reset') }}
+            </button>
+          </div>
         </form>
       </div>
     </div>
@@ -39,7 +46,7 @@
     <EmptyState v-if="!loading && !rows.length" :icon="emptyIcon" :title="emptyText || tr('no_matching_records', 'No matching records')"
       :subtitle="hasActiveFilters ? tr('try_adjusting_filters', 'Try adjusting your search or filters.') : ''" />
 
-    <div v-else class="table-responsive" :class="{ 'pc-table-loading': loading }">
+    <div v-else class="pc-desktop-table table-responsive" :class="{ 'pc-table-loading': loading, 'has-mobile-cards': !!$slots['mobile-card'] }">
       <div v-if="loading" class="pc-table-spinner"><div class="spinner-border text-primary" role="status"></div></div>
       <table class="table card-table table-vcenter table-mobile-md">
         <thead>
@@ -67,6 +74,11 @@
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <div v-if="rows.length && $slots['mobile-card']" class="pc-mobile-list" :class="{ 'pc-table-loading': loading }">
+      <div v-if="loading" class="pc-table-spinner"><div class="spinner-border text-primary" role="status"></div></div>
+      <slot v-for="(row, i) in rows" name="mobile-card" :row="row" :index="i" :key="rowKeyOf(row, i)" />
     </div>
 
     <div class="card-footer d-flex flex-wrap align-items-center gap-2">
@@ -126,6 +138,7 @@ export default {
     return {
       state: { page: 1, pageSize: this.defaultPageSize, search: '', sort: this.defaultSort, dir: this.defaultDir },
       debounce: null,
+      mobileFiltersOpen: false,
     };
   },
   computed: {
@@ -179,7 +192,7 @@ export default {
       clearTimeout(this.debounce);
       this.debounce = setTimeout(() => { this.state.page = 1; this.emitQuery(); }, 300);
     },
-    clearSearch() { this.state.search = ''; this.state.page = 1; this.emitQuery(); },
+    clearSearch() { this.state.search = ''; this.state.page = 1; this.mobileFiltersOpen = false; this.emitQuery(); },
     toggleSort(key) {
       if (this.state.sort === key) this.state.dir = this.state.dir === 'asc' ? 'desc' : 'asc';
       else { this.state.sort = key; this.state.dir = 'asc'; }

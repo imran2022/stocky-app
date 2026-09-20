@@ -39,6 +39,28 @@
           <a :href="`/api/portal/invoices/${row.id}/pdf`" target="_blank" rel="noopener" :title="$t('pdf')" class="text-primary"><i class="ti ti-download"></i></a>
         </div>
       </template>
+
+      <template #mobile-card="{ row }">
+        <article class="pc-transaction-card pc-invoice-card">
+          <div class="pc-transaction-head">
+            <div>
+              <div class="pc-eyebrow">{{ $t('ref') }}</div>
+              <router-link :to="`/invoices/${row.id}`" class="pc-transaction-ref font-monospace">{{ row.Ref }}</router-link>
+              <div class="pc-transaction-date">{{ row.date }}</div>
+            </div>
+            <span :class="badge(invoiceTone(row.payment_status))">{{ statusLabel(row.payment_status) }}</span>
+          </div>
+          <dl class="pc-money-grid">
+            <div><dt>{{ $t('total') }}</dt><dd>{{ money(row.GrandTotal) }}</dd></div>
+            <div><dt>{{ $t('paid') }}</dt><dd class="text-success">{{ money(row.paid_amount) }}</dd></div>
+            <div><dt>{{ $t('due') }}</dt><dd :class="Number(row.due) > 0 ? 'text-danger' : 'text-secondary'">{{ money(row.due) }}</dd></div>
+          </dl>
+          <div class="pc-card-actions">
+            <router-link :to="`/invoices/${row.id}`" class="btn btn-outline-secondary"><i class="ti ti-eye me-1"></i>{{ $t('view') }}</router-link>
+            <a :href="`/api/portal/invoices/${row.id}/pdf`" target="_blank" rel="noopener" class="btn btn-primary"><i class="ti ti-download me-1"></i>{{ $t('pdf') }}</a>
+          </div>
+        </article>
+      </template>
     </DataTable>
   </div>
 </template>

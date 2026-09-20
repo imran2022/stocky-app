@@ -182,6 +182,19 @@
       </footer>
     </div>
 
+    <!-- Mobile-first primary navigation. The full menu remains available from
+         the drawer; these five destinations cover the frequent billing flow. -->
+    <nav class="rst-mobile-nav d-lg-none d-print-none" :aria-label="tr('primary_navigation', 'Primary navigation')">
+      <router-link v-for="item in mobileNav" :key="item.to" :to="item.to" :class="{ active: isActive(item.to) }">
+        <i :class="`ti ti-${item.icon}`"></i>
+        <span>{{ tr(item.label, item.fallback) }}</span>
+      </router-link>
+      <button type="button" :class="{ active: drawerOpen }" @click="drawerOpen = true">
+        <i class="ti ti-dots"></i>
+        <span>{{ tr('more', 'More') }}</span>
+      </button>
+    </nav>
+
     <Customizer />
   </div>
 </template>
@@ -226,6 +239,12 @@ export default {
           { to: '/help', label: 'nav_help', icon: 'help-circle' },
           { to: '/profile', label: 'nav_profile', icon: 'user-circle' },
         ] },
+      ],
+      mobileNav: [
+        { to: '/dashboard', label: 'nav_home', fallback: 'Home', icon: 'home' },
+        { to: '/invoices', label: 'nav_invoices', fallback: 'Invoices', icon: 'file-invoice' },
+        { to: '/payments', label: 'nav_payments', fallback: 'Payments', icon: 'credit-card' },
+        { to: '/statement', label: 'nav_statement', fallback: 'Statement', icon: 'report-money' },
       ],
     };
   },

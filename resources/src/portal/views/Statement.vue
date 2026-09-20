@@ -10,7 +10,7 @@
       <div class="card-header d-block">
         <div class="d-flex flex-wrap align-items-center gap-2">
           <h3 class="card-title mb-0">{{ $t('account_statement') }}</h3>
-          <form class="ms-auto d-flex flex-wrap align-items-center gap-2 d-print-none" @submit.prevent="fetch">
+          <form class="pc-statement-filters ms-auto d-flex flex-wrap align-items-center gap-2 d-print-none" @submit.prevent="fetch">
             <input v-model="fromDate" type="date" class="form-control w-auto" :aria-label="$t('from')" :title="$t('from')" />
             <input v-model="toDate" type="date" class="form-control w-auto" :aria-label="$t('to')" :title="$t('to')" />
             <button type="submit" class="btn btn-outline-secondary" :disabled="loading">
@@ -24,7 +24,7 @@
 
       <template v-if="data">
         <EmptyState v-if="!(data.entries && data.entries.length)" icon="report-money" :title="$t('no_entries')" />
-        <div v-else class="table-responsive">
+        <div v-else class="pc-statement-desktop table-responsive">
           <table class="table table-vcenter card-table">
             <thead>
               <tr>
@@ -49,6 +49,26 @@
               </tr>
             </tbody>
           </table>
+        </div>
+        <div v-if="data.entries && data.entries.length" class="pc-statement-timeline">
+          <article v-for="(e, i) in data.entries" :key="`mobile-${i}`" class="pc-ledger-entry" :class="e.credit ? 'is-credit' : 'is-debit'">
+            <span class="pc-ledger-dot"></span>
+            <div class="pc-ledger-date">{{ e.date }}</div>
+            <div class="pc-ledger-card">
+              <div class="pc-ledger-head">
+                <div>
+                  <span class="pc-ledger-type">{{ enumLabel('type_', e.type) }}</span>
+                  <div class="font-monospace text-secondary small">{{ e.ref }}</div>
+                </div>
+                <div class="text-end">
+                  <div class="pc-eyebrow">{{ e.credit ? $t('credit') : $t('debit') }}</div>
+                  <strong :class="e.credit ? 'text-success' : 'text-danger'">{{ money(e.credit || e.debit) }}</strong>
+                </div>
+              </div>
+              <div v-if="e.description" class="pc-ledger-description">{{ e.description }}</div>
+              <div class="pc-ledger-balance"><span>{{ $t('balance') }}</span><strong>{{ money(e.balance) }}</strong></div>
+            </div>
+          </article>
         </div>
       </template>
       <EmptyState v-else icon="report-money" :title="$t('statement_hint')" />

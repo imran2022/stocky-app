@@ -31,6 +31,23 @@
       <template #cell-Sale_Ref="{ value }"><span class="font-monospace">{{ value || '—' }}</span></template>
       <template #cell-payment_method="{ value }"><span v-if="value" class="badge bg-azure-lt">{{ value }}</span><span v-else>—</span></template>
       <template #cell-montant="{ value }"><span class="text-success fw-semibold">{{ money(value) }}</span></template>
+
+      <template #mobile-card="{ row }">
+        <article class="pc-transaction-card pc-payment-card">
+          <div class="pc-transaction-head">
+            <div>
+              <div class="pc-eyebrow">{{ $t('ref') }}</div>
+              <div class="pc-transaction-ref font-monospace">{{ row.Ref }}</div>
+              <div class="pc-transaction-date">{{ row.date }}</div>
+            </div>
+            <div class="pc-payment-amount text-success">{{ money(row.montant) }}</div>
+          </div>
+          <dl class="pc-payment-meta">
+            <div><dt>{{ $t('invoice') }}</dt><dd class="font-monospace">{{ row.Sale_Ref || '—' }}</dd></div>
+            <div><dt>{{ $t('method') }}</dt><dd><span v-if="row.payment_method" class="badge bg-azure-lt">{{ row.payment_method }}</span><span v-else>—</span></dd></div>
+          </dl>
+        </article>
+      </template>
     </DataTable>
   </div>
 </template>

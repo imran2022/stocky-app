@@ -11,19 +11,29 @@
         <div class="text-secondary">{{ today }}</div>
       </div>
 
+      <section class="pc-dashboard-due d-sm-none" :class="{ 'is-clear': !(Number(d.total_due) > 0) }">
+        <div class="pc-dashboard-due-icon"><i class="ti ti-currency-dollar"></i></div>
+        <div class="pc-dashboard-due-copy">
+          <span>{{ $t('amount_due') }}</span>
+          <strong>{{ money(d.total_due) }}</strong>
+          <small>{{ dueSub }}</small>
+        </div>
+        <router-link v-if="Number(d.total_due) > 0" to="/invoices" class="btn btn-primary">{{ tr('pay_now', 'Pay now') }} <i class="ti ti-arrow-right"></i></router-link>
+      </section>
+
       <!-- ══ Headline figures ═══════════════════════════════════════ -->
-      <div class="row row-deck row-cards mb-3">
-        <div class="col-sm-6 col-xl-3">
+      <div class="row row-deck row-cards mb-3 pc-dashboard-stats">
+        <div class="d-none d-sm-block col-sm-6 col-xl-3">
           <StatCard :label="$t('amount_due')" :value="money(d.total_due)" icon="currency-dollar" :tone="Number(d.total_due) > 0 ? 'red' : 'primary'"
             :sub="dueSub" />
         </div>
-        <div class="col-sm-6 col-xl-3">
+        <div class="col-6 col-sm-6 col-xl-3">
           <StatCard :label="tr('invoiced_this_month', 'Invoiced this month')" :value="money(d.month.invoiced)" icon="receipt" tone="blue" :change="d.month.change_invoiced" :sub="d.month.label" />
         </div>
-        <div class="col-sm-6 col-xl-3">
+        <div class="col-6 col-sm-6 col-xl-3">
           <StatCard :label="tr('paid_this_month', 'Paid this month')" :value="money(d.month.paid)" icon="chart-bar" tone="teal" :change="d.month.change_paid" :sub="d.month.label" />
         </div>
-        <div class="col-sm-6 col-xl-3">
+        <div class="col-6 col-sm-6 col-xl-3">
           <StatCard :label="$t('total_invoices')" :value="number(d.total_invoices)" icon="file-invoice" tone="green"
             :sub="tr('average_invoice_sub', 'average {amount}', { amount: money(d.average_invoice) })" />
         </div>
@@ -115,7 +125,7 @@
             <div v-if="!d.recent_invoices.length" class="card-body">
               <EmptyState icon="receipt-off" :title="$t('no_invoices_yet')" />
             </div>
-            <div v-else class="table-responsive">
+            <div v-else class="pc-dashboard-invoices-desktop table-responsive">
               <table class="table table-vcenter card-table">
                 <thead>
                   <tr>
@@ -145,6 +155,15 @@
                   </tr>
                 </tbody>
               </table>
+            </div>
+            <div v-if="d.recent_invoices.length" class="pc-dashboard-invoices-mobile">
+              <router-link v-for="inv in d.recent_invoices" :key="`mobile-${inv.id}`" :to="`/invoices/${inv.id}`" class="pc-activity-row">
+                <span class="pc-activity-icon"><i class="ti ti-file-invoice"></i></span>
+                <span class="pc-activity-copy"><strong class="font-monospace">{{ inv.Ref }}</strong><small>{{ inv.date }}</small></span>
+                <span :class="badge(invoiceTone(inv.payment_status))">{{ statusLabel(inv.payment_status) }}</span>
+                <strong class="pc-activity-amount">{{ money(inv.GrandTotal) }}</strong>
+                <i class="ti ti-chevron-right text-secondary"></i>
+              </router-link>
             </div>
           </div>
         </div>
