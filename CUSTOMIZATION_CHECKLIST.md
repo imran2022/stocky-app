@@ -2111,3 +2111,105 @@ this build but outside its stated scope).
 **Migration:** none — this build is code + one translation-seeder run
 only. `php artisan db:seed --class=Database\Seeders\TranslationSeeder`
 should still be run once to correct the 3 translation keys.
+
+## Build N5 — POS receipt toggles + 2 new layouts, POS SKU search fix, Dashboard chart/profit clarity, Customer Statement fix (2026-09-20)
+
+### 1. POS Receipt Show VAT/BIN + Show Website toggles
+
+**How to verify:**
+- [ ] Settings → POS Receipt — confirm "Show VAT/BIN" and "Show Website"
+      appear in the toggle list, next to the existing Show Address/Show
+      Email toggles.
+- [ ] Toggle each on/off and confirm the live preview updates immediately
+      for whichever layout is currently selected.
+- [ ] Set a VAT/BIN number and a Website in Company Settings, save, then
+      go make a real POS sale and print/preview the receipt — both
+      should appear (or not) exactly matching the toggle state.
+- [ ] Confirm existing receipts/layouts that showed VAT/BIN before this
+      update still show it by default after `php artisan migrate` (the
+      new column defaults to ON specifically to avoid silently hiding it
+      on existing ZATCA-style receipts).
+
+**Regression test:** `tests/Regression/build_n5_receipt_vat_website_toggles.php`.
+
+### 2. POS Receipt Layout 6 (Roomy) + Layout 7 (Simplified Tax Invoice, English)
+
+**How to verify:**
+- [ ] Settings → POS Receipt (or Settings → POS Settings) — confirm the
+      layout dropdown now offers "Layout 6 - Minimal (Roomy)" and
+      "Layout 7 - Simplified Tax Invoice (English)" in addition to the
+      existing 5.
+- [ ] Select Layout 6 — the live preview should look like Layout 5
+      (Minimal) but noticeably more spaced out / larger text, matching
+      Layout 1-4's roominess.
+- [ ] Select Layout 7 — the live preview should look like Layout 4
+      (Bilingual) but with **no Arabic text anywhere**, English only.
+- [ ] Save each layout selection, then make/print a real POS sale on
+      each — confirm the printed/PDF receipt matches the live preview,
+      and that on a narrow paper size (58mm/80mm) Layout 7 does not crop
+      or wrap the right edge.
+- [ ] With Layout 7 selected, confirm the ZATCA QR code / Invoice QR
+      code (if enabled) still renders on the printed receipt — this is
+      the toggle most likely to silently break if a future customization
+      ever changes these layouts' QR block markup.
+- [ ] Toggle Show VAT/BIN, Show Website, Show Email, etc. while Layout 6
+      or 7 is selected — same toggle behavior as every other layout.
+
+**Regression test:** `tests/Regression/build_n5_receipt_layouts_6_7.php`.
+
+### 3. POS search by variable product's main SKU
+
+**How to verify:**
+- [ ] Open POS, search by a variable product's **main/parent SKU**
+      (not a variant's own code) — matching variant rows should now
+      appear, exactly as they already do in Sales > Create Sale.
+- [ ] Confirm searching by a variant's own individual code still works
+      exactly as before (no regression to the existing behavior).
+
+**Regression test:** `tests/Regression/build_n5_pos_main_sku_search.php`.
+
+### 4. Dashboard: Sales vs Purchases chart
+
+**How to verify:**
+- [ ] Open the Dashboard — the Sales vs Purchases chart should now be a
+      smooth gradient area chart (not a bar chart), visually matching
+      the style of the Payment Methods chart on the same page.
+- [ ] Hover over the chart — tooltips should still show the correct
+      Sales/Purchases figures for each point.
+- [ ] Switch the dashboard's date range / warehouse filter and confirm
+      the chart re-renders correctly as an area chart every time (not
+      reverting to a bar chart on data refresh).
+
+### 5. Dashboard: Profit card
+
+**How to verify:**
+- [ ] Hover the small info icon next to "Sales" and "Profit" on the
+      Dashboard stat cards — each should show a tooltip explaining
+      exactly what it counts (Sales = all sales incl. drafts/holds;
+      Profit = completed sales only, minus FIFO cost of goods and
+      expenses, plus service job profit).
+- [ ] Create a draft/held sale and confirm it appears in the Sales total
+      but not in the Profit calculation — this is expected, correct
+      behavior (now explained by the tooltip, not a bug).
+
+**Regression test:** `tests/Regression/build_n5_dashboard_profit_verification.php`.
+
+### 6. Customer Statement date range + Opening Balance fix
+
+**How to verify:**
+- [ ] Open a customer's Statement page — it should now default to
+      showing the last ~90 days instead of the full history.
+- [ ] Click "Show All Time" — full history should load exactly as
+      before this build.
+- [ ] Pick a client with activity both before and after some date, set
+      "From Date" to that date — the "Opening Balance" row shown should
+      now correctly reflect all activity *before* that date (not just
+      the client's static opening balance), and the final running
+      balance at the bottom should match the all-time closing balance
+      exactly.
+
+**Regression test:** `tests/Regression/build_n5_customer_statement_range_fix.php`.
+
+**Migration:** `php artisan migrate` (new `pos_settings.show_vat_bin` /
+`show_website` columns; additive only, safe rollback via
+`migrate:rollback --step=1`).

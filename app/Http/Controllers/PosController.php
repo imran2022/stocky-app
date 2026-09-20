@@ -2094,6 +2094,14 @@ class PosController extends BaseController
                 $product_price = $product_warehouse['product']->price;
 
             }
+
+            // The parent product's own code. A variant row exposes only the
+            // variant code above, so without this searching by the main SKU
+            // could never match a variant product (matches the same fix
+            // already applied to ProductsController::Products_by_Warehouse,
+            // used by Sales > Create Sale's product search).
+            $item['product_code'] = $product_warehouse['product']->code;
+
             $item['id'] = $product_warehouse->product_id;
             $firstimage = explode(',', (string) $product_warehouse['product']->image);
             $item['image'] = $firstimage[0];

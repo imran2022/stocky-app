@@ -637,6 +637,14 @@ class SettingsController extends Controller
             $data['show_address'] = $request['show_address'];
         }
 
+        if ($request->has('show_vat_bin')) {
+            $data['show_vat_bin'] = ($request['show_vat_bin'] == '1' || $request['show_vat_bin'] == 'true' || $request['show_vat_bin'] === true) ? 1 : 0;
+        }
+
+        if ($request->has('show_website')) {
+            $data['show_website'] = ($request['show_website'] == '1' || $request['show_website'] == 'true' || $request['show_website'] === true) ? 1 : 0;
+        }
+
         if ($request->has('receipt_paper_size')) {
             // Sanitize receipt paper size (58mm, 80mm, 88mm)
             $candidateSize = (int) $request['receipt_paper_size'];
@@ -843,7 +851,10 @@ class SettingsController extends Controller
         // 5 (Minimal) was missing from the old clamp and silently reset to 1.
         if ($request->has('receipt_layout')) {
             $candidate = (int) $request['receipt_layout'];
-            $data['receipt_layout'] = in_array($candidate, [1, 2, 3, 4, 5], true) ? $candidate : 1;
+            // 6 = Roomy (Layout 5's minimal design, Layout 1-4's spacing);
+            // 7 = Simplified Tax Invoice, English-only (Layout 4's design
+            // without the Arabic text, so it doesn't crop on narrow printers).
+            $data['receipt_layout'] = in_array($candidate, [1, 2, 3, 4, 5, 6, 7], true) ? $candidate : 1;
         }
 
         if (! empty($data)) {

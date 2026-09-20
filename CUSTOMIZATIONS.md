@@ -4358,3 +4358,184 @@ where there's no server-side data to assert against, following the same
 pattern used since Build L1. Full cumulative regression suite (46 files)
 re-run afterward — no new failures (same 3 pre-existing
 compiled-frontend-asset failures, unrelated to this build).
+
+## Build N5 — POS receipt toggles + 2 new layouts, POS SKU search fix, Dashboard chart/profit clarity, Customer Statement fix (2026-09-20)
+
+Client sent a 6-item batch request with screenshots. All 6 items:
+
+### 1. POS Receipt: Show VAT/BIN + Show Website toggles
+
+The receipt-content toggles already had "Show Address" / "Show Email" /
+etc. Added the same pattern for two more fields:
+
+- New migration `2026_09_20_000005_add_vat_bin_website_toggles_to_pos_settings_table.php`
+  adds `pos_settings.show_vat_bin` (default **1**, to preserve existing
+  ZATCA-compliant receipts the instant the migration runs — see the
+  regression note below) and `pos_settings.show_website` (default 0).
+- `PosSetting` model: both added to `$fillable` + `$casts`.
+- `SettingsController::update_pos_settings()`: both accepted with the
+  same tri-state boolean coercion as every other toggle.
+- `PosReceipt.vue` (Settings → POS Receipt, the live preview + toggle
+  list) and `PosPage.vue` (the real printed receipt): both new toggles
+  wired into **every layout** (1 through 7, including the two new ones
+  added in item 2 below), each gated the same way the existing toggles
+  are (`v-show="pos_settings.show_vat_bin"` / `show_website`).
+- **Bug caught during this build:** Layout 4's VAT/BIN line was
+  previously *unconditional* (`v-if="setting.vat_number"`, not tied to
+  any toggle at all). Wiring it to the new `show_vat_bin` toggle could
+  have silently hidden VAT/BIN on every existing ZATCA receipt the
+  moment the migration ran (a plain new boolean column normally defaults
+  to 0/off) — caught before shipping and fixed by defaulting the column
+  to `1`, with a comment in the migration explaining why.
+- Company address / phone / email that the client set in Company Settings
+  now flow onto the POS receipt exactly the same way the existing
+  Address/Email toggles already did — no separate wiring was needed for
+  that part, since the underlying data binding already existed.
+
+**Regression test:** `tests/Regression/build_n5_receipt_vat_website_toggles.php`.
+
+### 2. Two new POS receipt layouts (Layout 6 "Roomy" + Layout 7 "Simplified Tax Invoice, English")
+
+- **Layout 6 — Roomy:** same visual design as the existing Layout 5
+  ("Minimal") — logo, store name, contact block, a clean meta/items/
+  totals stack with light dividers — but sized like Layout 1-4 instead
+  of Layout 5's compact spacing: wider (330px vs 240px), larger type
+  (12px vs 11px base), taller line-height (1.6 vs 1.4), and roomier
+  padding throughout. Reuses the exact same markup and toggle gating as
+  Layout 5 (`pos_settings.show_*`), just under `.receipt-layout-6` /
+  `.minimal-*` CSS selectors with the roomier values.
+- **Layout 7 — Simplified Tax Invoice (English):** same structure as the
+  existing Layout 4 (Bilingual Arabic+English "ZATCA-style Simplified Tax
+  Invoice") but with **all Arabic text and the 3-column bilingual layout
+  removed** — English-only, 2-column rows throughout (label / value
+  instead of label / value / Arabic-label). Dropping the Arabic column
+  frees up horizontal room on narrow 58mm/80mm receipt printers, which is
+  what avoids the crop/wrap issue the client specifically asked to avoid.
+- Both new layouts are selectable from the same `receipt_layout` dropdown
+  (Settings → POS Receipt and Settings → POS Settings) and validated
+  server-side (`SettingsController`, now accepts 1-7, was 1-5).
+- Both layouts follow the exact same v-else-if chain pattern as every
+  existing layout, in both `PosReceipt.vue` (live preview) and
+  `PosPage.vue` (real receipt), gated by the exact same
+  `pos_settings.show_*` toggles as every other layout (including the new
+  VAT/BIN and Website toggles from item 1).
+- Print CSS added to `public/css/pos_print.css` for both new layouts,
+  mirroring the existing Layout 4/5 print rules (border neutralization,
+  grayscale-safe colors, `@media print` overrides).
+- **Bug caught during this build:** the `currentReceiptLayout` computed
+  property (in both `PosReceipt.vue` and `PosPage.vue`) had a hardcoded
+  `[1, 2, 3, 4, 5].includes(n) ? n : 1` allowlist that would have
+  silently forced Layout 6/7 selections back to Layout 1 — found and
+  fixed to `[1, 2, 3, 4, 5, 6, 7]` before shipping.
+- **Bug caught during this build:** Layout 7's QR-code blocks were
+  initially given their own ref names (`zatcaQrcodePos2`/`invoiceUrlQr2`)
+  to avoid an apparent naming clash with Layout 4/5/6 — but the existing
+  QR-rendering JS methods look up the exact ref names `zatcaQrcodePos`/
+  `invoiceUrlQr` regardless of which layout is active (this is safe
+  because only one v-else-if branch ever renders at a time). Using
+  different ref names for Layout 7 would have left its QR codes
+  permanently blank. Found and fixed to reuse the shared ref names,
+  matching every other layout.
+
+**Regression test:** `tests/Regression/build_n5_receipt_layouts_6_7.php`.
+
+### 3. Fix: POS search by variable product's main SKU returned nothing
+
+Root cause: `PosController::GetProductsByParametre()` (the product search
+endpoint used by the POS screen) never exposed the *parent* product's own
+SKU on a variant row — only the variant's own code. Sales > Create Sale's
+equivalent search (`ProductsController::Products_by_Warehouse()`) already
+had this exact fix (`$item['product_code'] = ...`), which is why searching
+by the main SKU worked there but not in POS. Ported the identical fix to
+`PosController`, and extended POS's own JS-side `search()` filter
+(`PosPage.vue`) to also match against the new `product_code` field
+(both the exact-match and fuzzy-match branches).
+
+**Regression test:** `tests/Regression/build_n5_pos_main_sku_search.php`
+(creates a real variable product via `ProductsController::store()`, then
+calls the real `PosController::GetProductsByParametre()` and confirms the
+main SKU now appears on every variant row alongside the variant's own
+code).
+
+### 4 & 5. Dashboard: modern chart + Profit card clarity
+
+**Sales vs Purchases chart (item 4):** client asked for something more
+modern than the plain bar chart. Client picked "smooth gradient area
+chart" when asked to choose a direction. Changed `salesChart` from a bar
+chart to a smooth gradient area chart (matching the existing style
+already used by the Payment Methods chart on the same page) — new
+stroke/fill/markers/tooltip config, `curve: 'smooth'`, gradient fill.
+**Important implementation detail:** vue3-apexcharts' `<apexchart>`
+component takes its render-time chart type from the `type` **prop** on
+the template tag, not from `options.chart.type` in the JS config — both
+had to be changed together (`type="area"` on the template, plus
+`options.chart.type: 'area'`), or the chart would silently keep
+rendering as a bar chart despite the options object being fully updated.
+This was caught and fixed during the build, not left as a residual bug.
+
+**Profit card (item 5):** investigated the "seems wrong" report in
+depth — the underlying formula (`completed sales total − FIFO COGS −
+expenses + service job profit`, using the same
+`App\Traits\CalculatesCogsAndAverageCost` trait the P&L report already
+relies on) is **correct accrual accounting**, proven with a real,
+isolated-warehouse regression scenario matching the screenshot's shape
+exactly. What was actually confusing: the **Sales** stat card includes
+*all* sales regardless of status (including drafts/holds), while the
+**Profit** card only counts *completed* sales — so the two numbers can
+look inconsistent even though both are individually correct. Rather than
+"fixing" a calculation that wasn't broken, added an info-icon tooltip to
+both the Sales and Profit stat cards explaining exactly what each one
+counts, so the discrepancy is self-explanatory going forward.
+
+**Regression test:** `tests/Regression/build_n5_dashboard_profit_verification.php`
+(dedicated fresh warehouse for isolation; proves the Profit formula
+against a hand-computed scenario; proves Sales includes non-completed
+sales while Profit does not; proves Purchases isn't subtracted directly
+from Profit; static checks for the tooltips and the chart-type fix).
+
+### 6. Customer Statement: pagination vs fixed date range
+
+Client asked which is better for a page that gets very long for
+customers with lots of history. **Recommendation given: a default date
+range, not pagination** — pagination on a running-balance ledger needs
+real engineering (every page needs to know the balance carried in from
+every prior page, which either means computing the whole history anyway
+or a more complex incremental-balance API), while a date range is simply
+safer and simpler to ship correctly, and the page already had a
+date-filter UI sitting mostly unused.
+
+**Bug found and fixed while implementing this (would have made the
+date-range approach unsafe to ship):** `App\Services\ClientStatementService::build()`
+excluded every row dated before `fromDate` from its 6 source queries
+(sales, payments, sale returns, refunds, service jobs, service job
+payments) when a date filter was applied — but never folded the net
+effect of those excluded rows into the **Opening Balance**, which was
+still only the client's static `opening_balance` column plus
+all-time (unfiltered) opening-balance payments. Concretely: a client
+with real activity before the filter's start date would show a wrong
+Opening Balance (and therefore a wrong running Balance for every entry
+after it) the moment any date filter was applied — this bug already
+existed and would affect anyone using the existing filter UI even
+before this build's default-range change. Fixed by adding a
+`$carryForward` calculation (only computed when `$fromDate` is set) that
+sums the net effect of all six source types for dates before the
+cutoff and folds it into the Opening Balance.
+
+`CustomerStatement.vue` now defaults to a 90-day range on first load
+(same underlying date-filter UI, just pre-filled instead of empty), with
+a relabeled "Show All Time" button to clear it and see full history.
+
+**Regression test:** `tests/Regression/build_n5_customer_statement_range_fix.php`
+(real client/sale/payment fixtures proving: before this fix, a
+date-filtered Opening Balance would have been wrong by the full net
+effect of the pre-cutoff activity; after the fix it's correct; the
+all-time closing balance is byte-for-byte unaffected — this fix only
+corrects what's shown for a filtered range, not the true final number).
+
+**Full cumulative regression suite after all 6 items (52 files, up from
+49 before this build): no new failures** — the same 3 pre-existing,
+unrelated compiled-frontend-asset failures remain
+(`build_e1_pos_recent.php`, `build_po_grn.php`, `build_po_phase1_3.php`).
+
+**Migration:** `php artisan migrate` (new `pos_settings.show_vat_bin` /
+`show_website` columns only — additive, safe `down()` provided).

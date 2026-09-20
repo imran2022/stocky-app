@@ -118,7 +118,53 @@ class ClientStatementService
 
         $currentOpeningBalance = (float) ($client->opening_balance ?? 0);
         $totalOpeningBalancePaid = (float) $openingPayments->sum('montant');
-        $originalOpeningBalance = $currentOpeningBalance + $totalOpeningBalancePaid;
+
+        // Bug fix (2026-09-20, client-reported page-length concern led to
+        // this being found): when `fromDate` is set, every source query
+        // above correctly EXCLUDES rows dated before it — but nothing was
+        // folding those excluded rows' net effect into the opening balance,
+        // so the "Opening Balance" and every following running "Balance"
+        // silently dropped all activity before the filter, understating
+        // (or overstating) the real balance for any client with history
+        // before that date. Carry it forward here instead: same six
+        // sources, same debit/credit sign as the entries built below, just
+        // summed for date < fromDate rather than listed row by row. Only
+        // runs when fromDate is actually set — the all-time view (no
+        // filter) is completely unaffected by this fix.
+        $carryForward = 0.0;
+        if ($fromDate) {
+            $beforeSales = (float) DB::table('sales')
+                ->whereNull('deleted_at')->where('client_id', $clientId)->where('statut', 'completed')
+                ->where('date', '<', $fromDate)->sum('GrandTotal');
+            $beforePayments = (float) DB::table('payment_sales')
+                ->whereNull('payment_sales.deleted_at')
+                ->join('sales', 'payment_sales.sale_id', '=', 'sales.id')
+                ->where('sales.client_id', $clientId)->where('payment_sales.date', '<', $fromDate)
+                ->sum('montant');
+            $beforeSaleReturns = (float) DB::table('sale_returns')
+                ->whereNull('deleted_at')->where('client_id', $clientId)->where('statut', 'received')
+                ->where('date', '<', $fromDate)->sum('GrandTotal');
+            $beforeRefunds = (float) DB::table('payment_sale_returns')
+                ->whereNull('payment_sale_returns.deleted_at')
+                ->join('sale_returns', 'payment_sale_returns.sale_return_id', '=', 'sale_returns.id')
+                ->where('sale_returns.client_id', $clientId)->where('payment_sale_returns.date', '<', $fromDate)
+                ->sum('montant');
+            $beforeServiceJobs = (float) DB::table('service_jobs')
+                ->whereNull('deleted_at')->where('client_id', $clientId)
+                ->whereIn('status', ServiceJob::DUE_STATUSES)->whereDate('created_at', '<', $fromDate)
+                ->sum('total_amount');
+            $beforeServicePayments = (float) DB::table('service_job_payments')
+                ->whereNull('service_job_payments.deleted_at')
+                ->join('service_jobs', 'service_job_payments.service_job_id', '=', 'service_jobs.id')
+                ->whereNull('service_jobs.deleted_at')->where('service_jobs.client_id', $clientId)
+                ->whereIn('service_jobs.status', ServiceJob::DUE_STATUSES)
+                ->where('service_job_payments.date', '<', $fromDate)->sum('montant');
+
+            $carryForward = $beforeSales - $beforePayments - $beforeSaleReturns + $beforeRefunds
+                + $beforeServiceJobs - $beforeServicePayments;
+        }
+
+        $originalOpeningBalance = $currentOpeningBalance + $totalOpeningBalancePaid + $carryForward;
 
         $entries = [];
         foreach ($sales as $sale) {

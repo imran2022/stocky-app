@@ -81,8 +81,9 @@
             <a-date-picker v-model:value="fromDate" :placeholder="$t('From_Date')" style="width: 150px" />
             <a-date-picker v-model:value="toDate" :placeholder="$t('To_Date')" style="width: 150px" />
             <a-button type="primary" :loading="loadingTable" @click="() => fetchStatement()">{{ $t('Apply') }}</a-button>
-            <a-button v-if="fromDate || toDate" @click="resetFilters">{{ $t('Reset') }}</a-button>
+            <a-button v-if="fromDate || toDate" @click="resetFilters">{{ $t('Show_All_Time') }}</a-button>
           </a-space>
+          <span class="stmt-range-hint">{{ $t('Statement_Default_Range_Hint') }}</span>
         </div>
 
         <a-table
@@ -158,8 +159,16 @@ const loadingTable = ref(false);
 const downloading = ref(null);
 const client = ref({});
 const data = reactive({ opening_balance: 0, closing_balance: 0, entries: [] });
-const fromDate = ref(null);
-const toDate = ref(null);
+// Default to the last 90 days on first load (client request: the page was
+// growing very long for customers with lots of history). The date filters
+// below still let the user widen this or clear it back to all-time via
+// Reset — this only changes what's shown BEFORE the user touches anything.
+// Safe now that ClientStatementService carries forward every transaction
+// before `fromDate` into the Opening Balance (see that fix's comment),
+// so the running balance stays correct even though only the last 90 days
+// of rows are listed.
+const fromDate = ref(dayjs().subtract(89, 'day'));
+const toDate = ref(dayjs());
 
 const initials = computed(() =>
   (client.value.name || '?')
@@ -325,6 +334,7 @@ onMounted(async () => {
   margin-bottom: 12px;
 }
 .muted { color: rgba(0, 0, 0, 0.45); }
+.stmt-range-hint { color: rgba(0, 0, 0, 0.4); font-size: 12px; }
 .amt-debit { color: #e11d48; font-weight: 600; }
 .amt-credit { color: #166534; font-weight: 600; }
 .closing-summary {

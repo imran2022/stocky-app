@@ -25,6 +25,8 @@
               { value: 3, label: $t('Layout_3_Detailed') },
               { value: 4, label: $t('Layout_4_Bilingual') },
               { value: 5, label: $t('Layout_5_Minimal') },
+              { value: 6, label: $t('Layout_6_Roomy') },
+              { value: 7, label: $t('Layout_7_Simplified_EN') },
             ]"
           />
         </div>
@@ -43,7 +45,9 @@
                             <small v-show="pos_settings.show_reference !== 0">Ref: REF-12345</small><br v-show="pos_settings.show_reference !== 0">
                             <small v-show="pos_settings.show_address">123 Demo Street</small><br v-show="pos_settings.show_address">
                             <small v-show="pos_settings.show_phone">+123 456 789</small><br v-show="pos_settings.show_phone">
-                            <small v-show="pos_settings.show_email">demo@example.com</small>
+                            <small v-show="pos_settings.show_vat_bin">VAT/BIN: {{ setting.vat_number || '300000000000003' }}</small><br v-show="pos_settings.show_vat_bin">
+                            <small v-show="pos_settings.show_email">demo@example.com</small><br v-show="pos_settings.show_email">
+                            <small v-show="pos_settings.show_website">{{ setting.website || 'www.example.com' }}</small>
                             <div class="mt-2">
                               <small v-show="pos_settings.show_date !== 0">Date: 2025-12-10 12:34</small><br>
                               <small v-show="pos_settings.show_seller !== 0">Seller: John Doe</small><br>
@@ -147,7 +151,9 @@
                             <small v-show="pos_settings.show_reference !== 0">Ref: REF-12345</small><br v-show="pos_settings.show_reference !== 0">
                             <small v-show="pos_settings.show_address">123 Demo Street</small><br v-show="pos_settings.show_address">
                             <small v-show="pos_settings.show_phone">+123 456 789</small><br v-show="pos_settings.show_phone">
-                            <small v-show="pos_settings.show_email">demo@example.com</small>
+                            <small v-show="pos_settings.show_vat_bin">VAT/BIN: {{ setting.vat_number || '300000000000003' }}</small><br v-show="pos_settings.show_vat_bin">
+                            <small v-show="pos_settings.show_email">demo@example.com</small><br v-show="pos_settings.show_email">
+                            <small v-show="pos_settings.show_website">{{ setting.website || 'www.example.com' }}</small>
                             <div class="mt-1">
                               <small v-show="pos_settings.show_date !== 0">Date: 2025-12-10 12:34</small><br>
                               <small v-show="pos_settings.show_seller !== 0">Seller: John Doe</small><br>
@@ -268,7 +274,10 @@
                                 <strong v-show="pos_settings.show_store_name !== 0">Demo Store</strong><br>
                                 <small v-show="pos_settings.show_reference !== 0">Ref: REF-12345</small><br v-show="pos_settings.show_reference !== 0">
                                 <small v-show="pos_settings.show_address">123 Demo Street</small><br>
-                                <small v-show="pos_settings.show_phone">+123 456 789</small>
+                                <small v-show="pos_settings.show_phone">+123 456 789</small><br v-show="pos_settings.show_phone">
+                                <small v-show="pos_settings.show_vat_bin">VAT/BIN: {{ setting.vat_number || '300000000000003' }}</small><br v-show="pos_settings.show_vat_bin">
+                                <small v-show="pos_settings.show_email">demo@example.com</small><br v-show="pos_settings.show_email">
+                                <small v-show="pos_settings.show_website">{{ setting.website || 'www.example.com' }}</small>
                               </div>
                               <div class="demo-logo-rect" v-show="pos_settings.show_logo !== 0">LOGO</div>
                             </div>
@@ -388,8 +397,9 @@
                             <div class="bl4-contact">123 Demo Street</div>
                             <div class="bl4-contact">+123 456 789</div>
                             <div class="bl4-contact" v-show="pos_settings.show_email">demo@example.com</div>
-                            <div v-if="setting.vat_number" class="bl4-trn">
-                              الرقم الضريبي / TRN : {{setting.vat_number}}
+                            <div class="bl4-contact" v-show="pos_settings.show_website">{{ setting.website || 'www.example.com' }}</div>
+                            <div v-show="pos_settings.show_vat_bin" class="bl4-trn">
+                              الرقم الضريبي / TRN : {{ setting.vat_number || '300000000000003' }}
                             </div>
                             <div class="bl4-title">
                               <div class="bl4-title-ar">فاتورة ضريبية مبسطة</div>
@@ -554,7 +564,7 @@
                         </div>
 
                         <!-- Layout 5 demo (Minimal) -->
-                        <div v-else class="receipt-layout-5">
+                        <div v-else-if="currentReceiptLayout === 5" class="receipt-layout-5">
                           <div class="info text-center mb-3">
                             <div class="invoice_logo mb-2" v-show="pos_settings.show_logo !== 0">
                               <div class="demo-logo-circle small">LOGO</div>
@@ -565,7 +575,9 @@
                               <span v-show="pos_settings.show_address && pos_settings.show_phone"> &middot; </span>
                               <span v-show="pos_settings.show_phone">+123 456 789</span>
                             </div>
+                            <div class="minimal-contact" v-show="pos_settings.show_vat_bin">VAT/BIN: {{ setting.vat_number || '300000000000003' }}</div>
                             <div class="minimal-contact" v-show="pos_settings.show_email">demo@example.com</div>
+                            <div class="minimal-contact" v-show="pos_settings.show_website">{{ setting.website || 'www.example.com' }}</div>
                           </div>
 
                           <div class="minimal-divider"></div>
@@ -677,6 +689,305 @@
                             </div>
                           </div>
 
+                          <div v-if="pos_settings.show_barcode !== 0" class="mt-2 text-center">
+                            <BarcodeSvg
+                              value="REF-12345"
+                              format="CODE128"
+                              textmargin="0"
+                              fontSize="12"
+                              height="40"
+                              width="1"
+                             />
+                          </div>
+                        </div>
+
+                        <!-- Layout 6 demo (Roomy) — same design as Layout 5 (Minimal),
+                             but with Layout 1-4's roomier spacing instead of Layout 5's
+                             compact spacing. Same markup/toggles as Layout 5. -->
+                        <div v-else-if="currentReceiptLayout === 6" class="receipt-layout-6">
+                          <div class="info text-center mb-3">
+                            <div class="invoice_logo mb-2" v-show="pos_settings.show_logo !== 0">
+                              <div class="demo-logo-circle small">LOGO</div>
+                            </div>
+                            <div class="minimal-store-name" v-show="pos_settings.show_store_name !== 0">DEMO STORE</div>
+                            <div class="minimal-contact" v-show="pos_settings.show_address || pos_settings.show_phone">
+                              <span v-show="pos_settings.show_address">123 Demo Street</span>
+                              <span v-show="pos_settings.show_address && pos_settings.show_phone"> &middot; </span>
+                              <span v-show="pos_settings.show_phone">+123 456 789</span>
+                            </div>
+                            <div class="minimal-contact" v-show="pos_settings.show_vat_bin">VAT/BIN: {{ setting.vat_number || '300000000000003' }}</div>
+                            <div class="minimal-contact" v-show="pos_settings.show_email">demo@example.com</div>
+                            <div class="minimal-contact" v-show="pos_settings.show_website">{{ setting.website || 'www.example.com' }}</div>
+                          </div>
+
+                          <div class="minimal-divider"></div>
+
+                          <div class="minimal-meta">
+                            <div v-show="pos_settings.show_reference !== 0" class="minimal-meta-row">
+                              <span>Ref</span><span>REF-12345</span>
+                            </div>
+                            <div v-show="pos_settings.show_date !== 0" class="minimal-meta-row">
+                              <span>Date</span><span>2025-12-10 12:34</span>
+                            </div>
+                            <div v-show="pos_settings.show_seller !== 0" class="minimal-meta-row">
+                              <span>Seller</span><span>John Doe</span>
+                            </div>
+                            <div v-show="pos_settings.show_customer" class="minimal-meta-row">
+                              <span>Customer</span><span>Jane Smith</span>
+                            </div>
+                            <div v-show="pos_settings.show_Warehouse" class="minimal-meta-row">
+                              <span>Warehouse</span><span>Main Store</span>
+                            </div>
+                          </div>
+
+                          <div class="minimal-divider"></div>
+
+                          <table class="minimal-items">
+                            <tbody>
+                              <tr>
+                                <td>
+                                  <div class="minimal-item-name">Demo Product A</div>
+                                  <div class="minimal-item-qty">2 &times; 10.00</div>
+                                  <div class="minimal-item-discount" v-show="pos_settings.show_product_discount !== 0">Discount &minus;2.00</div>
+                                </td>
+                                <td class="minimal-item-total">20.00</td>
+                              </tr>
+                              <tr>
+                                <td>
+                                  <div class="minimal-item-name">Demo Product B</div>
+                                  <div class="minimal-item-qty">1 &times; 5.00</div>
+                                </td>
+                                <td class="minimal-item-total">5.00</td>
+                              </tr>
+                            </tbody>
+                          </table>
+
+                          <div class="minimal-divider"></div>
+
+                          <table class="minimal-totals">
+                            <tbody>
+                              <tr v-show="pos_settings.show_tax">
+                                <td>Tax</td>
+                                <td>1.25</td>
+                              </tr>
+                              <tr v-show="pos_settings.show_discount">
+                                <td>Discount</td>
+                                <td>0.00</td>
+                              </tr>
+                              <tr v-show="pos_settings.show_shipping">
+                                <td>Shipping</td>
+                                <td>1.25</td>
+                              </tr>
+                              <tr class="minimal-grand">
+                                <td>Total</td>
+                                <td>25.00</td>
+                              </tr>
+                              <tr v-show="pos_settings.show_paid !== 0">
+                                <td>Paid</td>
+                                <td>20.00</td>
+                              </tr>
+                              <tr v-show="pos_settings.show_due !== 0">
+                                <td>Due</td>
+                                <td>5.00</td>
+                              </tr>
+                              <tr v-show="pos_settings.show_previous_dues !== 0">
+                                <td>{{ $t('Previous_Dues') }}</td>
+                                <td>10.00</td>
+                              </tr>
+                              <tr v-show="pos_settings.show_net_balance !== 0">
+                                <td>{{ $t('Net_Balance') }}</td>
+                                <td>15.00</td>
+                              </tr>
+                            </tbody>
+                          </table>
+
+                          <table class="minimal-payments" v-show="pos_settings.show_payments !== 0">
+                            <thead>
+                              <tr>
+                                <th>Pay By</th>
+                                <th>Amount</th>
+                                <th>Change</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr>
+                                <td>Cash</td>
+                                <td>20.00</td>
+                                <td>0.00</td>
+                              </tr>
+                            </tbody>
+                          </table>
+
+                          <p class="minimal-note" v-show="pos_settings.show_note" style="white-space:pre-line;">
+                            {{ pos_settings.note_customer || 'Thank you for your purchase!' }}
+                          </p>
+
+                          <div class="mt-2 text-center" v-show="pos_settings.show_zatca_qr !== 0">
+                            <div class="zatca-qr">
+                              <div class="zatca-qr-title">ZATCA</div>
+                              <div class="demo-qr-box"></div>
+                            </div>
+                          </div>
+
+                          <div v-if="pos_settings.show_barcode !== 0" class="mt-2 text-center">
+                            <BarcodeSvg
+                              value="REF-12345"
+                              format="CODE128"
+                              textmargin="0"
+                              fontSize="12"
+                              height="40"
+                              width="1"
+                             />
+                          </div>
+                        </div>
+
+                        <!-- Layout 7 demo (Simplified Tax Invoice, English-only) — same
+                             structure as Layout 4 (Bilingual), with all Arabic text/columns
+                             removed and spacing tightened so an 80mm/58mm receipt printer
+                             doesn't crop the right edge. -->
+                        <div v-else class="receipt-layout-7">
+                          <div class="info text-center bl7-header">
+                            <div class="invoice_logo mb-1" v-show="pos_settings.show_logo !== 0">
+                              <div class="demo-logo-circle">LOGO</div>
+                            </div>
+                            <div class="bl7-company-en">Demo Store</div>
+                            <div class="bl7-contact">123 Demo Street</div>
+                            <div class="bl7-contact">+123 456 789</div>
+                            <div class="bl7-contact" v-show="pos_settings.show_email">demo@example.com</div>
+                            <div class="bl7-contact" v-show="pos_settings.show_website">{{ setting.website || 'www.example.com' }}</div>
+                            <div v-show="pos_settings.show_vat_bin" class="bl7-trn">
+                              VAT/BIN: {{ setting.vat_number || '300000000000003' }}
+                            </div>
+                            <div class="bl7-title">SIMPLIFIED TAX INVOICE</div>
+                          </div>
+                          <div class="bl7-meta">
+                            <div v-show="pos_settings.show_reference !== 0" class="bl7-meta-row">
+                              <span class="bl7-meta-en">Invoice No</span>
+                              <span class="bl7-meta-val">REF-12345</span>
+                            </div>
+                            <div v-show="pos_settings.show_date !== 0" class="bl7-meta-row">
+                              <span class="bl7-meta-en">Date</span>
+                              <span class="bl7-meta-val">2025-12-10 12:34</span>
+                            </div>
+                            <div v-show="pos_settings.show_seller !== 0" class="bl7-meta-row">
+                              <span class="bl7-meta-en">Seller</span>
+                              <span class="bl7-meta-val">John Doe</span>
+                            </div>
+                            <div v-show="pos_settings.show_customer" class="bl7-meta-row">
+                              <span class="bl7-meta-en">Customer</span>
+                              <span class="bl7-meta-val">Jane Smith</span>
+                            </div>
+                            <div v-show="pos_settings.show_Warehouse" class="bl7-meta-row">
+                              <span class="bl7-meta-en">Warehouse</span>
+                              <span class="bl7-meta-val">Main Store</span>
+                            </div>
+                          </div>
+                          <table class="bl7-items">
+                            <colgroup><col style="width:46%"><col style="width:14%"><col style="width:18%"><col style="width:22%"></colgroup>
+                            <thead>
+                              <tr>
+                                <th class="bl7-th-left">Product</th>
+                                <th class="bl7-th-center">Qty</th>
+                                <th class="bl7-th-right">Rate</th>
+                                <th class="bl7-th-right">Amount</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr class="bl7-item-row">
+                                <td>
+                                  <div class="bl7-item-name">Demo Product A</div>
+                                  <div class="bl7-item-sub" v-show="pos_settings.show_product_discount !== 0">Discount: -2.00</div>
+                                </td>
+                                <td class="bl7-td-center">2</td>
+                                <td class="bl7-td-right">10.00</td>
+                                <td class="bl7-td-right">20.00</td>
+                              </tr>
+                              <tr class="bl7-item-row">
+                                <td><div class="bl7-item-name">Demo Product B</div></td>
+                                <td class="bl7-td-center">1</td>
+                                <td class="bl7-td-right">5.00</td>
+                                <td class="bl7-td-right">5.00</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                          <table class="bl7-totals">
+                            <colgroup><col style="width:50%"><col style="width:50%"></colgroup>
+                            <tbody>
+                              <tr>
+                                <td class="bl7-t-en">Sub Total</td>
+                                <td class="bl7-t-val">25.00</td>
+                              </tr>
+                              <tr v-show="pos_settings.show_tax">
+                                <td class="bl7-t-en">VAT</td>
+                                <td class="bl7-t-val">1.25</td>
+                              </tr>
+                              <tr v-show="pos_settings.show_discount">
+                                <td class="bl7-t-en">Discount</td>
+                                <td class="bl7-t-val">0.00</td>
+                              </tr>
+                              <tr v-show="pos_settings.show_shipping">
+                                <td class="bl7-t-en">Shipping</td>
+                                <td class="bl7-t-val">1.25</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                          <table class="bl7-grand">
+                            <colgroup><col style="width:50%"><col style="width:50%"></colgroup>
+                            <tbody>
+                              <tr>
+                                <td class="bl7-t-en">Grand Total</td>
+                                <td class="bl7-t-val">26.25</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                          <table class="bl7-pays">
+                            <colgroup><col style="width:50%"><col style="width:50%"></colgroup>
+                            <tbody>
+                              <tr v-show="pos_settings.show_paid !== 0">
+                                <td class="bl7-t-en">Paid Amount</td>
+                                <td class="bl7-t-val">25.00</td>
+                              </tr>
+                              <tr v-show="pos_settings.show_due !== 0">
+                                <td class="bl7-t-en">Balance Due</td>
+                                <td class="bl7-t-val">1.25</td>
+                              </tr>
+                              <tr v-show="pos_settings.show_previous_dues !== 0">
+                                <td class="bl7-t-en">Previous Dues</td>
+                                <td class="bl7-t-val">10.00</td>
+                              </tr>
+                              <tr v-show="pos_settings.show_net_balance !== 0">
+                                <td class="bl7-t-en">Net Balance</td>
+                                <td class="bl7-t-val">11.25</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                          <table class="bl7-payments" v-show="pos_settings.show_payments !== 0">
+                            <thead>
+                              <tr>
+                                <th class="bl7-th-left">Paid By</th>
+                                <th class="bl7-th-center">Amount</th>
+                                <th class="bl7-th-right">Change</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr>
+                                <td class="bl7-td-left">Cash</td>
+                                <td class="bl7-td-center">25.00</td>
+                                <td class="bl7-td-right">0.00</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                          <div class="bl7-footer">
+                            <div class="bl7-thanks-en">Thank You For Shopping With Us!</div>
+                            <div v-show="pos_settings.show_note" class="bl7-policy">{{ pos_settings.note_customer || 'Thank you for your purchase!' }}</div>
+                            <div class="bl7-footer-contact">+123 456 789 &middot; demo@example.com</div>
+                          </div>
+                          <div class="mt-2 text-center" v-show="pos_settings.show_zatca_qr !== 0">
+                            <div class="zatca-qr">
+                              <div class="zatca-qr-title">ZATCA</div>
+                              <div class="demo-qr-box"></div>
+                            </div>
+                          </div>
                           <div v-if="pos_settings.show_barcode !== 0" class="mt-2 text-center">
                             <BarcodeSvg
                               value="REF-12345"
@@ -813,7 +1124,7 @@ const { t } = useI18n();
 const isLoading = ref(true);
 const logoSizeType = ref('medium');
 const noteTouched = ref(false);
-const setting = ref({ vat_number: '' });
+const setting = ref({ vat_number: '', website: '' });
 
 const pos_settings = ref({
   note_customer: '',
@@ -833,6 +1144,8 @@ const pos_settings = ref({
   show_phone: '',
   show_email: '',
   show_address: '',
+  show_vat_bin: '',
+  show_website: '',
   show_customer: '',
   show_Warehouse: '',
   is_printable: '',
@@ -861,7 +1174,9 @@ const toggles = [
   { field: 'show_seller', label: 'Show_Seller' },
   { field: 'show_phone', label: 'Show_Phone' },
   { field: 'show_address', label: 'Show_Address' },
+  { field: 'show_vat_bin', label: 'Show_VAT_BIN' },
   { field: 'show_email', label: 'Show_Email' },
+  { field: 'show_website', label: 'Show_Website' },
   { field: 'show_customer', label: 'Show_Customer' },
   { field: 'show_Warehouse', label: 'Show_Warehouse' },
   { field: 'show_tax', label: 'Show_Tax', desc: 'Show_Tax_Desc' },
@@ -881,7 +1196,7 @@ const toggles = [
 
 const currentReceiptLayout = computed(() => {
   const n = Number(pos_settings.value.receipt_layout) || 1;
-  return [1, 2, 3, 4, 5].includes(n) ? n : 1;
+  return [1, 2, 3, 4, 5, 6, 7].includes(n) ? n : 1;
 });
 
 // Curated print-safe font stacks, including every font the legacy app used:
@@ -951,6 +1266,8 @@ async function submit() {
       show_phone: s.show_phone,
       show_email: s.show_email,
       show_address: s.show_address,
+      show_vat_bin: s.show_vat_bin,
+      show_website: s.show_website,
       show_customer: s.show_customer,
       show_Warehouse: s.show_Warehouse,
       is_printable: s.is_printable,
@@ -1004,6 +1321,7 @@ async function loadSettings() {
   try {
     const data = await http.get('get_Settings_data_api');
     setting.value.vat_number = data?.settings?.vat_number || '';
+    setting.value.website = data?.settings?.website || '';
   } catch (e) { /* display-only */ }
   isLoading.value = false;
 }
@@ -1455,6 +1773,322 @@ onMounted(loadSettings);
   color: #555;
   margin: 8px 0 0;
   font-style: italic;
+}
+
+/* Layout 6 specific styles (Roomy) — same "minimal" design as Layout 5, but
+   sized like Layout 1-4 (wider width, larger type, more breathing room)
+   instead of Layout 5's compact spacing. Reuses the .minimal-* class names
+   from Layout 5's markup, scoped under .receipt-layout-6 instead. */
+.receipt-layout-6 {
+  width: 330px;
+  max-width: 100%;
+  margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #111;
+  letter-spacing: 0.2px;
+}
+
+.receipt-layout-6 .minimal-store-name {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  margin-top: 4px;
+}
+
+.receipt-layout-6 .minimal-contact {
+  font-size: 11px;
+  color: #555;
+  margin-top: 3px;
+}
+
+.receipt-layout-6 .minimal-divider {
+  border-top: 1px solid #111;
+  margin: 12px 0;
+}
+
+.receipt-layout-6 .minimal-meta {
+  font-size: 11px;
+}
+
+.receipt-layout-6 .minimal-meta-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+}
+
+.receipt-layout-6 .minimal-meta-row span:first-child {
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 10px;
+}
+
+.receipt-layout-6 .minimal-items {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.receipt-layout-6 .minimal-items td {
+  padding: 6px 0;
+  vertical-align: top;
+}
+
+.receipt-layout-6 .minimal-item-name {
+  font-weight: 500;
+}
+
+.receipt-layout-6 .minimal-item-qty {
+  color: #777;
+  font-size: 10px;
+  margin-top: 2px;
+}
+
+.receipt-layout-6 .minimal-item-discount {
+  color: #999;
+  font-size: 10px;
+  font-style: italic;
+  margin-top: 2px;
+  letter-spacing: 0.3px;
+}
+
+.receipt-layout-6 .minimal-item-total {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.receipt-layout-6 .minimal-totals {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.receipt-layout-6 .minimal-totals td {
+  padding: 4px 0;
+}
+
+.receipt-layout-6 .minimal-totals td:last-child {
+  text-align: right;
+}
+
+.receipt-layout-6 .minimal-totals td:first-child {
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 10px;
+}
+
+.receipt-layout-6 .minimal-grand td {
+  font-size: 14px !important;
+  font-weight: 700;
+  color: #111 !important;
+  letter-spacing: 0.5px !important;
+  padding-top: 10px;
+  border-top: 1px solid #111;
+  text-transform: none !important;
+}
+
+.receipt-layout-6 .minimal-payments {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  margin-top: 10px;
+}
+
+.receipt-layout-6 .minimal-payments th {
+  font-weight: 500;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 10px;
+  padding: 5px 0;
+  border-top: 1px solid #eee;
+  border-bottom: 1px solid #eee;
+}
+
+.receipt-layout-6 .minimal-payments th:nth-child(2),
+.receipt-layout-6 .minimal-payments td:nth-child(2) {
+  text-align: center;
+}
+
+.receipt-layout-6 .minimal-payments th:nth-child(3),
+.receipt-layout-6 .minimal-payments td:nth-child(3) {
+  text-align: right;
+}
+
+.receipt-layout-6 .minimal-payments td {
+  padding: 4px 0;
+}
+
+.receipt-layout-6 .minimal-note {
+  text-align: center;
+  font-size: 11px;
+  color: #555;
+  margin: 12px 0 0;
+  font-style: italic;
+}
+
+/* Layout 7 specific styles (Simplified Tax Invoice, English-only) — same
+   structure as Layout 4's bl4-* rules, minus the Arabic columns/rows.
+   Removing the Arabic column frees up horizontal room on narrow (58mm/80mm)
+   receipt printers, and single-line (non-flex 3-column) rows avoid the
+   wrapping/crop issue bilingual rows can hit on very narrow paper. */
+.receipt-layout-7 {
+  color: #000;
+  font-size: 11px;
+  line-height: 1.5;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, Arial, sans-serif;
+}
+.receipt-layout-7 table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.receipt-layout-7 table td,
+.receipt-layout-7 table th {
+  font-size: 11px;
+  padding: 3px 2px;
+  line-height: 1.45;
+  vertical-align: top;
+}
+.receipt-layout-7 .bl7-th-left,
+.receipt-layout-7 .bl7-td-left   { text-align: left; }
+.receipt-layout-7 .bl7-th-center,
+.receipt-layout-7 .bl7-td-center { text-align: center; }
+.receipt-layout-7 .bl7-th-right,
+.receipt-layout-7 .bl7-td-right  { text-align: right; }
+.receipt-layout-7 .bl7-td-right,
+.receipt-layout-7 .bl7-t-val     { white-space: nowrap; }
+.receipt-layout-7 .bl7-company-en {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+}
+.receipt-layout-7 .bl7-contact {
+  font-size: 11px;
+  color: #333;
+  line-height: 1.5;
+}
+.receipt-layout-7 .bl7-trn {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid #000;
+  padding: 2px 10px;
+  margin-top: 6px;
+}
+.receipt-layout-7 .bl7-title {
+  border-top: 2px solid #000;
+  border-bottom: 2px solid #000;
+  padding: 6px 0;
+  margin: 8px 0 6px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+.receipt-layout-7 .bl7-meta {
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+.receipt-layout-7 .bl7-meta-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 2px 0;
+}
+.receipt-layout-7 .bl7-meta-en {
+  color: #444;
+}
+.receipt-layout-7 .bl7-meta-val {
+  font-weight: 600;
+  text-align: right;
+  word-break: break-word;
+}
+.receipt-layout-7 .bl7-items {
+  margin-top: 8px;
+}
+.receipt-layout-7 .bl7-items thead th {
+  font-weight: 700;
+  border-top: 2px solid #000;
+  border-bottom: 1px solid #000;
+  padding: 4px 2px;
+  line-height: 1.35;
+}
+.receipt-layout-7 .bl7-item-row td {
+  padding: 4px 2px;
+  border-bottom: 1px dashed #bbb;
+}
+.receipt-layout-7 .bl7-item-name {
+  font-weight: 600;
+}
+.receipt-layout-7 .bl7-item-sub {
+  font-size: 10px;
+  color: #444;
+  line-height: 1.4;
+}
+.receipt-layout-7 .bl7-totals {
+  margin-top: 2px;
+}
+.receipt-layout-7 .bl7-t-en {
+  text-align: left;
+  color: #333;
+}
+.receipt-layout-7 .bl7-t-val {
+  text-align: right;
+  font-weight: 600;
+}
+.receipt-layout-7 .bl7-grand {
+  margin-top: 5px;
+  border-top: 2px solid #000;
+  border-bottom: 2px solid #000;
+}
+.receipt-layout-7 .bl7-grand td {
+  font-size: 13px;
+  font-weight: 800;
+  color: #000;
+  padding: 5px 2px;
+}
+.receipt-layout-7 .bl7-pays {
+  margin-top: 5px;
+}
+.receipt-layout-7 .bl7-pays td {
+  font-weight: 600;
+}
+.receipt-layout-7 .bl7-payments {
+  margin-top: 10px;
+}
+.receipt-layout-7 .bl7-payments thead th {
+  font-weight: 700;
+  border-top: 1px solid #000;
+  border-bottom: 1px solid #000;
+  padding: 4px 2px;
+  line-height: 1.35;
+}
+.receipt-layout-7 .bl7-footer {
+  margin-top: 10px;
+  text-align: center;
+}
+.receipt-layout-7 .bl7-thanks-en {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  border-top: 1px solid #000;
+  padding-top: 7px;
+}
+.receipt-layout-7 .bl7-policy {
+  font-size: 10px;
+  color: #333;
+  margin-top: 4px;
+  line-height: 1.5;
+  white-space: pre-line;
+}
+.receipt-layout-7 .bl7-footer-contact {
+  font-size: 10px;
+  color: #333;
+  margin-top: 5px;
 }
 
 /* Responsive styles for mobile */

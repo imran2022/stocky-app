@@ -831,6 +831,423 @@ text-align: center;
   }
 }
 
+/* ====================================================================
+   Layout 6 - Roomy receipt (same "minimal" design as Layout 5, but sized
+   like Layout 1-4 — wider, larger type, more breathing room — instead of
+   Layout 5's compact spacing). Reuses the .minimal-* rules from Layout 5,
+   scoped under .receipt-layout-6 with roomier values.
+   ==================================================================== */
+#invoice-POS .receipt-layout-6,
+#invoice-POS .receipt-layout-6 * {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif !important;
+  color: #111;
+  letter-spacing: 0.2px;
+}
+#invoice-POS .receipt-layout-6 {
+  font-size: 12px;
+  line-height: 1.6;
+}
+#invoice-POS .receipt-layout-6 .minimal-store-name {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  margin-top: 4px;
+}
+#invoice-POS .receipt-layout-6 .minimal-contact {
+  font-size: 11px;
+  color: #555;
+  margin-top: 3px;
+}
+#invoice-POS .receipt-layout-6 .minimal-divider {
+  border-top: 1px solid #111;
+  margin: 12px 0;
+}
+#invoice-POS .receipt-layout-6 .minimal-meta {
+  font-size: 11px;
+}
+#invoice-POS .receipt-layout-6 .minimal-meta-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+}
+#invoice-POS .receipt-layout-6 .minimal-meta-row span:first-child {
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 10px;
+}
+#invoice-POS .receipt-layout-6 table {
+  width: 100%;
+  border-collapse: collapse;
+  border: none !important;
+}
+#invoice-POS .receipt-layout-6 table tr,
+#invoice-POS .receipt-layout-6 table td,
+#invoice-POS .receipt-layout-6 table th {
+  border: none !important;
+}
+#invoice-POS .receipt-layout-6 .minimal-items {
+  font-size: 11px;
+}
+#invoice-POS .receipt-layout-6 .minimal-items td {
+  padding: 6px 0;
+  vertical-align: top;
+}
+#invoice-POS .receipt-layout-6 .minimal-item-name {
+  font-weight: 500;
+}
+#invoice-POS .receipt-layout-6 .minimal-item-qty {
+  color: #777;
+  font-size: 10px;
+  margin-top: 2px;
+}
+#invoice-POS .receipt-layout-6 .minimal-item-discount {
+  color: #999;
+  font-size: 10px;
+  font-style: italic;
+  margin-top: 2px;
+  letter-spacing: 0.3px;
+}
+#invoice-POS .receipt-layout-6 .minimal-item-total {
+  text-align: right;
+  white-space: nowrap;
+}
+#invoice-POS .receipt-layout-6 .minimal-totals {
+  font-size: 11px;
+}
+#invoice-POS .receipt-layout-6 .minimal-totals td {
+  padding: 4px 0;
+}
+#invoice-POS .receipt-layout-6 .minimal-totals td:last-child {
+  text-align: right;
+}
+#invoice-POS .receipt-layout-6 .minimal-totals td:first-child {
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 10px;
+}
+#invoice-POS .receipt-layout-6 .minimal-grand td {
+  font-size: 14px !important;
+  font-weight: 700;
+  color: #111 !important;
+  letter-spacing: 0.5px !important;
+  padding-top: 10px;
+  border-top: 1px solid #111 !important;
+  text-transform: none !important;
+}
+#invoice-POS .receipt-layout-6 .minimal-payments {
+  font-size: 11px;
+  margin-top: 10px;
+}
+#invoice-POS .receipt-layout-6 .minimal-payments th {
+  font-weight: 500;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 10px;
+  padding: 5px 0;
+  border-top: 1px solid #eee !important;
+  border-bottom: 1px solid #eee !important;
+}
+#invoice-POS .receipt-layout-6 .minimal-payments th:nth-child(2),
+#invoice-POS .receipt-layout-6 .minimal-payments td:nth-child(2) {
+  text-align: center;
+}
+#invoice-POS .receipt-layout-6 .minimal-payments th:nth-child(3),
+#invoice-POS .receipt-layout-6 .minimal-payments td:nth-child(3) {
+  text-align: right;
+}
+#invoice-POS .receipt-layout-6 .minimal-payments td {
+  padding: 4px 0;
+}
+#invoice-POS .receipt-layout-6 .minimal-note {
+  text-align: center;
+  font-size: 11px;
+  color: #555;
+  margin: 12px 0 0;
+  font-style: italic;
+}
+@media print {
+  #invoice-POS .receipt-layout-6,
+  #invoice-POS .receipt-layout-6 * {
+    color: #000 !important;
+  }
+  #invoice-POS .receipt-layout-6 .minimal-contact,
+  #invoice-POS .receipt-layout-6 .minimal-meta-row span:first-child,
+  #invoice-POS .receipt-layout-6 .minimal-totals td:first-child,
+  #invoice-POS .receipt-layout-6 .minimal-item-qty,
+  #invoice-POS .receipt-layout-6 .minimal-item-discount,
+  #invoice-POS .receipt-layout-6 .minimal-payments th,
+  #invoice-POS .receipt-layout-6 .minimal-note {
+    color: #333 !important;
+  }
+  #invoice-POS .receipt-layout-6 table,
+  #invoice-POS .receipt-layout-6 table tr,
+  #invoice-POS .receipt-layout-6 table td,
+  #invoice-POS .receipt-layout-6 table th {
+    border: none !important;
+  }
+  #invoice-POS .receipt-layout-6 .minimal-divider {
+    border-top: 1px solid #000 !important;
+  }
+  #invoice-POS .receipt-layout-6 .minimal-grand td {
+    border-top: 1px solid #000 !important;
+  }
+  #invoice-POS .receipt-layout-6 .minimal-payments th {
+    border-top: 1px solid #888 !important;
+    border-bottom: 1px solid #888 !important;
+  }
+}
+
+/* ====================================================================
+   Layout 7 - Simplified Tax Invoice, English-only receipt. Same structure
+   as Layout 4's bl4-* rules, minus the Arabic columns/rows and the 3-way
+   flex meta/totals rows — a plain 2-column English layout that frees up
+   horizontal room on narrow (58mm/80mm) receipt printers, avoiding the
+   crop/wrap issues bilingual rows can hit on very narrow paper.
+   ==================================================================== */
+#invoice-POS .receipt-layout-7,
+#invoice-POS .receipt-layout-7 * {
+  text-transform: none !important;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, Arial, sans-serif;
+}
+#invoice-POS .receipt-layout-7 {
+  color: #000;
+  font-size: 11px;
+  line-height: 1.5;
+}
+#invoice-POS .receipt-layout-7 table,
+#invoice-POS .receipt-layout-7 table tr,
+#invoice-POS .receipt-layout-7 table tbody tr,
+#invoice-POS .receipt-layout-7 table thead tr {
+  border: none !important;
+  border-bottom: none !important;
+}
+#invoice-POS .receipt-layout-7 table td,
+#invoice-POS .receipt-layout-7 table th {
+  border: none !important;
+  font-size: 11px;
+  padding: 3px 2px !important;
+  line-height: 1.45 !important;
+  vertical-align: top;
+}
+#invoice-POS .receipt-layout-7 .info > div {
+  line-height: 1.45;
+}
+#invoice-POS .receipt-layout-7 .bl7-th-left,
+#invoice-POS .receipt-layout-7 .bl7-td-left   { text-align: left !important; }
+#invoice-POS .receipt-layout-7 .bl7-th-center,
+#invoice-POS .receipt-layout-7 .bl7-td-center { text-align: center !important; }
+#invoice-POS .receipt-layout-7 .bl7-th-right,
+#invoice-POS .receipt-layout-7 .bl7-td-right  { text-align: right !important; }
+#invoice-POS .receipt-layout-7 .bl7-td-right,
+#invoice-POS .receipt-layout-7 .bl7-t-val     { white-space: nowrap; }
+#invoice-POS .receipt-layout-7 .bl7-company-en {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+}
+#invoice-POS .receipt-layout-7 .bl7-contact {
+  font-size: 11px;
+  color: #333;
+  line-height: 1.5;
+}
+#invoice-POS .receipt-layout-7 .bl7-trn {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid #000;
+  padding: 2px 10px;
+  margin-top: 6px;
+}
+#invoice-POS .receipt-layout-7 .bl7-title {
+  border-top: 2px solid #000;
+  border-bottom: 2px solid #000;
+  padding: 6px 0;
+  margin: 8px 0 6px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+#invoice-POS .receipt-layout-7 .bl7-meta {
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+#invoice-POS .receipt-layout-7 .bl7-meta-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 2px 0;
+}
+#invoice-POS .receipt-layout-7 .bl7-meta-en {
+  color: #444;
+}
+#invoice-POS .receipt-layout-7 .bl7-meta-val {
+  font-weight: 600;
+  text-align: right;
+  word-break: break-word;
+}
+#invoice-POS .receipt-layout-7 .bl7-items {
+  width: 100%;
+  margin-top: 8px;
+  border-collapse: collapse;
+}
+#invoice-POS .receipt-layout-7 .bl7-items thead th {
+  font-weight: 700;
+  border-top: 2px solid #000 !important;
+  border-bottom: 1px solid #000 !important;
+  padding: 4px 2px !important;
+  line-height: 1.35 !important;
+}
+#invoice-POS .receipt-layout-7 .bl7-item-row td {
+  padding: 4px 2px !important;
+  border-bottom: 1px dashed #bbb !important;
+}
+#invoice-POS .receipt-layout-7 .bl7-item-name {
+  font-weight: 600;
+}
+#invoice-POS .receipt-layout-7 .bl7-item-sub {
+  font-size: 10px;
+  color: #444;
+  line-height: 1.4;
+}
+#invoice-POS .receipt-layout-7 .bl7-totals {
+  width: 100%;
+  margin-top: 2px;
+}
+#invoice-POS .receipt-layout-7 .bl7-t-en {
+  text-align: left !important;
+  color: #333;
+}
+#invoice-POS .receipt-layout-7 .bl7-t-val {
+  text-align: right !important;
+  font-weight: 600;
+}
+#invoice-POS .receipt-layout-7 .bl7-grand {
+  width: 100%;
+  margin-top: 5px;
+  border-top: 2px solid #000 !important;
+  border-bottom: 2px solid #000 !important;
+}
+#invoice-POS .receipt-layout-7 .bl7-grand td {
+  font-size: 13px;
+  font-weight: 800;
+  color: #000 !important;
+  padding: 5px 2px !important;
+}
+#invoice-POS .receipt-layout-7 .bl7-pays {
+  width: 100%;
+  margin-top: 5px;
+}
+#invoice-POS .receipt-layout-7 .bl7-pays td {
+  font-weight: 600;
+}
+#invoice-POS .receipt-layout-7 .bl7-payments {
+  width: 100%;
+  margin-top: 10px;
+}
+#invoice-POS .receipt-layout-7 .bl7-payments thead th {
+  font-weight: 700;
+  border-top: 1px solid #000 !important;
+  border-bottom: 1px solid #000 !important;
+  padding: 4px 2px !important;
+  line-height: 1.35 !important;
+}
+#invoice-POS .receipt-layout-7 .bl7-pay-note {
+  font-size: 10px;
+  font-style: italic;
+  color: #444;
+  padding-bottom: 4px !important;
+  white-space: pre-line;
+}
+#invoice-POS .receipt-layout-7 .bl7-footer {
+  margin-top: 10px;
+  text-align: center;
+}
+#invoice-POS .receipt-layout-7 .bl7-sale-note {
+  font-size: 10px;
+  font-style: italic;
+  text-align: left;
+  white-space: pre-line;
+  margin-bottom: 4px;
+}
+#invoice-POS .receipt-layout-7 .bl7-thanks-en {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  border-top: 1px solid #000;
+  padding-top: 7px;
+}
+#invoice-POS .receipt-layout-7 .bl7-policy {
+  font-size: 10px;
+  color: #333;
+  margin-top: 4px;
+  line-height: 1.5;
+  white-space: pre-line;
+}
+#invoice-POS .receipt-layout-7 .bl7-footer-contact {
+  font-size: 10px;
+  color: #333;
+  margin-top: 5px;
+}
+@media print {
+  #invoice-POS .receipt-layout-7,
+  #invoice-POS .receipt-layout-7 * {
+    text-transform: none !important;
+  }
+  #invoice-POS .receipt-layout-7 table,
+  #invoice-POS .receipt-layout-7 table tr,
+  #invoice-POS .receipt-layout-7 table tbody tr,
+  #invoice-POS .receipt-layout-7 table thead tr,
+  #invoice-POS .receipt-layout-7 table td,
+  #invoice-POS .receipt-layout-7 table th {
+    border: none !important;
+    border-bottom: none !important;
+  }
+  #invoice-POS .receipt-layout-7,
+  #invoice-POS .receipt-layout-7 table td,
+  #invoice-POS .receipt-layout-7 table th {
+    color: #000 !important;
+  }
+  #invoice-POS .receipt-layout-7 .bl7-contact,
+  #invoice-POS .receipt-layout-7 .bl7-meta-en,
+  #invoice-POS .receipt-layout-7 .bl7-item-sub,
+  #invoice-POS .receipt-layout-7 .bl7-t-en,
+  #invoice-POS .receipt-layout-7 .bl7-pay-note,
+  #invoice-POS .receipt-layout-7 .bl7-policy,
+  #invoice-POS .receipt-layout-7 .bl7-footer-contact {
+    color: #333 !important;
+  }
+  #invoice-POS .receipt-layout-7 .bl7-items thead th {
+    border-top: 2px solid #000 !important;
+    border-bottom: 1px solid #000 !important;
+  }
+  #invoice-POS .receipt-layout-7 .bl7-item-row td {
+    border-bottom: 1px dashed #999 !important;
+  }
+  #invoice-POS .receipt-layout-7 .bl7-grand {
+    border-top: 2px solid #000 !important;
+    border-bottom: 2px solid #000 !important;
+  }
+  #invoice-POS .receipt-layout-7 .bl7-payments thead th {
+    border-top: 1px solid #000 !important;
+    border-bottom: 1px solid #000 !important;
+  }
+  #invoice-POS .receipt-layout-7 .bl7-title {
+    border-top: 2px solid #000 !important;
+    border-bottom: 2px solid #000 !important;
+  }
+  #invoice-POS .receipt-layout-7 .bl7-trn {
+    border: 1px solid #000 !important;
+  }
+  #invoice-POS .receipt-layout-7 .bl7-thanks {
+    border-top: 1px solid #000 !important;
+  }
+}
+
 /* Generic invoice URL QR container (used in all layouts) */
 #invoice-POS .invoice-url-qr{
   display: flex;

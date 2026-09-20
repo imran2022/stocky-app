@@ -57,7 +57,12 @@
                 <component :is="card.icon" />
               </span>
               <div>
-                <div class="stat-label">{{ card.label }}</div>
+                <div class="stat-label">
+                  {{ card.label }}
+                  <a-tooltip v-if="card.hint" :title="card.hint" @click.stop>
+                    <InfoCircleOutlined class="stat-hint-icon" />
+                  </a-tooltip>
+                </div>
                 <div class="stat-value">{{ card.money ? money(card.value) : card.value }}</div>
               </div>
             </div>
@@ -69,7 +74,7 @@
       <a-row :gutter="[16, 16]" style="margin-top: 16px">
         <a-col :xs="24" :xl="16">
           <a-card class="chart-card" :title="$t('Sales_And_Purchases')">
-            <apexchart v-if="salesChart.series.length" :key="'bar-' + loadCount" type="bar" height="320" :options="salesChart.options" :series="salesChart.series" />
+            <apexchart v-if="salesChart.series.length" :key="'area-' + loadCount" type="area" height="320" :options="salesChart.options" :series="salesChart.series" />
             <a-empty v-else :description="$t('No_data_available')" style="padding: 48px 0" />
           </a-card>
         </a-col>
@@ -368,14 +373,14 @@ const statCards = computed(() => {
   const r = report.value;
   const n = k => Number(r[k]) || 0;
   return [
-    { label: t('Sales'), value: n('today_sales'), money: true, icon: ShoppingCartOutlined, tint: 'rgba(109,40,217,0.12)', link: '/sales' },
+    { label: t('Sales'), value: n('today_sales'), money: true, icon: ShoppingCartOutlined, tint: 'rgba(109,40,217,0.12)', link: '/sales', hint: t('Dashboard_Sales_Hint') },
     { label: t('Purchases'), value: n('today_purchases'), money: true, icon: ShoppingOutlined, tint: 'rgba(22,119,255,0.12)', link: '/purchases' },
     { label: t('SalesReturn'), value: n('return_sales'), money: true, icon: RollbackOutlined, tint: 'rgba(250,140,22,0.12)', link: '/sale-returns' },
     { label: t('PurchasesReturn'), value: n('return_purchases'), money: true, icon: UndoOutlined, tint: 'rgba(245,34,45,0.12)', link: '/purchase-returns' },
     { label: t('Sales_Due'), value: n('sales_due'), money: true, icon: DollarOutlined, tint: 'rgba(250,140,22,0.12)', link: '/sales' },
     { label: t('Purchase_Due'), value: n('purchase_due'), money: true, icon: WalletOutlined, tint: 'rgba(22,119,255,0.12)', link: '/purchases' },
     { label: t('Invoices'), value: n('today_invoices'), money: false, icon: FileTextOutlined, tint: 'rgba(140,140,140,0.14)', link: '/sales' },
-    { label: t('Profit'), value: n('today_profit'), money: true, icon: RiseOutlined, tint: 'rgba(82,196,26,0.14)', link: '/reports/profit-and-loss' },
+    { label: t('Profit'), value: n('today_profit'), money: true, icon: RiseOutlined, tint: 'rgba(82,196,26,0.14)', link: '/reports/profit-and-loss', hint: t('Dashboard_Profit_Hint') },
   ];
 });
 
@@ -506,24 +511,25 @@ const warehouseColumns = computed(() => [
 ]);
 
 function buildCharts(days, salesData, purchasesData, products, customers, pay) {
+  // Modernized (2026-09-20, client request): smooth gradient area chart,
+  // matching the Payment Sent/Received chart's style below, instead of the
+  // previous flat grouped bar chart — easier to read the trend at a glance.
   salesChart.value = {
     series: [
       { name: t('Sales'), data: salesData },
       { name: t('Purchases'), data: purchasesData },
     ],
     options: {
-      chart: { ...CHART_BASE, type: 'bar' },
+      chart: { ...CHART_BASE, type: 'area' },
       colors: ['#6366f1', '#22d3ee'],
-      plotOptions: { bar: { columnWidth: '45%', borderRadius: 5, borderRadiusApplication: 'end' } },
-      fill: {
-        type: 'gradient',
-        gradient: { shade: 'light', type: 'vertical', shadeIntensity: 0.2, opacityFrom: 0.95, opacityTo: 0.8, stops: [0, 100] },
-      },
+      stroke: { curve: 'smooth', width: 2.5 },
+      fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.4, opacityTo: 0.04, stops: [0, 95] } },
+      markers: { size: 0, hover: { size: 5 } },
       dataLabels: { enabled: false },
       legend: { labels: { colors: '#595959' } },
       xaxis: { categories: days, axisBorder: { show: false }, axisTicks: { show: false } },
       grid: GRID,
-      tooltip: { theme: 'light' },
+      tooltip: { theme: 'light', shared: true, y: { formatter: v => money(v) } },
     },
   };
   donutChart.value = {
@@ -755,6 +761,12 @@ onMounted(load);
 .stat-label {
   color: rgba(0, 0, 0, 0.45);
   font-size: 13px;
+}
+.stat-hint-icon {
+  margin-left: 4px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.3);
+  cursor: help;
 }
 .stat-value {
   font-size: 20px;

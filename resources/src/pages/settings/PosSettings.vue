@@ -30,6 +30,8 @@
                   { value: 3, label: $t('Layout_3_Detailed') },
                   { value: 4, label: $t('Layout_4_Bilingual') },
                   { value: 5, label: $t('Layout_5_Minimal') },
+                  { value: 6, label: $t('Layout_6_Roomy') },
+                  { value: 7, label: $t('Layout_7_Simplified_EN') },
                 ]"
               />
             </a-form-item>

@@ -1374,7 +1374,9 @@
                   <span v-show="pos_settings.show_date !== 0">{{$t('date')}} : {{invoice_pos.sale.date}} <br></span>
                   <span v-show="pos_settings.show_seller !== 0">{{$t('Seller')}} : {{invoice_pos.sale.seller_name}} <br></span>
                   <span v-show="pos_settings.show_address">{{$t('Adress')}} : {{invoice_pos.setting.CompanyAdress}} <br></span>
+                  <span v-show="pos_settings.show_vat_bin && invoice_pos.setting.vat_number">VAT/BIN : {{invoice_pos.setting.vat_number}} <br></span>
                   <span v-show="pos_settings.show_email">{{$t('Email')}} : {{invoice_pos.setting.email}} <br></span>
+                  <span v-show="pos_settings.show_website && invoice_pos.setting.website">{{invoice_pos.setting.website}} <br></span>
                   <span v-show="pos_settings.show_phone">{{$t('Phone')}} : {{invoice_pos.setting.CompanyPhone}} <br></span>
                   <span v-show="pos_settings.show_customer">{{$t('Customer')}} : {{invoice_pos.sale.client_name}} <br></span>
                   <span v-show="pos_settings.show_Warehouse">{{$t('warehouse')}} : {{invoice_pos.sale.warehouse_name}} <br></span>
@@ -1559,7 +1561,9 @@
                   <div v-show="pos_settings.show_store_name !== 0">{{invoice_pos.setting.CompanyName}}</div>
                   <div v-show="pos_settings.show_address">{{invoice_pos.setting.CompanyAdress}}</div>
                   <div v-show="pos_settings.show_phone">{{invoice_pos.setting.CompanyPhone}}</div>
+                  <div v-show="pos_settings.show_vat_bin && invoice_pos.setting.vat_number">VAT/BIN: {{invoice_pos.setting.vat_number}}</div>
                   <div v-show="pos_settings.show_email">{{invoice_pos.setting.email}}</div>
+                  <div v-show="pos_settings.show_website && invoice_pos.setting.website">{{invoice_pos.setting.website}}</div>
                 </div>
                 <div class="mt-1">
                   <small
@@ -1772,7 +1776,9 @@
                     <strong v-show="pos_settings.show_store_name !== 0">{{invoice_pos.setting.CompanyName}}</strong><br>
                     <span v-show="pos_settings.show_address">{{invoice_pos.setting.CompanyAdress}}</span><br v-show="pos_settings.show_address">
                     <span v-show="pos_settings.show_phone">{{invoice_pos.setting.CompanyPhone}}</span><br v-show="pos_settings.show_phone">
-                    <span v-show="pos_settings.show_email">{{invoice_pos.setting.email}}</span>
+                    <span v-show="pos_settings.show_vat_bin && invoice_pos.setting.vat_number">VAT/BIN: {{invoice_pos.setting.vat_number}}</span><br v-show="pos_settings.show_vat_bin && invoice_pos.setting.vat_number">
+                    <span v-show="pos_settings.show_email">{{invoice_pos.setting.email}}</span><br v-show="pos_settings.show_email">
+                    <span v-show="pos_settings.show_website && invoice_pos.setting.website">{{invoice_pos.setting.website}}</span>
                   </div>
                   <div class="invoice_logo text-center mb-2" v-show="pos_settings.show_logo !== 0">
                     <img :src="'/images/'+invoice_pos.setting.logo" alt :width="pos_settings.logo_size || 60" :height="pos_settings.logo_size || 60">
@@ -1972,7 +1978,8 @@
                 <div class="bl4-contact" v-if="invoice_pos.setting.CompanyAdress">{{invoice_pos.setting.CompanyAdress}}</div>
                 <div class="bl4-contact" v-if="invoice_pos.setting.CompanyPhone">{{invoice_pos.setting.CompanyPhone}}</div>
                 <div class="bl4-contact" v-if="invoice_pos.setting.email" v-show="pos_settings.show_email">{{invoice_pos.setting.email}}</div>
-                <div v-if="invoice_pos.setting.vat_number" class="bl4-trn">
+                <div class="bl4-contact" v-if="invoice_pos.setting.website" v-show="pos_settings.show_website">{{invoice_pos.setting.website}}</div>
+                <div v-if="invoice_pos.setting.vat_number" v-show="pos_settings.show_vat_bin" class="bl4-trn">
                   الرقم الضريبي / TRN : {{invoice_pos.setting.vat_number}}
                 </div>
                 <div class="bl4-title">
@@ -2191,7 +2198,9 @@
                   <span v-show="pos_settings.show_address && pos_settings.show_phone"> &middot; </span>
                   <span v-show="pos_settings.show_phone">{{invoice_pos.setting.CompanyPhone}}</span>
                 </div>
+                <div class="minimal-contact" v-show="pos_settings.show_vat_bin" v-if="invoice_pos.setting.vat_number">VAT/BIN: {{invoice_pos.setting.vat_number}}</div>
                 <div class="minimal-contact" v-show="pos_settings.show_email" v-if="invoice_pos.setting.email">{{invoice_pos.setting.email}}</div>
+                <div class="minimal-contact" v-show="pos_settings.show_website" v-if="invoice_pos.setting.website">{{invoice_pos.setting.website}}</div>
               </div>
 
               <div class="minimal-divider"></div>
@@ -2330,6 +2339,360 @@
                 <div v-if="pos_settings.show_barcode !== 0 && invoice_pos.sale && invoice_pos.sale.Ref" class="receipt-qr-block">
                   <div class="receipt-qr-title">Invoice QR</div>
                   <div class="receipt-qr-canvas" ref="invoiceUrlQr"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Layout 6 - Roomy (same design as Layout 5 - Minimal, with Layout
+                 1-4's roomier spacing instead of Layout 5's compact spacing) -->
+            <div v-else-if="currentReceiptLayout === 6" class="receipt-layout-6">
+              <div class="info text-center mb-2">
+                <div class="invoice_logo mb-2" v-show="pos_settings.show_logo !== 0">
+                  <img :src="'/images/'+invoice_pos.setting.logo" alt :width="pos_settings.logo_size || 60" :height="pos_settings.logo_size || 60">
+                </div>
+                <div class="minimal-store-name" v-show="pos_settings.show_store_name !== 0">{{invoice_pos.setting.CompanyName}}</div>
+                <div class="minimal-contact" v-if="invoice_pos.setting.CompanyAdress || invoice_pos.setting.CompanyPhone">
+                  <span v-show="pos_settings.show_address">{{invoice_pos.setting.CompanyAdress}}</span>
+                  <span v-show="pos_settings.show_address && pos_settings.show_phone"> &middot; </span>
+                  <span v-show="pos_settings.show_phone">{{invoice_pos.setting.CompanyPhone}}</span>
+                </div>
+                <div class="minimal-contact" v-show="pos_settings.show_vat_bin" v-if="invoice_pos.setting.vat_number">VAT/BIN: {{invoice_pos.setting.vat_number}}</div>
+                <div class="minimal-contact" v-show="pos_settings.show_email" v-if="invoice_pos.setting.email">{{invoice_pos.setting.email}}</div>
+                <div class="minimal-contact" v-show="pos_settings.show_website" v-if="invoice_pos.setting.website">{{invoice_pos.setting.website}}</div>
+              </div>
+
+              <div class="minimal-divider"></div>
+
+              <div class="minimal-meta">
+                <div v-if="invoice_pos.sale && invoice_pos.sale.Ref && pos_settings.show_reference !== 0" class="minimal-meta-row">
+                  <span>{{$t('Reference')}}</span><span>{{invoice_pos.sale.Ref}}</span>
+                </div>
+                <div v-show="pos_settings.show_date !== 0" class="minimal-meta-row">
+                  <span>{{$t('date')}}</span><span>{{invoice_pos.sale.date}}</span>
+                </div>
+                <div v-show="pos_settings.show_seller !== 0" class="minimal-meta-row">
+                  <span>{{$t('Seller')}}</span><span>{{invoice_pos.sale.seller_name}}</span>
+                </div>
+                <div v-show="pos_settings.show_customer" class="minimal-meta-row">
+                  <span>{{$t('Customer')}}</span><span>{{invoice_pos.sale.client_name}}</span>
+                </div>
+                <div v-show="pos_settings.show_Warehouse" class="minimal-meta-row">
+                  <span>{{$t('warehouse')}}</span><span>{{invoice_pos.sale.warehouse_name}}</span>
+                </div>
+              </div>
+
+              <div class="minimal-divider"></div>
+
+              <table class="minimal-items">
+                <tbody>
+                  <tr v-for="detail_invoice in invoice_pos.details" :key="'min6-item-' + detail_invoice.id">
+                    <td>
+                      <div class="minimal-item-name">{{detail_invoice.name}}</div>
+                      <div class="minimal-item-qty">{{formatNumber(detail_invoice.quantity,2)}} {{ packLineUnit(detail_invoice) }} &times; {{ formatPriceDisplay(detail_invoice.total/detail_invoice.quantity,2) }}</div>
+                      <div class="minimal-item-qty" v-if="detail_invoice.pack_name && Number(detail_invoice.pack_multiplier) > 1">(×{{ detail_invoice.pack_multiplier }}) = {{ formatNumber(detail_invoice.quantity * detail_invoice.pack_multiplier, 2) }} {{ detail_invoice.unit_sale || ($t('Pcs') || 'pcs') }}</div>
+                      <div class="minimal-item-discount" v-if="pos_settings.show_product_discount !== 0 && Number(detail_invoice.DiscountNet || 0) > 0">{{$t('Discount')}} &minus;{{ formatPriceDisplay(Number(detail_invoice.DiscountNet) * Number(detail_invoice.quantity), 2) }}</div>
+                      <div class="minimal-item-qty" v-show="detail_invoice.is_imei && detail_invoice.imei_number !== null">IMEI/SN: {{detail_invoice.imei_number}}</div>
+                    </td>
+                    <td class="minimal-item-total">{{ formatPriceDisplay(detail_invoice.total,2) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div class="minimal-divider"></div>
+
+              <table class="minimal-totals">
+                <tbody>
+                  <tr>
+                    <td>{{$t('Subtotal')}}</td>
+                    <td>{{ formatPriceWithSymbol(invoice_pos.symbol, pos_settings.show_items_tax != 0 ? (invoiceSubtotal - invoiceDetailsTaxTotal) : invoiceSubtotal, 2) }}</td>
+                  </tr>
+                  <tr v-show="pos_settings.show_items_tax != 0 && Number(invoiceDetailsTaxTotal) > 0">
+                    <td>{{$t('TotalItemsTax')}}</td>
+                    <td>{{ formatPriceWithSymbol(invoice_pos.symbol, invoiceDetailsTaxTotal, 2) }} ({{ formatNumber(invoiceProductTaxRate, 2) }} %)</td>
+                  </tr>
+                  <tr v-show="pos_settings.show_tax && Number(invoice_pos.sale.taxe || 0) > 0">
+                    <td>{{$t('Tax')}}</td>
+                    <td>{{ formatPriceWithSymbol(invoice_pos.symbol, invoice_pos.sale.taxe, 2) }}</td>
+                  </tr>
+                  <tr v-show="pos_settings.show_discount">
+                    <td>{{$t('Discount')}}</td>
+                    <td>
+                      <template v-if="String(invoice_pos.sale.discount_Method || '2') === '1'">
+                        {{ formatNumber(invoice_pos.sale.discount, 2) }}%
+                      </template>
+                      <template v-else>
+                        {{ formatPriceWithSymbol(invoice_pos.symbol, calculatedManualDiscountAmount, 2) }}
+                      </template>
+                    </td>
+                  </tr>
+                  <tr v-show="pos_settings.show_discount && invoice_pos.sale.discount_from_points && Number(invoice_pos.sale.discount_from_points) > 0">
+                    <td>{{$t('Discount_from_Points')}}</td>
+                    <td>{{ formatPriceWithSymbol(invoice_pos.symbol, invoice_pos.sale.discount_from_points, 2) }}</td>
+                  </tr>
+                  <template v-if="invoicePromotions.length > 0">
+                    <tr v-for="(promo, idx) in invoicePromotions" :key="'promo-f-' + idx + '-' + promo.id">
+                      <td>{{$t('Promotions')}} — {{ promo.name }}<span v-if="promo.code"> ({{ promo.code }})</span></td>
+                      <td>−{{ formatPriceWithSymbol(invoice_pos.symbol, promo.amount, 2) }}</td>
+                    </tr>
+                  </template>
+                  <tr v-else-if="Number(invoice_pos.sale.promotion_discount || 0) > 0">
+                    <td>{{$t('Promotions')}}<span v-if="invoice_pos.sale.promotion_code"> ({{ invoice_pos.sale.promotion_code }})</span></td>
+                    <td>−{{ formatPriceWithSymbol(invoice_pos.symbol, invoice_pos.sale.promotion_discount, 2) }}</td>
+                  </tr>
+                  <tr v-show="pos_settings.show_shipping">
+                    <td>{{$t('Shipping')}}</td>
+                    <td>{{ formatPriceWithSymbol(invoice_pos.symbol, invoice_pos.sale.shipping, 2) }}</td>
+                  </tr>
+                  <tr class="minimal-grand">
+                    <td>{{$t('Total')}}</td>
+                    <td>{{ formatPriceWithSymbol(invoice_pos.symbol, invoice_pos.sale.GrandTotal, 2) }}</td>
+                  </tr>
+                  <tr v-show="pos_settings.show_paid !== 0">
+                    <td>{{$t('Paid')}}</td>
+                    <td>{{ formatPriceWithSymbol(invoice_pos.symbol, invoice_pos.sale.paid_amount, 2) }}</td>
+                  </tr>
+                  <tr v-show="pos_settings.show_due !== 0">
+                    <td>{{$t('Due')}}</td>
+                    <td>{{ formatPriceWithSymbol(invoice_pos.symbol, (invoice_pos.sale.GrandTotal - invoice_pos.sale.paid_amount), 2) }}</td>
+                  </tr>
+                  <tr v-if="showPreviousDuesRow">
+                    <td>{{$t('Previous_Dues')}}</td>
+                    <td>{{ formatPriceWithSymbol(invoice_pos.symbol, invoicePreviousDues, 2) }}</td>
+                  </tr>
+                  <tr v-if="showNetBalanceRow">
+                    <td>{{$t('Net_Balance')}}</td>
+                    <td>{{ formatPriceWithSymbol(invoice_pos.symbol, invoiceNetBalance, 2) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <table class="minimal-payments" v-show="pos_settings.show_payments !== 0 && invoice_pos.sale.paid_amount > 0">
+                <thead>
+                  <tr>
+                    <th>{{$t('PayeBy')}}</th>
+                    <th>{{$t('Amount')}}</th>
+                    <th>{{$t('Change')}}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template v-for="payment_pos in payments" :key="'pay-' + payment_pos.id">
+                    <tr>
+                      <td>{{payment_pos.payment_method?payment_pos.payment_method.name:'---'}}</td>
+                      <td>{{ formatPriceDisplay(payment_pos.montant, 2) }}</td>
+                      <td>{{ formatPriceDisplay(payment_pos.change, 2) }}</td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+
+              <p class="minimal-note" v-show="pos_settings.show_note && pos_settings.note_customer" style="white-space:pre-line;">
+                {{pos_settings.note_customer}}
+              </p>
+
+              <div v-if="(invoice_pos.setting && invoice_pos.setting.zatca_enabled && invoice_pos.zatca_qr && pos_settings.show_zatca_qr !== 0) || (pos_settings.show_barcode !== 0 && invoice_pos.sale && invoice_pos.sale.Ref)" class="receipt-qr-row mt-2">
+                <div v-if="invoice_pos.setting && invoice_pos.setting.zatca_enabled && invoice_pos.zatca_qr && pos_settings.show_zatca_qr !== 0" class="receipt-qr-block">
+                  <div class="receipt-qr-title">ZATCA QR</div>
+                  <div class="receipt-qr-canvas" ref="zatcaQrcodePos"></div>
+                </div>
+                <div v-if="pos_settings.show_barcode !== 0 && invoice_pos.sale && invoice_pos.sale.Ref" class="receipt-qr-block">
+                  <div class="receipt-qr-title">Invoice QR</div>
+                  <div class="receipt-qr-canvas" ref="invoiceUrlQr"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Layout 7 - Simplified Tax Invoice, English-only (same structure
+                 as Layout 4 - Bilingual, with all Arabic text/columns removed
+                 and spacing tightened so an 80mm/58mm receipt printer doesn't
+                 crop the right edge). -->
+            <div v-else class="receipt-layout-7">
+              <div class="info text-center bl7-header">
+                <div class="invoice_logo mb-1" v-show="pos_settings.show_logo !== 0">
+                  <img :src="'/images/'+invoice_pos.setting.logo" alt :width="pos_settings.logo_size || 60" :height="pos_settings.logo_size || 60">
+                </div>
+                <div class="bl7-company-en">{{invoice_pos.setting.CompanyName}}</div>
+                <div class="bl7-contact" v-if="invoice_pos.setting.CompanyAdress">{{invoice_pos.setting.CompanyAdress}}</div>
+                <div class="bl7-contact" v-if="invoice_pos.setting.CompanyPhone">{{invoice_pos.setting.CompanyPhone}}</div>
+                <div class="bl7-contact" v-if="invoice_pos.setting.email" v-show="pos_settings.show_email">{{invoice_pos.setting.email}}</div>
+                <div class="bl7-contact" v-if="invoice_pos.setting.website" v-show="pos_settings.show_website">{{invoice_pos.setting.website}}</div>
+                <div v-if="invoice_pos.setting.vat_number" v-show="pos_settings.show_vat_bin" class="bl7-trn">
+                  VAT/BIN: {{invoice_pos.setting.vat_number}}
+                </div>
+                <div class="bl7-title">SIMPLIFIED TAX INVOICE</div>
+              </div>
+
+              <div class="bl7-meta">
+                <div v-if="invoice_pos.sale && invoice_pos.sale.Ref && pos_settings.show_reference !== 0" class="bl7-meta-row">
+                  <span class="bl7-meta-en">Invoice No</span>
+                  <span class="bl7-meta-val">{{invoice_pos.sale.Ref}}</span>
+                </div>
+                <div v-show="pos_settings.show_date !== 0" class="bl7-meta-row">
+                  <span class="bl7-meta-en">Date</span>
+                  <span class="bl7-meta-val">{{invoice_pos.sale.date}}</span>
+                </div>
+                <div v-show="pos_settings.show_seller !== 0" class="bl7-meta-row">
+                  <span class="bl7-meta-en">Seller</span>
+                  <span class="bl7-meta-val">{{invoice_pos.sale.seller_name}}</span>
+                </div>
+                <div v-show="pos_settings.show_customer" class="bl7-meta-row">
+                  <span class="bl7-meta-en">Customer</span>
+                  <span class="bl7-meta-val">{{invoice_pos.sale.client_name}}</span>
+                </div>
+                <div v-show="pos_settings.show_Warehouse" class="bl7-meta-row">
+                  <span class="bl7-meta-en">Warehouse</span>
+                  <span class="bl7-meta-val">{{invoice_pos.sale.warehouse_name}}</span>
+                </div>
+              </div>
+
+              <table class="bl7-items">
+                <colgroup><col style="width:46%"><col style="width:14%"><col style="width:18%"><col style="width:22%"></colgroup>
+                <thead>
+                  <tr>
+                    <th class="bl7-th-left">Product</th>
+                    <th class="bl7-th-center">Qty</th>
+                    <th class="bl7-th-right">Rate</th>
+                    <th class="bl7-th-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="detail_invoice in invoice_pos.details" class="bl7-item-row" :key="'bl7-item-' + detail_invoice.id">
+                    <td>
+                      <div class="bl7-item-name">{{detail_invoice.name}}</div>
+                      <div class="bl7-item-sub" v-if="Number(detail_invoice.tax_percent || detail_invoice.tax_rate || 0) > 0">VAT @ {{ formatNumber(Number(detail_invoice.tax_percent || detail_invoice.tax_rate || 0),2) }}% ({{ formatPriceDisplay(detail_invoice.total * Number(detail_invoice.tax_percent || detail_invoice.tax_rate || 0) / 100, 2) }})</div>
+                      <div class="bl7-item-sub" v-if="pos_settings.show_product_discount !== 0 && Number(detail_invoice.DiscountNet || 0) > 0">Discount: -{{ formatPriceDisplay(Number(detail_invoice.DiscountNet) * Number(detail_invoice.quantity), 2) }}</div>
+                      <div class="bl7-item-sub" v-show="detail_invoice.is_imei && detail_invoice.imei_number !==null">IMEI/SN: {{detail_invoice.imei_number}}</div>
+                      <div class="bl7-item-sub" v-if="detail_invoice.pack_name && Number(detail_invoice.pack_multiplier) > 1">(×{{ detail_invoice.pack_multiplier }}) = {{ formatNumber(detail_invoice.quantity * detail_invoice.pack_multiplier, 2) }} {{ detail_invoice.unit_sale || ($t('Pcs') || 'pcs') }}</div>
+                    </td>
+                    <td class="bl7-td-center">{{formatNumber(detail_invoice.quantity,2)}} {{ packLineUnit(detail_invoice) }}</td>
+                    <td class="bl7-td-right">{{ formatPriceDisplay(detail_invoice.total/detail_invoice.quantity,2) }}</td>
+                    <td class="bl7-td-right">{{ formatPriceDisplay(detail_invoice.total,2) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <table class="bl7-totals">
+                <colgroup><col style="width:50%"><col style="width:50%"></colgroup>
+                <tbody>
+                  <tr>
+                    <td class="bl7-t-en">Sub Total</td>
+                    <td class="bl7-t-val">{{ formatPriceWithSymbol(invoice_pos.symbol, pos_settings.show_items_tax != 0 ? (invoiceSubtotal - invoiceDetailsTaxTotal) : invoiceSubtotal, 2) }}</td>
+                  </tr>
+                  <tr v-show="pos_settings.show_items_tax != 0 && Number(invoiceDetailsTaxTotal) > 0">
+                    <td class="bl7-t-en">Total Items Tax</td>
+                    <td class="bl7-t-val">{{ formatPriceWithSymbol(invoice_pos.symbol, invoiceDetailsTaxTotal, 2) }}</td>
+                  </tr>
+                  <tr v-show="pos_settings.show_discount">
+                    <td class="bl7-t-en">Discount</td>
+                    <td class="bl7-t-val">
+                      <template v-if="String(invoice_pos.sale.discount_Method || '2') === '1'">
+                        {{ formatNumber(invoice_pos.sale.discount, 2) }}% ({{ formatPriceWithSymbol(invoice_pos.symbol, calculatedManualDiscountAmount ,2) }})
+                      </template>
+                      <template v-else>
+                        {{ formatPriceWithSymbol(invoice_pos.symbol, calculatedManualDiscountAmount ,2) }}
+                      </template>
+                    </td>
+                  </tr>
+                  <tr v-show="pos_settings.show_discount && invoice_pos.sale.discount_from_points && Number(invoice_pos.sale.discount_from_points) > 0">
+                    <td class="bl7-t-en">Discount from Points</td>
+                    <td class="bl7-t-val">{{ formatPriceWithSymbol(invoice_pos.symbol, invoice_pos.sale.discount_from_points ,2) }}</td>
+                  </tr>
+                  <template v-if="invoicePromotions.length > 0">
+                    <tr v-for="(promo, idx) in invoicePromotions" :key="'promo-g-' + idx + '-' + promo.id">
+                      <td class="bl7-t-en">Promotion — {{ promo.name }}<span v-if="promo.code"> ({{ promo.code }})</span></td>
+                      <td class="bl7-t-val">−{{ formatPriceWithSymbol(invoice_pos.symbol, promo.amount, 2) }}</td>
+                    </tr>
+                  </template>
+                  <tr v-else-if="Number(invoice_pos.sale.promotion_discount || 0) > 0">
+                    <td class="bl7-t-en">Promotion<span v-if="invoice_pos.sale.promotion_code"> ({{ invoice_pos.sale.promotion_code }})</span></td>
+                    <td class="bl7-t-val">−{{ formatPriceWithSymbol(invoice_pos.symbol, invoice_pos.sale.promotion_discount, 2) }}</td>
+                  </tr>
+                  <tr v-show="pos_settings.show_tax && Number(invoice_pos.sale.taxe || 0) > 0">
+                    <td class="bl7-t-en">VAT</td>
+                    <td class="bl7-t-val">{{ formatPriceWithSymbol(invoice_pos.symbol, invoice_pos.sale.taxe ,2) }}</td>
+                  </tr>
+                  <tr v-show="pos_settings.show_shipping">
+                    <td class="bl7-t-en">Shipping</td>
+                    <td class="bl7-t-val">{{ formatPriceWithSymbol(invoice_pos.symbol, invoice_pos.sale.shipping ,2) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <table class="bl7-grand">
+                <colgroup><col style="width:50%"><col style="width:50%"></colgroup>
+                <tbody>
+                  <tr>
+                    <td class="bl7-t-en">Grand Total</td>
+                    <td class="bl7-t-val">{{ formatPriceWithSymbol(invoice_pos.symbol, invoice_pos.sale.GrandTotal ,2) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <table class="bl7-pays">
+                <colgroup><col style="width:50%"><col style="width:50%"></colgroup>
+                <tbody>
+                  <tr v-show="pos_settings.show_paid !== 0">
+                    <td class="bl7-t-en">Paid Amount</td>
+                    <td class="bl7-t-val">{{ formatPriceWithSymbol(invoice_pos.symbol, invoice_pos.sale.paid_amount ,2) }}</td>
+                  </tr>
+                  <tr v-show="pos_settings.show_due !== 0">
+                    <td class="bl7-t-en">Balance Due</td>
+                    <td class="bl7-t-val">{{ formatPriceWithSymbol(invoice_pos.symbol, (invoice_pos.sale.GrandTotal - invoice_pos.sale.paid_amount), 2) }}</td>
+                  </tr>
+                  <tr v-if="showPreviousDuesRow">
+                    <td class="bl7-t-en">Previous Dues</td>
+                    <td class="bl7-t-val">{{ formatPriceWithSymbol(invoice_pos.symbol, invoicePreviousDues, 2) }}</td>
+                  </tr>
+                  <tr v-if="showNetBalanceRow">
+                    <td class="bl7-t-en">Net Balance</td>
+                    <td class="bl7-t-val">{{ formatPriceWithSymbol(invoice_pos.symbol, invoiceNetBalance, 2) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <table class="bl7-payments" v-show="pos_settings.show_payments !== 0 && invoice_pos.sale.paid_amount > 0">
+                <thead>
+                  <tr>
+                    <th class="bl7-th-left">Paid By</th>
+                    <th class="bl7-th-center">Amount</th>
+                    <th class="bl7-th-right">Change</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template v-for="payment_pos in payments" :key="'pay7-' + payment_pos.id">
+                    <tr>
+                      <td class="bl7-td-left">{{payment_pos.payment_method?payment_pos.payment_method.name:'---'}}</td>
+                      <td class="bl7-td-center">{{ formatPriceDisplay(payment_pos.montant ,2) }}</td>
+                      <td class="bl7-td-right">{{ formatPriceDisplay(payment_pos.change ,2) }}</td>
+                    </tr>
+                    <tr v-if="payment_pos.notes" :key="'pay7-note-' + payment_pos.id">
+                      <td colspan="3" class="bl7-pay-note">
+                        {{$t('Payment_note')}}: {{payment_pos.notes}}
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+
+              <div id="legalcopy" class="bl7-footer">
+                <div v-if="invoice_pos.sale && invoice_pos.sale.notes" class="bl7-sale-note">
+                  {{$t('sale_note')}}: {{invoice_pos.sale.notes}}
+                </div>
+                <div class="bl7-thanks-en">Thank You For Shopping With Us!</div>
+                <div v-show="pos_settings.show_note && pos_settings.note_customer" class="bl7-policy">{{pos_settings.note_customer}}</div>
+                <div class="bl7-footer-contact" v-if="invoice_pos.setting.CompanyPhone || invoice_pos.setting.email">
+                  <span v-if="invoice_pos.setting.CompanyPhone">{{invoice_pos.setting.CompanyPhone}}</span>
+                  <span v-if="invoice_pos.setting.CompanyPhone && invoice_pos.setting.email"> &middot; </span>
+                  <span v-if="invoice_pos.setting.email">{{invoice_pos.setting.email}}</span>
+                </div>
+                <div v-if="(invoice_pos.setting && invoice_pos.setting.zatca_enabled && invoice_pos.zatca_qr && pos_settings.show_zatca_qr !== 0) || (pos_settings.show_barcode !== 0 && invoice_pos.sale && invoice_pos.sale.Ref)" class="receipt-qr-row mt-2">
+                  <div v-if="invoice_pos.setting && invoice_pos.setting.zatca_enabled && invoice_pos.zatca_qr && pos_settings.show_zatca_qr !== 0" class="receipt-qr-block">
+                    <div class="receipt-qr-title">ZATCA QR</div>
+                    <div class="receipt-qr-canvas" ref="zatcaQrcodePos"></div>
+                  </div>
+                  <div v-if="pos_settings.show_barcode !== 0 && invoice_pos.sale && invoice_pos.sale.Ref" class="receipt-qr-block">
+                    <div class="receipt-qr-title">Invoice QR</div>
+                    <div class="receipt-qr-canvas" ref="invoiceUrlQr"></div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -4520,13 +4883,13 @@ export default {
       return (tax / base) * 100;
     },
 
-    // Normalize POS receipt layout selection (1, 2, 3, 4, or 5)
+    // Normalize POS receipt layout selection (1-7)
     currentReceiptLayout() {
       const raw = this.pos_settings && this.pos_settings.receipt_layout != null
         ? this.pos_settings.receipt_layout
         : 1;
       const n = Number(raw) || 1;
-      return [1, 2, 3, 4, 5].includes(n) ? n : 1;
+      return [1, 2, 3, 4, 5, 6, 7].includes(n) ? n : 1;
     },
 
     // Outstanding balance carried by the customer before this sale. Shared by
@@ -7428,7 +7791,12 @@ export default {
           const product_filter = this.products_pos.filter(product =>
             this.productFitsVehicle(product) &&
             (product.product_type === 'is_service' || this.isOversellingAllowed || Number(product.qte_sale || 0) > 0) &&
-            (product.code === this.search_input || String(product.barcode || '').includes(this.search_input))
+            // A variant row's own `code` is the variant's code; `product_code`
+            // is the parent product's SKU (also matched here, and below in
+            // the fuzzy filter, so typing the main SKU of a Variable Product
+            // finds it too, not just its variant codes) — mirrors the same
+            // fix already applied to Sales > Create Sale's product search.
+            (product.code === this.search_input || product.product_code === this.search_input || String(product.barcode || '').includes(this.search_input))
           );
           if(product_filter.length === 1){
             // Play sound only if barcode scanning sound is enabled
@@ -7444,11 +7812,13 @@ export default {
               if (!this.isOversellingAllowed && product.product_type !== 'is_service' && Number(product.qte_sale || 0) <= 0) return false;
               const name = String(product.name || '').toLowerCase();
               const code = String(product.code || '').toLowerCase();
+              const productCode = String(product.product_code || '').toLowerCase();
               const barcodeStr = String(product.barcode || '').toLowerCase();
               const term = this.search_input.toLowerCase();
               return (
                 name.includes(term) ||
                 code.includes(term) ||
+                productCode.includes(term) ||
                 barcodeStr.includes(term)
               );
             });
@@ -9860,6 +10230,8 @@ export default {
           show_phone: this.pos_settings.show_phone,
           show_email: this.pos_settings.show_email,
           show_address: this.pos_settings.show_address,
+          show_vat_bin: this.pos_settings.show_vat_bin,
+          show_website: this.pos_settings.show_website,
           show_customer: this.pos_settings.show_customer,
           show_Warehouse: this.pos_settings.show_Warehouse,
           is_printable: this.pos_settings.is_printable,
@@ -10684,7 +11056,9 @@ export default {
             ? this.pos_settings
             : {
                 show_address: false,
+                show_vat_bin: true,
                 show_email: false,
+                show_website: false,
                 show_phone: false,
                 show_customer: true,
                 show_Warehouse: true,
