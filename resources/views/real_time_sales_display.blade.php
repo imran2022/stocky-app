@@ -7,7 +7,7 @@
     <title>Live Sales Display</title>
     <link rel="icon" href="{{ asset('images/' . (($app_settings->favicon ?? null) ?: 'favicon.ico')) }}">
     <style>
-      html,body{margin:0;min-height:100%;background:#060b16;color:#fff;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+      html,body{margin:0;min-height:100%;background:#f5f5f7;color:#1f1f2c;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
       #real-time-sales-display{min-height:100vh}
     </style>
 </head>

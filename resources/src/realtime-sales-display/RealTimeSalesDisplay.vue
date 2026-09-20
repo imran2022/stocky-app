@@ -1,5 +1,5 @@
 <template>
-  <div class="display-shell">
+  <div class="display-shell" :class="{ dark: theme === 'dark' }">
     <header>
       <div class="brand">
         <span class="logo"><img :src="logo" alt=""></span>
@@ -7,6 +7,10 @@
       </div>
       <div class="header-meta">
         <span class="live" :class="{ offline: hasError }"><i></i>{{ hasError ? 'CONNECTION LOST' : 'LIVE' }}</span>
+        <button class="theme-toggle" type="button" :title="theme === 'dark' ? 'Use light theme' : 'Use dark theme'" @click="toggleTheme">
+          <svg v-if="theme === 'dark'" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></svg>
+          <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5 8.5 8.5 0 1 0 20.5 14.2Z"/></svg>
+        </button>
         <div class="clock"><span>{{ dateLabel }}</span><strong>{{ timeLabel }}</strong></div>
       </div>
     </header>
@@ -18,16 +22,16 @@
       </section>
       <section class="kpis">
         <article :class="{ bump: bumpCount }">
-          <span class="kpi-icon blue">↗</span><div><p>Sales today</p><strong>{{ todayCount }}</strong></div>
+          <div><p>Sales today</p><strong>{{ todayCount }}</strong></div>
         </article>
         <article :class="{ bump: bumpTotal }">
-          <span class="kpi-icon orange">$</span><div><p>Total today</p><strong>{{ money(todayTotal) }}</strong><small :class="{ down: trend < 0 }">{{ trendText }} vs yesterday</small></div>
+          <div><p>Total today</p><strong>{{ money(todayTotal) }}</strong><small :class="{ down: trend < 0 }">{{ trendText }} vs yesterday</small></div>
         </article>
         <article>
-          <span class="kpi-icon violet">Ø</span><div><p>Average sale</p><strong>{{ money(averageSale) }}</strong><small>{{ money(todayPaid) }} paid</small></div>
+          <div><p>Average sale</p><strong>{{ money(averageSale) }}</strong><small>{{ money(todayPaid) }} paid</small></div>
         </article>
         <article>
-          <span class="kpi-icon green">●</span><div><p>Last sale</p><strong>{{ lastSaleRelative }}</strong><small>{{ lastSaleAbsolute }}</small></div>
+          <div><p>Last sale</p><strong>{{ lastSaleRelative }}</strong><small>{{ lastSaleAbsolute }}</small></div>
         </article>
       </section>
 
@@ -43,18 +47,22 @@
       <template v-else>
         <section class="grid top-grid">
           <article class="panel chart-panel">
-            <div class="panel-title"><div><p>Performance</p><h2>Hourly sales today</h2></div><span>24 hours</span></div>
+            <div class="panel-title"><h2>Hourly sales today</h2><span>24 hours</span></div>
             <div class="chart">
-              <div v-for="point in hourly" :key="point.hour" class="bar-slot" :title="`${hourName(point.hour)} — ${point.count} sales · ${money(point.total)}`">
-                <div class="bar-value">{{ point.count || '' }}</div>
-                <div class="bar" :style="{ height: `${barHeight(point.count)}%` }"></div>
-                <span>{{ shortHour(point.hour) }}</span>
-              </div>
+              <svg viewBox="0 0 1000 250" role="img" aria-label="Hourly sales chart">
+                <line v-for="line in [30,80,130,180]" :key="line" x1="34" :y1="line" x2="985" :y2="line" class="grid-line"/>
+                <g v-for="point in hourly" :key="point.hour">
+                  <title>{{ hourName(point.hour) }} — {{ point.count }} sales · {{ money(point.total) }}</title>
+                  <rect :x="46 + point.hour * 39" :y="svgBarY(point.count)" width="20" :height="svgBarHeight(point.count)" rx="5" class="chart-bar"/>
+                  <text v-if="point.count" :x="56 + point.hour * 39" :y="svgBarY(point.count) - 7" text-anchor="middle" class="bar-label">{{ point.count }}</text>
+                  <text v-if="point.hour % 3 === 0" :x="56 + point.hour * 39" y="225" text-anchor="middle" class="axis-label">{{ String(point.hour).padStart(2, '0') }}</text>
+                </g>
+              </svg>
             </div>
           </article>
 
           <article class="panel products">
-            <div class="panel-title"><div><p>Today</p><h2>Top products</h2></div><span>By quantity</span></div>
+            <div class="panel-title"><h2>Top products today</h2><span>By quantity</span></div>
             <div v-if="!topProducts.length" class="empty">No sales yet</div>
             <div v-for="(product,index) in topProducts" :key="product.product_id || index" class="product">
               <b>{{ String(index + 1).padStart(2, '0') }}</b>
@@ -66,7 +74,7 @@
 
         <section class="grid bottom-grid">
           <article class="panel recent" :class="{ 'show-customers': showCustomerNames }">
-            <div class="panel-title"><div><p>Activity</p><h2>Recent sales</h2></div><span>Latest {{ recentSales.length }}</span></div>
+            <div class="panel-title"><h2>Recent sales</h2><span>Latest {{ recentSales.length }}</span></div>
             <div class="table">
               <div class="tr th"><span>Reference</span><span v-if="showCustomerNames">Customer</span><span>Warehouse</span><span>Status</span><span>Total</span><span>Time</span></div>
               <div v-if="!recentSales.length" class="empty">No sales yet</div>
@@ -79,7 +87,7 @@
           </article>
 
           <article class="panel locations">
-            <div class="panel-title"><div><p>Locations</p><h2>Sales by warehouse</h2></div></div>
+            <div class="panel-title"><h2>Sales by warehouse</h2></div>
             <div v-if="!locations.length" class="empty">No sales yet</div>
             <div v-for="(location,index) in locations" :key="location.warehouse_id || index" class="location">
               <span>{{ index + 1 }}</span><div><strong>{{ location.name }}</strong><small>{{ location.total_invoice }} invoices</small></div>
@@ -98,6 +106,7 @@ export default {
   data() {
     return {
       token: window.__RTSD_TOKEN__ || '', logo: window.__RTSD_LOGO__ || '', company: window.__RTSD_COMPANY__ || 'Stocky',
+      theme: localStorage.getItem('rtsd_theme') || 'light',
       loading: true, fetching: false, hasError: false, accessExpired: false, now: Date.now(), refreshSeconds: 30,
       todayCount: 0, todayTotal: 0, todayPaid: 0, todayDue: 0, yesterdayTotal: 0, lastSaleAt: null,
       statuses: { paid: 0, partial: 0, unpaid: 0 }, hourly: [], recentSales: [], topProducts: [], locations: [],
@@ -128,11 +137,15 @@ export default {
       if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
       return `${Math.floor(seconds / 3600)}h ago`;
     },
-    shortHour(hour) { return hour % 3 === 0 ? String(hour).padStart(2, '0') : ''; },
     hourName(hour) { return `${String(hour).padStart(2, '0')}:00`; },
-    barHeight(count) { const max = Math.max(1, ...this.hourly.map(item => Number(item.count || 0))); return Math.max(count ? 8 : 2, Number(count || 0) / max * 100); },
+    svgBarHeight(count) { const max = Math.max(1, ...this.hourly.map(item => Number(item.count || 0))); return count ? Math.max(6, Number(count) / max * 165) : 3; },
+    svgBarY(count) { return 198 - this.svgBarHeight(count); },
     productWidth(product) { const max = Math.max(1, ...this.topProducts.map(item => Number(item.quantity || 0))); return Math.max(5, Number(product.quantity || 0) / max * 100); },
     saleTime(date) { return date ? new Date(date).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) : '—'; },
+    toggleTheme() {
+      this.theme = this.theme === 'dark' ? 'light' : 'dark';
+      try { localStorage.setItem('rtsd_theme', this.theme); } catch (e) { /* storage may be blocked */ }
+    },
     async fetchData() {
       if (this.fetching) return;
       this.fetching = true;
@@ -194,4 +207,116 @@ main{padding:clamp(16px,1.6vw,28px) clamp(22px,2.4vw,44px) 32px}.kpis{display:gr
 @media(max-width:1000px){.kpis{grid-template-columns:repeat(2,1fr)}.top-grid,.bottom-grid{grid-template-columns:1fr}.chart{height:220px}}
 @media(max-width:620px){header{height:76px;padding:11px 14px}.logo{width:44px;height:44px}.brand h1{font-size:17px}.brand p,.live,.clock span{display:none}.clock strong{font-size:17px}main{padding:12px}.kpis{gap:9px}.kpis article{padding:13px;gap:10px}.kpi-icon{width:34px;height:34px}.kpis strong{font-size:17px}.payment-strip{gap:12px;overflow-x:auto}.payment-strip .due{padding-left:12px}.payment-strip .updated{display:none}.panel{padding:14px}.chart{height:170px}}
 @media(prefers-reduced-motion:reduce){.bar,.bump,.loading i{animation:none;transition:none}}
+
+/* Match the authenticated Real-time Sales Counter: light Ant-style cards by
+   default, with the same purple chart accent. Dark is an explicit choice. */
+.display-shell {
+  --bg:#f5f5f7; --panel:#fff; --solid:#fff; --line:#ededf2;
+  --text:#1f1f2c; --muted:#8c8c9c; --orange:#6d28d9;
+  color:var(--text);
+  background:var(--bg);
+}
+.display-shell.dark {
+  --bg:#0b1220; --panel:#111c2e; --solid:#111c2e; --line:rgba(148,163,184,.17);
+  --text:#f5f7fb; --muted:#98a6ba; --orange:#8b6cf0;
+  background:#0b1220;
+}
+header {
+  height:76px;
+  border-bottom-color:var(--line);
+  background:rgba(255,255,255,.96);
+  box-shadow:0 1px 3px rgba(15,23,42,.04);
+}
+.dark header { background:rgba(12,20,34,.96); }
+.logo { width:46px;height:46px;border-color:var(--line);border-radius:10px;background:#fafafa; }
+.dark .logo { background:rgba(255,255,255,.06); }
+.brand h1 { font-size:20px;font-weight:650; }
+.brand p { color:var(--muted);font-size:12px; }
+.clock strong { color:var(--text);font-size:19px; }
+.theme-toggle {
+  width:34px;height:34px;padding:0;display:grid;place-items:center;border:1px solid var(--line);
+  border-radius:7px;color:#595969;background:var(--panel);cursor:pointer;
+}
+.dark .theme-toggle { color:#d8deea; }
+.theme-toggle:hover { border-color:#6d28d9;color:#6d28d9; }
+.theme-toggle svg { width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round; }
+.live { color:#389e0d;border-color:#b7eb8f;background:#f6ffed; }
+.live i { background:#52c41a;box-shadow:0 0 0 4px rgba(82,196,26,.12); }
+.dark .live { color:#6ee7b7;border-color:rgba(52,211,153,.24);background:rgba(16,185,129,.08); }
+main { padding:20px clamp(20px,2vw,32px) 28px; }
+.kpis { gap:16px; }
+.kpis article,.panel,.payment-strip {
+  border-color:var(--line);border-radius:8px;background:var(--panel);
+  box-shadow:0 1px 2px rgba(15,23,42,.025);
+}
+.kpis article { min-height:104px;padding:18px 20px; }
+.kpis article>div { min-width:0;width:100%; }
+.kpis p { margin-bottom:9px;color:rgba(0,0,0,.45);font-size:13px; }
+.dark .kpis p { color:var(--muted); }
+.kpis strong { color:var(--text);font-size:clamp(22px,1.7vw,30px);font-weight:600; }
+.kpis small { margin-top:7px;color:#52c41a;font-size:12px; }
+.kpis small.down { color:#ff4d4f; }
+.payment-strip { min-height:52px;padding:12px 18px; }
+.payment-strip>div { font-size:13px; }
+.payment-strip strong { font-size:14px; }
+.payment-strip .due strong { color:#6d28d9; }
+.payment-strip .updated { font-size:12px; }
+.top-grid,.bottom-grid { grid-template-columns:minmax(0,14fr) minmax(340px,10fr); }
+.panel { padding:20px; }
+.panel-title { min-height:28px;margin-bottom:16px;align-items:center; }
+.panel-title h2 { color:var(--text);font-size:16px;font-weight:600;letter-spacing:0; }
+.panel-title>span { color:var(--muted);font-size:12px; }
+.chart {
+  height:260px;padding:0;border:0;display:block;
+  background-image:linear-gradient(to bottom,transparent calc(100% - 1px),var(--line) 1px);
+}
+.chart svg { width:100%;height:100%;overflow:visible; }
+.grid-line { stroke:var(--line);stroke-width:1;stroke-dasharray:4 5; }
+.chart-bar { fill:#6d28d9; }
+.dark .chart-bar { fill:#8b6cf0; }
+.bar-label { fill:var(--muted);font-size:10px;font-weight:600; }
+.axis-label { fill:var(--muted);font-size:10px; }
+.product { min-height:47px;padding:10px 2px; }
+.product>b { font-size:12px; }
+.product div>strong { color:var(--text);font-size:13px;font-weight:500; }
+.product div>span { height:6px;margin-top:8px; }
+.product div i { background:#6d28d9; }
+.product p strong { color:var(--text);font-size:13px; }
+.product p small { font-size:11px; }
+.tr {
+  min-width:720px;min-height:48px;padding:9px 4px;gap:14px;
+  color:var(--text);font-size:13px;
+}
+.tr.th {
+  min-height:38px;color:var(--muted);font-size:11px;font-weight:600;
+  letter-spacing:.025em;text-transform:none;
+}
+.tr>strong { font-weight:600; }
+.status { padding:4px 9px;font-size:11px;font-weight:600; }
+.status.paid { color:#389e0d;background:#f6ffed; }
+.status.partial { color:#d48806;background:#fffbe6; }
+.status.unpaid { color:#cf1322;background:#fff1f0; }
+.dark .status.paid { color:#6ee7b7;background:rgba(16,185,129,.12); }
+.dark .status.partial { color:#fde68a;background:rgba(245,158,11,.12); }
+.dark .status.unpaid { color:#fca5a5;background:rgba(239,68,68,.12); }
+.location { min-height:62px;padding:12px 3px;grid-template-columns:28px minmax(0,1fr) auto; }
+.location>span { color:#6d28d9;font-size:12px; }
+.location div strong { color:var(--text);font-size:14px;font-weight:600; }
+.location small { margin-top:5px;font-size:12px; }
+.location>b { color:var(--text);font-size:14px;font-weight:600; }
+.empty { font-size:13px; }
+@media(max-width:1000px){
+  .top-grid,.bottom-grid{grid-template-columns:1fr}
+  .chart{height:250px}
+}
+@media(max-width:620px){
+  header{height:68px}
+  main{padding:12px}
+  .kpis article{min-height:90px;padding:14px}
+  .kpis strong{font-size:19px}
+  .panel{padding:15px}
+  .chart{height:210px;overflow-x:auto}
+  .chart svg{min-width:760px}
+  .theme-toggle{width:32px;height:32px}
+}
 </style>
