@@ -79,7 +79,11 @@ class PdfTemplate extends Model
     public const LAYOUTS = [
         'sale' => [
             'classic' => 'Classic',
-            'modern' => 'Modern (with Shipping Label)',
+            // Build N3: was "Modern (with Shipping Label)" — stale even
+            // before this rename, since Build M5 removed the embedded
+            // shipping-label section from this layout; the standalone
+            // Shipping Label PDF (shipping_label.blade.php) is unaffected.
+            'modern' => 'Modern',
         ],
     ];
 

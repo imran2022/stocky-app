@@ -135,9 +135,16 @@
           <div class="inv-box">
             <div class="inv-box-title">{{ $t('Company') }}</div>
             <div class="inv-box-name">{{ company.CompanyName }}</div>
+            <!-- Standard company header order (Build K1/M5): Name / Address /
+                 VAT-BIN / Phone / Mail / Website — this box previously left
+                 out VAT/BIN and Website entirely and ordered Phone/Email
+                 ahead of Address, unlike every PDF and the public invoice
+                 page. -->
+            <div v-if="company.CompanyAdress">{{ $t('Adress') }}: {{ company.CompanyAdress }}</div>
+            <div v-if="company.vat_number">VAT/BIN: {{ company.vat_number }}</div>
             <div v-if="company.CompanyPhone">{{ $t('Phone') }}: {{ company.CompanyPhone }}</div>
             <div v-if="company.email">{{ $t('Email') }}: {{ company.email }}</div>
-            <div v-if="company.CompanyAdress">{{ $t('Adress') }}: {{ company.CompanyAdress }}</div>
+            <div v-if="company.website">Website: {{ company.website }}</div>
           </div>
         </a-col>
       </a-row>

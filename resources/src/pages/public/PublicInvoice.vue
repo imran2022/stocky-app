@@ -46,6 +46,7 @@
         <table>
           <thead>
             <tr>
+              <th class="col-seq">#</th>
               <th class="col-item">Item</th>
               <th class="col-num">Price</th>
               <th class="col-num" v-if="data.enable_box_qty">Box</th>
@@ -57,6 +58,7 @@
           </thead>
           <tbody>
             <tr v-for="(item, i) in data.items" :key="i">
+              <td class="col-seq">{{ i + 1 }}</td>
               <td class="col-item">
                 <div class="item-name">{{ item.name }}</div>
                 <div class="item-code" v-if="item.code">{{ item.code }}</div>
@@ -324,8 +326,9 @@ onMounted(async () => {
 }
 
 .bill-to-label {
-  font-size: 11px;
-  color: #94A3B8;
+  font-size: 12px;
+  color: #334155;
+  font-weight: 700;
   letter-spacing: 0.04em;
   margin-bottom: 6px;
 }
@@ -355,19 +358,31 @@ table {
 thead th {
   text-align: left;
   font-size: 11px;
-  color: #94A3B8;
+  color: #475569;
+  font-weight: 700;
   letter-spacing: 0.04em;
-  padding: 0 0 8px;
+  padding: 10px 10px;
+  background: #F1F5F9;
   border-bottom: 1px solid #E2E8F0;
 }
 
+thead th:first-child { border-top-left-radius: 6px; border-bottom-left-radius: 6px; }
+thead th:last-child { border-top-right-radius: 6px; border-bottom-right-radius: 6px; }
+
+.col-seq { width: 32px; text-align: center; }
 .col-num { text-align: right; }
 
 tbody td {
-  padding: 12px 0;
+  padding: 12px 10px;
   border-bottom: 1px solid #F1F5F9;
   font-size: 14px;
   vertical-align: top;
+}
+
+td.col-seq {
+  text-align: center;
+  color: #94A3B8;
+  font-variant-numeric: tabular-nums;
 }
 
 tbody td.col-num {

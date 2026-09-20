@@ -4234,3 +4234,127 @@ compiled-frontend-asset failures as Build N1a, unrelated to this build).
   this build's own verification pass but outside the audit's explicit
   High-severity list and this build's stated scope. Recommended as a
   further follow-up if/when those flows matter for this deployment.
+
+## Build N3 — User-Reported Bugs After Build N2 (2026-09-20)
+
+Seven items reported by the client (with screenshots) right after applying
+Build N2. None of these came from the third-party audit — all are direct
+usage feedback.
+
+### 1. Public invoice "Download PDF" started returning 403 (regression)
+
+**Root cause:** Build N1a's C-05 security fix added a `'view'` policy
+check inside `SalesController::Sale_PDF()`. That method is not only hit
+via the authenticated `sale_pdf/{id}` route — `PublicInvoiceController::
+pdf()` (the public, unguessable-token download used by the "Download PDF"
+button on the customer-facing invoice page) also calls `Sale_PDF()`
+**in-process**, so the same policy check silently started running there
+too, with no logged-in user to satisfy it.
+
+**Fix:** `PublicInvoiceController::pdf()` now sets a
+`publicly_authorized_via_token` attribute on the request after its own
+token lookup (`findByToken()`) has already confirmed the sale belongs to
+this link. `Sale_PDF()` checks that attribute and skips the redundant
+policy check only when it's present — every other caller (including the
+direct `sale_pdf/{id}` route) is authorized exactly as before.
+
+**A general pattern worth remembering:** any time one controller calls
+another controller's method in-process (not over HTTP), an authorization
+check later added to the callee can silently start applying to callers
+that were never meant to need it. Worth checking for at any other
+same-process controller-to-controller call in this app.
+
+### 2. Public invoice page styling
+
+`resources/src/pages/public/PublicInvoice.vue`: the "Billed to" label is
+now bold or (`font-weight: 700`, darker color); the item table header now
+has a light background with rounded outer corners; each line item now has
+a running serial number (`#`) column.
+
+### 3. Sale unit price — direct inline edit
+
+`resources/src/pages/sales/SaleForm.vue`'s line table "Net Unit Price"
+column was static text. It's now an `a-input-number` (mirroring
+`PurchaseForm.vue`'s existing "Net Cost" column pattern exactly): editing
+it sets the line's `Unit_price` (converted through the multi-currency
+doc/base helpers, same as Purchase) and recomputes discount/tax/subtotal
+via the existing `recomputeLine()`. The below-minimum-price warning
+already reads the recomputed `Net_price` reactively, so it keeps working
+unchanged.
+
+### 4. Company address block: missing fields, wrong order
+
+The authenticated Sale/Purchase/Quotation/Sale-Return/Purchase-Return
+Detail pages showed the company box as Name → Phone → Email → Address,
+with no VAT/BIN or Website — unlike every PDF (Builds K1/M5) and the
+public invoice page (Build L1), which all use Name / Address / VAT-BIN /
+Phone / Mail / Website. `company.vat_number` and `company.website` were
+already present in every one of these pages' own API response (the
+`Setting` model was never missing the columns) — they just weren't
+rendered. Reordered and added on all 5 pages to match the standard.
+
+### 5. Packing List PDF missing customer info + order meta
+
+`resources/views/pdf/packing_list.blade.php` showed only the customer
+name and date. Now also shows customer address/phone (when set) and a
+Warehouse / Order Status / Payment Status block, matching what the Sale
+Invoice PDF already shows. `SalesController::Sale_Packing_List()` now
+eager-loads the `warehouse` relation and passes `client_phone`,
+`client_adr`, `warehouse`, `statut`, `payment_status` into the view.
+
+### 6. Menu/report labels not human-readable
+
+`database/seeders/translations/en.php` had no entry at all for two keys
+`menu.js` references (`Zone_Courier_Report`, `PriceVarianceReport`) and
+was missing a third (`StockLookup`). Because `TranslationSeeder` only
+overwrites a key it actually has an entry for (and never touches a row
+flagged `is_customized` — see its own doc comment), whatever was already
+sitting in the live `translations` table for these — including any typo —
+could never be corrected by re-seeding. All three keys added with correct
+English text; verified by actually running `TranslationSeeder` against a
+real database and confirming the stored values. **If a translation still
+looks wrong after applying this build and re-seeding**, check Settings →
+Translations for that exact key — it likely has `is_customized = 1` (was
+hand-edited through the Translations UI at some point) and needs fixing
+there directly; re-seeding intentionally will not touch it.
+
+### 7. Invoice PDF template label
+
+`PdfTemplate::LAYOUTS['sale']['modern']` renamed from
+`"Modern (with Shipping Label)"` to plain `"Modern"` — the "(with
+Shipping Label)" part was already stale before this fix, since Build M5
+removed the embedded shipping-label section from that layout. This is the
+single source the System Settings dropdown is built from
+(`PdfTemplateController`), so no frontend change was needed.
+
+**Files touched:**
+- `app/Http/Controllers/SalesController.php` (`Sale_PDF()` flag check,
+  `Sale_Packing_List()` new fields).
+- `app/Http/Controllers/PublicInvoiceController.php` (`pdf()` sets the
+  flag).
+- `app/Models/PdfTemplate.php` (label rename).
+- `database/seeders/translations/en.php` (3 new/fixed keys).
+- `resources/views/pdf/packing_list.blade.php`.
+- `resources/src/pages/public/PublicInvoice.vue`.
+- `resources/src/pages/sales/SaleForm.vue`.
+- `resources/src/pages/sales/SaleDetails.vue`,
+  `resources/src/pages/purchases/PurchaseDetails.vue`,
+  `resources/src/pages/quotations/QuotationDetails.vue`,
+  `resources/src/pages/sale_return/SaleReturnDetails.vue`,
+  `resources/src/pages/purchase_return/PurchaseReturnDetails.vue`.
+- New: `tests/Regression/build_n3_bug_fixes.php`.
+
+**Verification:** real, DB-backed test (`build_n3_bug_fixes.php`) —
+(a) calls `PublicInvoiceController::pdf()` with no authenticated user and
+a real token and confirms a 200 with real `%PDF` content, while the
+direct `Sale_PDF()` call with no token-flag and no user still throws an
+authorization exception (C-05 still intact); (b) renders the real
+`packing_list` Blade view with a real Sale/Client/Warehouse and confirms
+the new fields actually appear in the output; (c) runs the real
+`TranslationSeeder` against the real database and confirms the 3 keys
+land with the correct values; (d) static source-contract checks for the
+Vue-only changes (styling, inline price edit, company-box field/order)
+where there's no server-side data to assert against, following the same
+pattern used since Build L1. Full cumulative regression suite (46 files)
+re-run afterward — no new failures (same 3 pre-existing
+compiled-frontend-asset failures, unrelated to this build).

@@ -3222,12 +3222,20 @@ class SalesController extends BaseController
         // Security fix (Build N1 / audit C-05)
         $this->authorizeForUser($request->user('api'), 'view', Sale::class);
 
-        $sale_data = Sale::with('details.product')->where('deleted_at', '=', null)->findOrFail($id);
+        $sale_data = Sale::with('details.product', 'warehouse')->where('deleted_at', '=', null)->findOrFail($id);
 
         $sale = [
             'Ref' => $sale_data->Ref,
             'date' => $sale_data->date.' '.$sale_data->time,
             'client_name' => $sale_data->client->name,
+            // Customer address/phone + Warehouse/Order Status/Payment Status
+            // (Build N3) — same fields the Sale Invoice PDF shows, added here
+            // so the Packing List carries the same delivery-relevant info.
+            'client_phone' => $sale_data->client->phone,
+            'client_adr' => $sale_data->client->adresse,
+            'warehouse' => optional($sale_data->warehouse)->name,
+            'statut' => $sale_data->statut,
+            'payment_status' => $sale_data->payment_statut,
         ];
 
         $details = [];
@@ -3279,8 +3287,19 @@ class SalesController extends BaseController
 
     public function Sale_PDF(Request $request, $id)
     {
-        // Security fix (Build N1 / audit C-05)
-        $this->authorizeForUser($request->user('api'), 'view', Sale::class);
+        // Security fix (Build N1 / audit C-05) — skipped only when the
+        // caller has already been authorized a different way: the public,
+        // unguessable-token invoice link (PublicInvoiceController::pdf())
+        // calls this method in-process and sets
+        // 'publicly_authorized_via_token' after its own token lookup
+        // already confirmed the sale. Regression fixed in Build N3: this
+        // bypass didn't exist when C-05 first shipped, so the public
+        // "Download PDF" button on the token-based invoice page started
+        // returning 403 for anonymous visitors — exactly the flow this
+        // route is meant to stay open for.
+        if (! $request->attributes->get('publicly_authorized_via_token')) {
+            $this->authorizeForUser($request->user('api'), 'view', Sale::class);
+        }
 
         $details = [];
         $helpers = new helpers;

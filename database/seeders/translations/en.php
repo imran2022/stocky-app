@@ -318,6 +318,12 @@ return [
 'WarehouseStockChart' => 'Warehouse Stock Chart',
 'SalesReport' => 'Sales Report',
 'Invoice_Receivables_Report' => 'Invoice Receivables Report',
+// Build N3: these two keys were missing from this file entirely (menu.js
+// references them, but with nothing here to seed, whatever ended up in the
+// live translations table — including any typo — was never corrected by a
+// reseed). Adding them here so `TranslationSeeder` upserts the correct text.
+'Zone_Courier_Report' => 'Zone Courier Report',
+'PriceVarianceReport' => 'Price Variance Report',
 'AI_Reports' => 'AI Reports',
 'PurchasesReport' => 'Purchases Report',
 'CustomersReport' => 'Customers Report',
@@ -342,6 +348,10 @@ return [
 'dashboard' => 'Dashboard',
 'Products' => 'Products',
 'productsList' => 'All Products',
+// Build N3: menu.js references this key but it had no entry here, so it
+// rendered as the raw key "StockLookup" whenever a viewer had no cached
+// translation for it.
+'StockLookup' => 'Stock Lookup',
 'ProductManagement' => 'Product Management',
 'ProductQuantityAlerts' => 'Product Quantity Alerts',
 'CodeProduct' => 'Code Product',

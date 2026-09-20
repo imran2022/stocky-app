@@ -117,7 +117,15 @@
                 {{ $t('Price_below_min_not_allowed') }}
               </div>
             </template>
-            <template v-else-if="column.key === 'net_price'">{{ docMoney(record.Net_price) }}</template>
+            <template v-else-if="column.key === 'net_price'">
+              <a-input-number
+                :value="toDocAmt(record.Unit_price)"
+                :min="0"
+                :precision="2"
+                style="width: 110px"
+                @update:value="v => setUnitPrice(record, v)"
+              />
+            </template>
             <template v-else-if="column.key === 'box_qty'">
               <a-input-number
                 :value="record.box_qty"
@@ -1073,6 +1081,22 @@ function setQty(line, value) {
     }
   }
   line.quantity = qty;
+  recomputeLine(line);
+}
+
+// Direct inline price edit on the line table (mirrors PurchaseForm.vue's
+// setUnitCost) — lets a user fix the unit price without opening the full
+// line-edit modal. Bound to the 'net_price' column: legacy names that
+// column "Net Unit Price" but, exactly like Purchase's own 'net_cost'
+// column, the input actually edits the underlying Unit_price — discount/tax
+// are then reapplied on top by recomputeLine() to get the true net price.
+// The below-minimum-price warning (hasMinPriceViolation / the per-row
+// warning under the product cell) reads Net_price reactively, so it updates
+// automatically here too — no separate check needed.
+function setUnitPrice(line, value) {
+  let docPrice = Number(value);
+  if (Number.isNaN(docPrice) || docPrice < 0) docPrice = 0;
+  line.Unit_price = toBaseAmt(docPrice);
   recomputeLine(line);
 }
 

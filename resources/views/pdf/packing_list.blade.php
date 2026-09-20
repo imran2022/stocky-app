@@ -101,18 +101,49 @@
 
 <div style="height: 1px; background: #f1f5f9; margin-bottom: 12px;"></div>
 
+{{--
+    Customer address/phone + Warehouse/Order Status/Payment Status
+    (Build N3) — same fields and layout the Modern Sale Invoice's header
+    shows, added here per feedback that the Packing List should carry the
+    same delivery-relevant info.
+--}}
 <table style="margin-bottom: 15px;">
     <tr>
         <td style="width: 50%; vertical-align: top;">
             <span class="label">Customer</span>
             <div style="font-size: 9.5pt; font-weight: bold; color: #1e293b;">{{ $sale['client_name'] }}</div>
+            @if(!empty($sale['client_adr']))
+            <div style="font-size: 8.5pt; color: #64748b; margin-top: 2px;">{{ $sale['client_adr'] }}</div>
+            @endif
+            @if(!empty($sale['client_phone']))
+            <div style="font-size: 8.5pt; color: #64748b;">{{ $sale['client_phone'] }}</div>
+            @endif
         </td>
         <td style="width: 50%; vertical-align: top; text-align: right;">
             <span class="label">Date</span>
-            <div style="font-size: 9.5pt; font-weight: bold; color: #1e293b;">{{ $sale['date'] }}</div>
+            <div style="font-size: 9.5pt; font-weight: bold; color: #1e293b; margin-bottom: 3px;">{{ $sale['date'] }}</div>
+            @if(!empty($sale['statut']))
+            <div style="font-size: 8.5pt; font-weight: bold; color: #64748b; margin-bottom: 2px;">
+                Order Status: <span style="color: #0f172a; text-transform: capitalize;">{{ $sale['statut'] }}</span>
+            </div>
+            @endif
+            @if(!empty($sale['payment_status']))
+            <div style="font-size: 8.5pt; font-weight: bold; color: #64748b;">
+                Payment Status: <span style="color: #2563eb; text-transform: uppercase;">{{ $sale['payment_status'] }}</span>
+            </div>
+            @endif
         </td>
     </tr>
 </table>
+
+@if(!empty($sale['warehouse']))
+<div style="margin-bottom: 15px; border: 1px solid #e2e8f0; border-radius: 6px; padding: 7px 12px; background: #f8fafc; page-break-inside: avoid;">
+    <span class="label" style="margin-bottom: 3px;">Delivery Info</span>
+    <div style="font-size: 8.5pt; color: #64748b;">
+        <strong style="color: #1e293b;">Warehouse:</strong> {{ $sale['warehouse'] }}
+    </div>
+</div>
+@endif
 
 <table class="product-table" style="margin-bottom: 15px;">
     <thead>

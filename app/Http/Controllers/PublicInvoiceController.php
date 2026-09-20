@@ -244,6 +244,18 @@ class PublicInvoiceController extends BaseController
 
         $request->merge(['inline' => true]);
 
+        // Regression fix (Build N3): Build N1a's C-05 fix added a 'view'
+        // policy check to SalesController::Sale_PDF() to stop the
+        // SEQUENTIAL-ID route (sale_pdf/{id}) from being guessed by an
+        // anonymous visitor. This route is different — access is already
+        // gated by the unguessable public_token looked up in
+        // findByToken() above — but because this calls Sale_PDF()
+        // in-process, that same policy check was also (wrongly) applied
+        // here, with no logged-in user to satisfy it, so the "Download
+        // PDF" button on the public invoice page started returning 403.
+        // This flag tells Sale_PDF() authorization was already handled.
+        $request->attributes->set('publicly_authorized_via_token', true);
+
         return app(SalesController::class)->Sale_PDF($request, $sale->id);
     }
 

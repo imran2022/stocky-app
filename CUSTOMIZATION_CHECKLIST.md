@@ -2074,3 +2074,40 @@ regression-suite exit-code masking (H-05), npm dependency upgrades
 (H-08), soft-delete audit trail depth (H-09), and the same stock-locking
 pattern in PurchasesReturnController/SalesReturnController (found during
 this build but outside its stated scope).
+
+## Build N3 — User-Reported Bugs After Build N2
+
+**How to verify:**
+- [ ] Open a sale's public invoice link (Sale Detail → generate/copy
+      public link) in a private/incognito browser window (no login) and
+      click "Download PDF" — it should download a real PDF, not show a
+      403 error.
+- [ ] The direct `/sale_pdf/{id}` link should still require login (this
+      must NOT have re-opened).
+- [ ] On the same public invoice page: "Billed to" is bold, the item
+      table header has a shaded background, and each item row shows a
+      serial number (1, 2, 3, ...).
+- [ ] Create or edit a Sale — the "Net Unit Price" column in the line
+      table should be directly editable (like Purchase's "Net Cost"
+      column already is), and discount/tax/subtotal should recompute
+      when it's changed.
+- [ ] Open a Sale/Purchase/Quotation/Sale Return/Purchase Return Detail
+      page — the "Company" box should show Name, Address, VAT/BIN (if
+      set), Phone, Email, Website (if set), in that order.
+- [ ] Download a Packing List PDF for a sale whose client has an address
+      and phone — both should appear, along with Warehouse, Order Status,
+      and Payment Status.
+- [ ] After applying this build, run `php artisan db:seed --class=Database\Seeders\TranslationSeeder`
+      — the "Zone Courier Report", "Price Variance Report", and "Stock
+      Lookup" menu items should read correctly. If any of the three still
+      look wrong afterward, check Settings → Translations for that exact
+      key — it may have been hand-customized there, which the seeder
+      intentionally never overwrites.
+- [ ] System Settings → Invoice PDF → template dropdown should say
+      "Modern", not "Modern (with Shipping Label)".
+
+**Regression test:** `tests/Regression/build_n3_bug_fixes.php`.
+
+**Migration:** none — this build is code + one translation-seeder run
+only. `php artisan db:seed --class=Database\Seeders\TranslationSeeder`
+should still be run once to correct the 3 translation keys.
