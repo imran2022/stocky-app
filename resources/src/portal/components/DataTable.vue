@@ -4,8 +4,8 @@
     carries the title and the filter form (search, selects, page length), a
     card-table, and the pagination in the card footer.
   -->
-  <div class="card">
-    <div class="card-header d-block">
+  <div class="card pc-data-card">
+    <div class="card-header d-block pc-data-card-header">
       <div class="d-flex flex-wrap align-items-center gap-2">
         <h3 class="card-title mb-0">{{ title }}</h3>
         <span v-if="totalRows" class="badge bg-secondary-lt">{{ totalRows }}</span>
@@ -48,7 +48,7 @@
 
     <div v-else class="pc-desktop-table table-responsive" :class="{ 'pc-table-loading': loading, 'has-mobile-cards': !!$slots['mobile-card'] }">
       <div v-if="loading" class="pc-table-spinner"><div class="spinner-border text-primary" role="status"></div></div>
-      <table class="table card-table table-vcenter table-mobile-md">
+      <table class="table card-table table-vcenter table-mobile-md pc-data-grid">
         <thead>
           <tr>
             <th v-for="col in columns" :key="col.key" :class="[col.class, col.numeric ? 'text-end' : '']" :style="col.width ? { width: col.width } : null">
@@ -81,7 +81,7 @@
       <slot v-for="(row, i) in rows" name="mobile-card" :row="row" :index="i" :key="rowKeyOf(row, i)" />
     </div>
 
-    <div class="card-footer d-flex flex-wrap align-items-center gap-2">
+    <div class="card-footer d-flex flex-wrap align-items-center gap-2 pc-data-card-footer">
       <p class="m-0 text-secondary">{{ rangeText }}</p>
       <ul class="pagination m-0 ms-auto">
         <li class="page-item" :class="{ disabled: state.page <= 1 || loading }">

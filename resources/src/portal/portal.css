@@ -4479,3 +4479,304 @@ body.rst-app {
     .pc-activity-row > .ti-chevron-right { display: none; }
     .pc-statement-filters { grid-template-columns: 1fr; }
 }
+
+/* =========================================================================
+   Client Portal desktop polish — Phase 2
+   ========================================================================= */
+
+.pc-dashboard-hero {
+    position: relative;
+    isolation: isolate;
+    grid-template-columns: minmax(0, 1fr) minmax(19rem, 25rem);
+    align-items: stretch;
+    gap: 1.5rem;
+    min-height: 15.5rem;
+    margin-bottom: 1.25rem;
+    padding: 2rem;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--tblr-border-color));
+    border-radius: calc(var(--rst-radius) + 0.25rem);
+    background:
+        radial-gradient(circle at 8% 0%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 34%),
+        linear-gradient(135deg, color-mix(in srgb, var(--tblr-bg-surface) 94%, var(--accent)), var(--tblr-bg-surface));
+    box-shadow: 0 16px 42px rgb(15 23 42 / 0.07);
+}
+
+.pc-dashboard-hero::after {
+    position: absolute;
+    z-index: -1;
+    width: 18rem;
+    height: 18rem;
+    inset-inline-end: 18rem;
+    bottom: -12rem;
+    border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
+    border-radius: 50%;
+    content: '';
+}
+
+.pc-dashboard-hero-copy {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+}
+
+.pc-dashboard-kicker {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.8rem;
+    color: var(--accent);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.pc-dashboard-hero h1 {
+    max-width: 44rem;
+    margin: 0;
+    font-size: clamp(1.8rem, 3vw, 2.7rem);
+    line-height: 1.1;
+    letter-spacing: -0.035em;
+}
+
+.pc-dashboard-hero-copy > p {
+    margin: 0.65rem 0 1.35rem;
+    color: var(--tblr-secondary-color);
+    font-size: 0.9375rem;
+}
+
+.pc-dashboard-quick-actions { display: flex; flex-wrap: wrap; gap: 0.65rem; }
+
+.pc-dashboard-hero-due {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    justify-content: center;
+    padding: 1.5rem;
+    border: 1px solid color-mix(in srgb, var(--tblr-danger) 26%, var(--tblr-border-color));
+    border-radius: var(--rst-radius);
+    background: color-mix(in srgb, var(--tblr-danger) 5%, var(--tblr-bg-surface));
+    box-shadow: 0 12px 30px rgb(15 23 42 / 0.08);
+}
+
+.pc-dashboard-hero-due.is-clear {
+    border-color: color-mix(in srgb, var(--tblr-success) 28%, var(--tblr-border-color));
+    background: color-mix(in srgb, var(--tblr-success) 5%, var(--tblr-bg-surface));
+}
+
+.pc-dashboard-hero-due-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: var(--tblr-secondary-color);
+    font-size: 0.8125rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.pc-dashboard-hero-due-icon {
+    display: grid;
+    width: 2.3rem;
+    height: 2.3rem;
+    place-items: center;
+    border-radius: 0.7rem;
+    background: color-mix(in srgb, var(--tblr-danger) 12%, transparent);
+    color: var(--tblr-danger);
+    font-size: 1.2rem;
+}
+
+.pc-dashboard-hero-due.is-clear .pc-dashboard-hero-due-icon {
+    background: color-mix(in srgb, var(--tblr-success) 12%, transparent);
+    color: var(--tblr-success);
+}
+
+.pc-dashboard-hero-due > strong {
+    margin-top: 0.35rem;
+    font-size: clamp(1.75rem, 3vw, 2.5rem);
+    line-height: 1.1;
+    letter-spacing: -0.035em;
+    font-variant-numeric: tabular-nums;
+}
+
+.pc-dashboard-hero-due > small { margin-top: 0.45rem; color: var(--tblr-secondary-color); }
+.pc-dashboard-due-link,
+.pc-dashboard-due-clear {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    align-self: flex-start;
+    margin-top: 1.25rem;
+    font-size: 0.8125rem;
+    font-weight: 700;
+}
+.pc-dashboard-due-clear { color: var(--tblr-success); }
+
+.pc-dashboard-stats > div .card {
+    position: relative;
+    overflow: hidden;
+    border-color: color-mix(in srgb, var(--accent) 12%, var(--tblr-border-color));
+    border-radius: var(--rst-radius);
+    box-shadow: 0 8px 26px rgb(15 23 42 / 0.045);
+    transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.pc-dashboard-stats > div .card::after {
+    position: absolute;
+    inset-inline: 0;
+    bottom: 0;
+    height: 3px;
+    background: var(--accent);
+    content: '';
+    opacity: 0.7;
+}
+
+.pc-dashboard-stats > div:nth-child(2) .card::after { background: var(--tblr-blue); }
+.pc-dashboard-stats > div:nth-child(3) .card::after { background: var(--tblr-teal); }
+.pc-dashboard-stats > div:nth-child(4) .card::after { background: var(--tblr-success); }
+.pc-dashboard-stats .h2 { letter-spacing: -0.025em; font-variant-numeric: tabular-nums; }
+
+.pc-dashboard-panel,
+.pc-data-card,
+.pc-invoice-overview,
+.pc-invoice-items,
+.pc-payment-summary {
+    border-color: color-mix(in srgb, var(--accent) 9%, var(--tblr-border-color));
+    border-radius: var(--rst-radius);
+    box-shadow: 0 8px 28px rgb(15 23 42 / 0.045);
+}
+
+.pc-dashboard-panel { overflow: hidden; }
+.pc-dashboard-panel > .card-header,
+.pc-data-card-header,
+.pc-invoice-items > .card-header,
+.pc-payment-summary > .card-header {
+    min-height: 4.25rem;
+    border-bottom-color: color-mix(in srgb, var(--accent) 8%, var(--tblr-border-color));
+    background: linear-gradient(180deg, color-mix(in srgb, var(--tblr-bg-surface) 96%, var(--accent)), var(--tblr-bg-surface));
+}
+
+.pc-dashboard-panel .card-title,
+.pc-data-card .card-title,
+.pc-invoice-items .card-title,
+.pc-payment-summary .card-title { font-weight: 700; letter-spacing: -0.01em; }
+
+.pc-attention-card { border-inline-start-width: 3px !important; border-radius: var(--rst-radius); }
+
+.pc-live-row { min-height: 4.3rem; border-color: var(--tblr-border-color); }
+.pc-live-icon {
+    display: grid;
+    width: 2.5rem;
+    height: 2.5rem;
+    flex: 0 0 auto;
+    place-items: center;
+    border-radius: 0.7rem;
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    color: var(--accent);
+    font-size: 1.15rem;
+}
+.pc-live-row:hover .pc-live-icon { background: var(--accent); color: #fff; }
+
+.pc-invoice-reference { display: inline-flex; align-items: center; gap: 0.65rem; }
+.pc-invoice-reference-icon {
+    display: grid;
+    width: 2.25rem;
+    height: 2.25rem;
+    flex: 0 0 auto;
+    place-items: center;
+    border-radius: 0.6rem;
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    color: var(--accent);
+}
+.pc-invoice-reference strong,
+.pc-invoice-reference small { display: block; }
+.pc-invoice-reference small { color: var(--tblr-secondary-color); font-size: 0.6875rem; }
+
+/* Modern desktop data grids without changing server-side table behavior. */
+.pc-data-card { overflow: hidden; }
+.pc-data-card-header { padding-block: 1rem; }
+.pc-data-grid { margin-bottom: 0; }
+.pc-data-grid thead th,
+.pc-statement-desktop thead th {
+    padding-block: 0.8rem;
+    border-bottom-width: 1px;
+    background: var(--tblr-bg-surface-secondary);
+    color: var(--tblr-secondary-color);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.055em;
+    text-transform: uppercase;
+}
+.pc-data-grid tbody td,
+.pc-statement-desktop tbody td { padding-block: 0.9rem; }
+.pc-data-grid tbody tr,
+.pc-statement-desktop tbody tr { transition: background-color 140ms ease; }
+.pc-data-grid tbody tr:hover,
+.pc-statement-desktop tbody tr:hover { background: color-mix(in srgb, var(--accent) 4%, transparent); }
+.pc-data-grid .rst-row-actions a {
+    display: grid;
+    width: 2rem;
+    height: 2rem;
+    place-items: center;
+    border: 1px solid var(--tblr-border-color);
+    border-radius: 0.5rem;
+    background: var(--tblr-bg-surface);
+}
+.pc-data-grid .rst-row-actions a:hover { border-color: color-mix(in srgb, var(--accent) 35%, var(--tblr-border-color)); background: color-mix(in srgb, var(--accent) 7%, var(--tblr-bg-surface)); }
+.pc-data-card-footer { min-height: 4rem; background: color-mix(in srgb, var(--tblr-bg-surface) 97%, var(--accent)); }
+
+/* Invoice detail desktop identity and hierarchy. */
+.pc-invoice-overview {
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    padding: 1.25rem 1.5rem;
+    border: 1px solid color-mix(in srgb, var(--accent) 14%, var(--tblr-border-color));
+    background:
+        linear-gradient(110deg, color-mix(in srgb, var(--accent) 7%, var(--tblr-bg-surface)), var(--tblr-bg-surface) 55%);
+}
+.pc-invoice-overview-mark {
+    display: grid;
+    width: 3.5rem;
+    height: 3.5rem;
+    flex: 0 0 auto;
+    place-items: center;
+    border-radius: 0.9rem;
+    background: var(--accent);
+    color: #fff;
+    box-shadow: 0 10px 24px color-mix(in srgb, var(--accent) 25%, transparent);
+    font-size: 1.6rem;
+}
+.pc-invoice-overview-copy { min-width: 0; }
+.pc-invoice-overview-copy h1 { margin: 0.1rem 0 0.35rem; font-size: 1.65rem; letter-spacing: -0.025em; }
+.pc-invoice-overview-meta { display: flex; flex-wrap: wrap; gap: 1rem; color: var(--tblr-secondary-color); font-size: 0.8125rem; }
+.pc-invoice-overview-meta span { display: inline-flex; align-items: center; gap: 0.35rem; }
+.pc-invoice-overview-status { display: flex; align-items: center; gap: 0.8rem; margin-inline-start: auto; }
+.pc-payment-summary .card-body { padding: 1.25rem; }
+.pc-summary-list .pc-summary-due { margin-inline: -1.25rem; margin-bottom: -1.25rem; padding: 1rem 1.25rem; background: color-mix(in srgb, var(--tblr-danger) 5%, var(--tblr-bg-surface)); }
+.pc-summary-list .pc-summary-due dd { font-size: 1.25rem; }
+
+@media (min-width: 992px) {
+    .pc-dashboard-stats > div .card:hover {
+        transform: translateY(-2px);
+        border-color: color-mix(in srgb, var(--accent) 26%, var(--tblr-border-color));
+        box-shadow: 0 14px 34px rgb(15 23 42 / 0.08);
+    }
+}
+
+@media (min-width: 768px) and (max-width: 1199.98px) {
+    .pc-dashboard-hero { grid-template-columns: minmax(0, 1fr) minmax(18rem, 21rem); padding: 1.5rem; }
+    .pc-dashboard-hero h1 { font-size: 2rem; }
+}
+
+@media (max-width: 767.98px) {
+    .pc-dashboard-panel,
+    .pc-data-card,
+    .pc-invoice-items,
+    .pc-payment-summary { box-shadow: none; }
+    .pc-data-card-header { min-height: auto; }
+    .pc-summary-list .pc-summary-due { margin-inline: -1rem; margin-bottom: -1rem; padding-inline: 1rem; }
+}

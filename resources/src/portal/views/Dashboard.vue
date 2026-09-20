@@ -1,12 +1,36 @@
 <template>
-  <div>
+  <div class="pc-dashboard-page">
     <div v-if="loading" class="text-center py-6">
       <div class="spinner-border text-primary" role="status"></div>
       <div class="text-secondary mt-2">{{ $t('loading_dashboard') }}</div>
     </div>
 
     <template v-else>
-      <div class="mb-3">
+      <section class="pc-dashboard-hero d-none d-md-grid">
+        <div class="pc-dashboard-hero-copy">
+          <div class="pc-dashboard-kicker"><i class="ti ti-sparkles"></i>{{ tr('account_overview', 'Account overview') }}</div>
+          <h1>{{ greeting }}, {{ firstName || d.client.name }}</h1>
+          <p>{{ today }}</p>
+          <div class="pc-dashboard-quick-actions">
+            <router-link to="/invoices" class="btn btn-primary"><i class="ti ti-file-invoice me-1"></i>{{ $t('nav_invoices') }}</router-link>
+            <router-link to="/statement" class="btn btn-outline-secondary"><i class="ti ti-report-money me-1"></i>{{ $t('nav_statement') }}</router-link>
+          </div>
+        </div>
+        <div class="pc-dashboard-hero-due" :class="{ 'is-clear': !(Number(d.total_due) > 0) }">
+          <div class="pc-dashboard-hero-due-head">
+            <span>{{ $t('amount_due') }}</span>
+            <span class="pc-dashboard-hero-due-icon"><i :class="`ti ti-${Number(d.total_due) > 0 ? 'alert-circle' : 'circle-check'}`"></i></span>
+          </div>
+          <strong>{{ money(d.total_due) }}</strong>
+          <small>{{ dueSub }}</small>
+          <router-link v-if="Number(d.total_due) > 0" to="/invoices" class="pc-dashboard-due-link">
+            {{ tr('review_invoices', 'Review invoices') }} <i class="ti ti-arrow-right"></i>
+          </router-link>
+          <span v-else class="pc-dashboard-due-clear"><i class="ti ti-check"></i>{{ tr('account_up_to_date', 'Account is up to date') }}</span>
+        </div>
+      </section>
+
+      <div class="mb-3 d-md-none">
         <div class="h3 mb-0">{{ greeting }}, {{ firstName || d.client.name }}</div>
         <div class="text-secondary">{{ today }}</div>
       </div>
@@ -23,9 +47,8 @@
 
       <!-- ══ Headline figures ═══════════════════════════════════════ -->
       <div class="row row-deck row-cards mb-3 pc-dashboard-stats">
-        <div class="d-none d-sm-block col-sm-6 col-xl-3">
-          <StatCard :label="$t('amount_due')" :value="money(d.total_due)" icon="currency-dollar" :tone="Number(d.total_due) > 0 ? 'red' : 'primary'"
-            :sub="dueSub" />
+        <div class="col-6 col-sm-6 col-xl-3">
+          <StatCard :label="$t('total_paid')" :value="money(d.total_paid)" icon="wallet" tone="primary" :sub="tr('all_time', 'All time')" />
         </div>
         <div class="col-6 col-sm-6 col-xl-3">
           <StatCard :label="tr('invoiced_this_month', 'Invoiced this month')" :value="money(d.month.invoiced)" icon="receipt" tone="blue" :change="d.month.change_invoiced" :sub="d.month.label" />
@@ -40,9 +63,9 @@
       </div>
 
       <!-- ══ Needs attention ═════════════════════════════════════════ -->
-      <div v-if="d.alerts.length" class="row row-cards mb-3">
+      <div v-if="d.alerts.length" class="row row-cards mb-3 pc-dashboard-attention">
         <div v-for="(alert, i) in d.alerts" :key="i" class="col-md-6 col-xl-4">
-          <div class="card h-100" :class="`border-${alert.tone}`">
+          <div class="card h-100 pc-attention-card" :class="`border-${alert.tone}`">
             <div class="card-body">
               <div class="d-flex align-items-start gap-2 mb-2">
                 <i :class="`ti ti-${alert.icon} fs-2 text-${alert.tone}`"></i>
@@ -58,7 +81,7 @@
       <div class="row row-cards mb-3">
         <!-- ══ The trend ══════════════════════════════════════════════ -->
         <div class="col-xl-8">
-          <div class="card h-100">
+          <div class="card h-100 pc-dashboard-panel pc-trend-panel">
             <div class="card-header">
               <div>
                 <h3 class="card-title">{{ tr('invoiced_last_months', 'Invoiced, last {months} months', { months: d.by_month.length }) }}</h3>
@@ -86,13 +109,14 @@
 
         <!-- ══ Right now ══════════════════════════════════════════════ -->
         <div class="col-xl-4">
-          <div class="card h-100">
+          <div class="card h-100 pc-dashboard-panel pc-live-panel">
             <div class="card-header"><h3 class="card-title">{{ tr('right_now', 'Right now') }}</h3></div>
             <div class="list-group list-group-flush">
-              <router-link v-for="row in liveRows" :key="row.to" :to="row.to" class="list-group-item list-group-item-action d-flex align-items-center gap-3">
-                <i :class="`ti ti-${row.icon} fs-2 text-secondary`"></i>
+              <router-link v-for="row in liveRows" :key="row.to" :to="row.to" class="list-group-item list-group-item-action d-flex align-items-center gap-3 pc-live-row">
+                <span class="pc-live-icon"><i :class="`ti ti-${row.icon}`"></i></span>
                 <span class="flex-fill">{{ row.label }}</span>
                 <span class="h3 mb-0">{{ row.value }}</span>
+                <i class="ti ti-chevron-right text-secondary"></i>
               </router-link>
             </div>
             <div class="card-footer">
@@ -115,7 +139,7 @@
       <div class="row row-cards mb-3">
         <!-- ══ Latest invoices ═══════════════════════════════════════ -->
         <div class="col-xl-8">
-          <div class="card h-100">
+          <div class="card h-100 pc-dashboard-panel pc-recent-panel">
             <div class="card-header">
               <h3 class="card-title">{{ $t('recent_invoices') }}</h3>
               <div class="card-actions">
@@ -140,7 +164,10 @@
                 <tbody>
                   <tr v-for="inv in d.recent_invoices" :key="inv.id">
                     <td>
-                      <router-link :to="`/invoices/${inv.id}`" class="fw-semibold text-reset text-decoration-none font-monospace">{{ inv.Ref }}</router-link>
+                      <router-link :to="`/invoices/${inv.id}`" class="pc-invoice-reference text-reset text-decoration-none">
+                        <span class="pc-invoice-reference-icon"><i class="ti ti-file-invoice"></i></span>
+                        <span><strong class="font-monospace">{{ inv.Ref }}</strong><small>{{ tr('invoice', 'Invoice') }}</small></span>
+                      </router-link>
                     </td>
                     <td class="text-secondary">{{ inv.date }}</td>
                     <td><span :class="badge(invoiceTone(inv.payment_status))">{{ statusLabel(inv.payment_status) }}</span></td>
@@ -170,7 +197,7 @@
 
         <!-- ══ Payment mix ═══════════════════════════════════════════ -->
         <div class="col-xl-4">
-          <div class="card h-100">
+          <div class="card h-100 pc-dashboard-panel pc-payment-mix-panel">
             <div class="card-header">
               <div>
                 <h3 class="card-title">{{ tr('payment_mix', 'Payment mix') }}</h3>
@@ -207,7 +234,7 @@
       <div class="row row-cards">
         <!-- ══ What you buy most ═════════════════════════════════════ -->
         <div class="col-xl-7">
-          <div class="card h-100">
+          <div class="card h-100 pc-dashboard-panel pc-purchases-panel">
             <div class="card-header">
               <div>
                 <h3 class="card-title mb-0">{{ tr('top_purchases', 'What you buy most') }}</h3>
@@ -243,7 +270,7 @@
 
         <!-- ══ Account summary ═══════════════════════════════════════ -->
         <div class="col-xl-5">
-          <div class="card h-100">
+          <div class="card h-100 pc-dashboard-panel pc-account-panel">
             <div class="card-header">
               <div>
                 <h3 class="card-title">{{ tr('account_summary', 'Account summary') }}</h3>

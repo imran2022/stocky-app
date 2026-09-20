@@ -6,7 +6,7 @@
       <div class="col-sm-6 col-lg-4"><StatCard :label="$t('closing_balance')" :value="money(data.closing_balance)" icon="scale" :tone="Number(data.closing_balance) > 0 ? 'red' : 'green'" /></div>
     </div>
 
-    <div class="card">
+    <div class="card pc-data-card pc-statement-card">
       <div class="card-header d-block">
         <div class="d-flex flex-wrap align-items-center gap-2">
           <h3 class="card-title mb-0">{{ $t('account_statement') }}</h3>

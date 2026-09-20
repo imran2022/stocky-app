@@ -13,6 +13,24 @@
     </div>
 
     <template v-else-if="invoice">
+      <section class="pc-invoice-overview d-none d-md-flex">
+        <div class="pc-invoice-overview-mark"><i class="ti ti-file-invoice"></i></div>
+        <div class="pc-invoice-overview-copy">
+          <div class="pc-eyebrow">{{ $t('invoice') }}</div>
+          <h1 class="font-monospace">{{ invoice.Ref }}</h1>
+          <div class="pc-invoice-overview-meta">
+            <span><i class="ti ti-calendar"></i>{{ invoice.date }}</span>
+            <span v-if="invoice.warehouse_name"><i class="ti ti-building-warehouse"></i>{{ invoice.warehouse_name }}</span>
+          </div>
+        </div>
+        <div class="pc-invoice-overview-status">
+          <span :class="badge(invoiceTone(invoice.payment_status))">{{ statusLabel(invoice.payment_status) }}</span>
+          <a :href="`/api/portal/invoices/${invoice.id}/pdf`" target="_blank" rel="noopener" class="btn btn-primary">
+            <i class="ti ti-download me-1"></i>{{ $t('download_pdf') }}
+          </a>
+        </div>
+      </section>
+
       <div class="pc-invoice-detail-intro d-md-none">
         <div>
           <div class="pc-eyebrow">{{ $t('invoice') }}</div>
