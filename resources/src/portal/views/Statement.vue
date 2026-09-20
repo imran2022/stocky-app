@@ -1,9 +1,10 @@
 <template>
   <div>
-    <div v-if="data" class="row row-deck row-cards mb-3">
-      <div class="col-sm-6 col-lg-4"><StatCard :label="$t('account')" :value="(data.client && data.client.name) || '—'" icon="user" tone="blue" /></div>
-      <div class="col-sm-6 col-lg-4"><StatCard :label="$t('opening_balance')" :value="money(data.current_opening_balance != null ? data.current_opening_balance : data.opening_balance)" icon="wallet" tone="teal" /></div>
-      <div class="col-sm-6 col-lg-4"><StatCard :label="$t('closing_balance')" :value="money(data.closing_balance)" icon="scale" :tone="Number(data.closing_balance) > 0 ? 'red' : 'green'" /></div>
+    <div v-if="data" class="row row-deck row-cards mb-3 pc-statement-stats">
+      <div class="col-6 col-lg-3"><StatCard :label="$t('opening_balance')" :value="money(data.opening_balance)" icon="wallet" tone="teal" /></div>
+      <div class="col-6 col-lg-3"><StatCard :label="$t('debit')" :value="money(totalDebit)" icon="arrow-up-right" tone="red" /></div>
+      <div class="col-6 col-lg-3"><StatCard :label="$t('credit')" :value="money(totalCredit)" icon="arrow-down-left" tone="green" /></div>
+      <div class="col-6 col-lg-3"><StatCard :label="$t('closing_balance')" :value="money(data.closing_balance)" icon="scale" :tone="Number(data.closing_balance) > 0 ? 'red' : 'green'" /></div>
     </div>
 
     <div class="card pc-data-card pc-statement-card">
@@ -85,6 +86,11 @@ import EmptyState from '../components/EmptyState.vue';
 export default {
   components: { StatCard, EmptyState },
   data() { return { data: null, fromDate: '', toDate: '', loading: false }; },
+  computed: {
+    statementEntries() { return (this.data && Array.isArray(this.data.entries)) ? this.data.entries : []; },
+    totalDebit() { return this.statementEntries.filter((e) => e.type !== 'opening').reduce((sum, e) => sum + (Number(e.debit) || 0), 0); },
+    totalCredit() { return this.statementEntries.filter((e) => e.type !== 'opening').reduce((sum, e) => sum + (Number(e.credit) || 0), 0); },
+  },
   mounted() { this.fetch(); },
   methods: {
     money,

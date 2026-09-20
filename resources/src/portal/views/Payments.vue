@@ -14,6 +14,7 @@
       :empty-text="$t('no_payments_found')"
       empty-icon="credit-card-off"
       :filters="filters"
+      mobile-scrollable
       @query="fetch"
       @reset="resetFilters"
     >
@@ -65,8 +66,8 @@ export default {
   computed: {
     columns() {
       return [
-        { key: 'date', label: this.$t('date'), sortable: true },
         { key: 'Ref', label: this.$t('ref'), sortable: true },
+        { key: 'date', label: this.$t('date'), sortable: true },
         { key: 'Sale_Ref', label: this.$t('invoice'), sortable: true },
         { key: 'payment_method', label: this.$t('method'), sortable: true },
         { key: 'montant', label: this.$t('amount'), sortable: true, numeric: true },

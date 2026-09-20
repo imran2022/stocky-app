@@ -14,25 +14,31 @@
     </div>
 
     <template v-else-if="invoice">
-      <div class="pc-invoice-detail-intro d-md-none">
-        <div>
-          <div class="pc-eyebrow">{{ $t('invoice') }}</div>
-          <div class="h1 mb-1 font-monospace">{{ invoice.Ref }}</div>
-          <div class="text-secondary">{{ invoice.date }}</div>
+      <section class="card pc-invoice-mobile-summary d-md-none">
+        <div class="pc-invoice-mobile-head">
+          <router-link to="/invoices" class="pc-invoice-mobile-back" :aria-label="$t('back_to_invoices')"><i class="ti ti-arrow-left"></i></router-link>
+          <div class="min-w-0">
+            <div class="pc-eyebrow">{{ $t('invoice') }}</div>
+            <h1 class="font-monospace">{{ invoice.Ref }}</h1>
+            <div class="pc-invoice-mobile-date"><i class="ti ti-calendar"></i>{{ invoice.date }}</div>
+          </div>
+          <span :class="badge(invoiceTone(invoice.payment_status))">{{ statusLabel(invoice.payment_status) }}</span>
         </div>
-        <span :class="badge(invoiceTone(invoice.payment_status))">{{ statusLabel(invoice.payment_status) }}</span>
-      </div>
+        <div class="pc-invoice-mobile-money">
+          <div><span>{{ $t('total') }}</span><strong>{{ money(invoice.GrandTotal) }}</strong></div>
+          <div><span>{{ $t('amount_due') }}</span><strong :class="Number(invoice.due) > 0 ? 'text-danger' : 'text-success'">{{ money(invoice.due) }}</strong></div>
+        </div>
+        <a :href="`/api/portal/invoices/${invoice.id}/pdf`" target="_blank" rel="noopener" class="btn btn-primary w-100">
+          <i class="ti ti-download me-1"></i>{{ $t('download_pdf') }}
+        </a>
+      </section>
 
-      <div class="row row-deck row-cards mb-3 pc-invoice-stats">
-        <div class="col-4 col-md-6 col-xl-3"><StatCard :label="$t('total')" :value="money(invoice.GrandTotal)" icon="receipt" tone="blue" :sub="invoice.date" /></div>
-        <div class="col-4 col-md-6 col-xl-3"><StatCard :label="$t('paid')" :value="money(invoice.paid_amount)" icon="check" tone="green" /></div>
-        <div class="col-4 col-md-6 col-xl-3"><StatCard :label="$t('due')" :value="money(invoice.due)" icon="alert-circle" :tone="Number(invoice.due) > 0 ? 'red' : 'teal'" /></div>
-        <div class="col-md-6 col-xl-3 d-none d-md-block"><StatCard :label="$t('date')" :value="invoice.date" icon="calendar" tone="purple" :sub="invoice.warehouse_name || ''" /></div>
+      <div class="row row-deck row-cards mb-3 pc-invoice-stats d-none d-md-flex">
+        <div class="col-md-6 col-xl-3"><StatCard :label="$t('total')" :value="money(invoice.GrandTotal)" icon="receipt" tone="blue" :sub="invoice.date" /></div>
+        <div class="col-md-6 col-xl-3"><StatCard :label="$t('paid')" :value="money(invoice.paid_amount)" icon="check" tone="green" /></div>
+        <div class="col-md-6 col-xl-3"><StatCard :label="$t('due')" :value="money(invoice.due)" icon="alert-circle" :tone="Number(invoice.due) > 0 ? 'red' : 'teal'" /></div>
+        <div class="col-md-6 col-xl-3"><StatCard :label="$t('date')" :value="invoice.date" icon="calendar" tone="purple" :sub="invoice.warehouse_name || ''" /></div>
       </div>
-
-      <a :href="`/api/portal/invoices/${invoice.id}/pdf`" target="_blank" rel="noopener" class="btn btn-primary btn-lg w-100 mb-3 d-md-none">
-        <i class="ti ti-download me-1"></i>{{ $t('download_pdf') }}
-      </a>
 
       <div class="row row-cards align-items-start pc-invoice-detail-grid">
         <div class="col-xl-8">

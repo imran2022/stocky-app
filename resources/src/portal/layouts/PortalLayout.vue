@@ -136,7 +136,7 @@
       </header>
 
       <!-- ── Page header: pretitle, title, breadcrumbs, actions ── -->
-      <div class="page-header d-print-none">
+      <div v-if="!isDashboard" class="page-header d-print-none">
         <div class="container-xl">
           <div class="row g-2 align-items-center">
             <div class="col">
@@ -250,6 +250,7 @@ export default {
   },
   computed: {
     initials() { return initials(this.clientName || 'A'); },
+    isDashboard() { return this.$route.path === '/dashboard'; },
     sidenavOpen() { return this.isDesktop ? !this.theme.collapsed : this.drawerOpen; },
     toggleLabel() {
       if (!this.isDesktop) return this.tr('open_menu', 'Open menu');

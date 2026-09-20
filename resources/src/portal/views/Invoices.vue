@@ -13,6 +13,7 @@
       :empty-text="$t('no_invoices_found')"
       empty-icon="file-invoice"
       :filters="filters"
+      mobile-scrollable
       @query="fetch"
       @reset="resetFilters"
     >

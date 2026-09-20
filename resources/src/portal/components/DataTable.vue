@@ -4,7 +4,7 @@
     carries the title and the filter form (search, selects, page length), a
     card-table, and the pagination in the card footer.
   -->
-  <div class="card pc-data-card">
+  <div class="card pc-data-card" :class="{ 'is-mobile-scrollable-card': mobileScrollable }">
     <div class="card-header d-block pc-data-card-header">
       <div class="d-flex flex-wrap align-items-center gap-2">
         <h3 class="card-title mb-0">{{ title }}</h3>
@@ -46,9 +46,12 @@
     <EmptyState v-if="!loading && !rows.length" :icon="emptyIcon" :title="emptyText || tr('no_matching_records', 'No matching records')"
       :subtitle="hasActiveFilters ? tr('try_adjusting_filters', 'Try adjusting your search or filters.') : ''" />
 
-    <div v-else class="pc-desktop-table table-responsive" :class="{ 'pc-table-loading': loading, 'has-mobile-cards': !!$slots['mobile-card'] }">
+    <div v-else class="pc-desktop-table table-responsive" :class="{ 'pc-table-loading': loading, 'has-mobile-cards': !!$slots['mobile-card'], 'is-mobile-scrollable': mobileScrollable }">
       <div v-if="loading" class="pc-table-spinner"><div class="spinner-border text-primary" role="status"></div></div>
-      <table class="table card-table table-vcenter table-mobile-md pc-data-grid">
+      <div v-if="mobileScrollable" class="pc-swipe-hint d-md-none" aria-hidden="true">
+        <i class="ti ti-arrows-horizontal"></i>{{ tr('swipe_to_view', 'Swipe to view all columns') }}
+      </div>
+      <table class="table card-table table-vcenter pc-data-grid" :class="{ 'table-mobile-md': !mobileScrollable }">
         <thead>
           <tr>
             <th v-for="col in columns" :key="col.key" :class="[col.class, col.numeric ? 'text-end' : '']" :style="col.width ? { width: col.width } : null">
@@ -76,7 +79,7 @@
       </table>
     </div>
 
-    <div v-if="rows.length && $slots['mobile-card']" class="pc-mobile-list" :class="{ 'pc-table-loading': loading }">
+    <div v-if="rows.length && $slots['mobile-card'] && !mobileScrollable" class="pc-mobile-list" :class="{ 'pc-table-loading': loading }">
       <div v-if="loading" class="pc-table-spinner"><div class="spinner-border text-primary" role="status"></div></div>
       <slot v-for="(row, i) in rows" name="mobile-card" :row="row" :index="i" :key="rowKeyOf(row, i)" />
     </div>
@@ -132,6 +135,7 @@ export default {
     emptyText: { type: String, default: '' },
     emptyIcon: { type: String, default: 'search-off' },
     filters: { type: Object, default: () => ({}) },
+    mobileScrollable: { type: Boolean, default: false },
   },
   emits: ['query', 'reset'],
   data() {
