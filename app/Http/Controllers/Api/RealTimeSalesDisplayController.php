@@ -195,13 +195,17 @@ class RealTimeSalesDisplayController extends Controller
                 ])->values();
         }
 
+        $lastSaleExpression = $driver === 'sqlite'
+            ? "MAX(sales.date || ' ' || COALESCE(sales.time, '00:00:00'))"
+            : "MAX(CONCAT(sales.date, ' ', COALESCE(sales.time, '00:00:00')))";
         $salesByLocation = (clone $base)
             ->leftJoin('warehouses', 'sales.warehouse_id', '=', 'warehouses.id')
             ->select(
                 'sales.warehouse_id',
                 'warehouses.name as warehouse_name',
                 DB::raw('COUNT(*) as total_invoice'),
-                DB::raw('COALESCE(SUM(sales.GrandTotal),0) as amount')
+                DB::raw('COALESCE(SUM(sales.GrandTotal),0) as amount'),
+                DB::raw($lastSaleExpression.' as last_sale')
             )
             ->groupBy('sales.warehouse_id', 'warehouses.name')
             ->orderByDesc('amount')
@@ -211,6 +215,7 @@ class RealTimeSalesDisplayController extends Controller
                 'name' => $row->warehouse_name ?: '—',
                 'total_invoice' => (int) $row->total_invoice,
                 'amount' => (float) $row->amount,
+                'last_sale' => $row->last_sale ? Carbon::parse($row->last_sale)->toIso8601String() : null,
             ])->values();
 
         $yesterdayQuery = Sale::query()

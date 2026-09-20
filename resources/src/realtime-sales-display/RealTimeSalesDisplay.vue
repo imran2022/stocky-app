@@ -7,9 +7,17 @@
       </div>
       <div class="header-meta">
         <span class="live" :class="{ offline: hasError }"><i></i>{{ hasError ? 'CONNECTION LOST' : 'LIVE' }}</span>
+        <button class="theme-toggle" :class="{ active: soundEnabled }" type="button" :title="soundEnabled ? 'Mute new sale sound' : 'Enable new sale sound'" @click="toggleSound">
+          <svg v-if="soundEnabled" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18 6a8.5 8.5 0 0 1 0 12"/></svg>
+          <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="m16 10 5 5M21 10l-5 5"/></svg>
+        </button>
         <button class="theme-toggle" type="button" :title="theme === 'dark' ? 'Use light theme' : 'Use dark theme'" @click="toggleTheme">
           <svg v-if="theme === 'dark'" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></svg>
           <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5 8.5 8.5 0 1 0 20.5 14.2Z"/></svg>
+        </button>
+        <button class="theme-toggle" type="button" :title="isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'" @click="toggleFullscreen">
+          <svg v-if="isFullscreen" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>
+          <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M4 15v5h5M20 15v5h-5"/></svg>
         </button>
         <div class="clock"><span>{{ dateLabel }}</span><strong>{{ timeLabel }}</strong></div>
       </div>
@@ -40,8 +48,14 @@
         <div><i class="partial"></i><span>Partial</span><strong>{{ statuses.partial }}</strong></div>
         <div><i class="unpaid"></i><span>Unpaid</span><strong>{{ statuses.unpaid }}</strong></div>
         <div class="due"><span>Sales due</span><strong>{{ money(todayDue) }}</strong></div>
-        <div class="updated">{{ hasError ? 'Retrying…' : `Updated ${updatedRelative}` }}</div>
+        <div class="updated">{{ hasError ? `Retrying in ${nextRefreshSeconds}s` : `Updated ${updatedRelative} · Next ${nextRefreshSeconds}s` }}</div>
       </section>
+
+      <transition name="notice">
+        <div v-if="newSaleNotice" class="sale-notice" role="status" aria-live="polite">
+          <span>New sale</span><strong>{{ newSaleNotice.Ref || 'Sale recorded' }}</strong><b>{{ money(newSaleNotice.grand_total) }}</b>
+        </div>
+      </transition>
 
       <section v-if="loading" class="loading"><i></i><span>Loading live sales…</span></section>
       <template v-else>
@@ -88,10 +102,13 @@
 
           <article class="panel locations">
             <div class="panel-title"><h2>Sales by warehouse</h2></div>
-            <div v-if="!locations.length" class="empty">No sales yet</div>
-            <div v-for="(location,index) in locations" :key="location.warehouse_id || index" class="location">
-              <span>{{ index + 1 }}</span><div><strong>{{ location.name }}</strong><small>{{ location.total_invoice }} invoices</small></div>
-              <b>{{ money(location.amount) }}</b>
+            <div class="location-table">
+              <div class="location-row location-head"><span>S/N</span><span>Name</span><span>Total invoice</span><span>Amount</span><span>Last sale</span></div>
+              <div v-if="!locations.length" class="empty">No sales yet</div>
+              <div v-for="(location,index) in locations" :key="location.warehouse_id || index" class="location-row">
+                <span>{{ index + 1 }}</span><strong>{{ location.name }}</strong><span>{{ location.total_invoice }}</span>
+                <b>{{ money(location.amount) }}</b><time>{{ locationDateTime(location.last_sale) }}</time>
+              </div>
             </div>
           </article>
         </section>
@@ -106,12 +123,14 @@ export default {
   data() {
     return {
       token: window.__RTSD_TOKEN__ || '', logo: window.__RTSD_LOGO__ || '', company: window.__RTSD_COMPANY__ || 'Stocky',
-      theme: localStorage.getItem('rtsd_theme') || 'light',
+      theme: localStorage.getItem('rtsd_theme') || 'light', soundEnabled: localStorage.getItem('rtsd_sound') === 'on',
       loading: true, fetching: false, hasError: false, accessExpired: false, now: Date.now(), refreshSeconds: 30,
       todayCount: 0, todayTotal: 0, todayPaid: 0, todayDue: 0, yesterdayTotal: 0, lastSaleAt: null,
       statuses: { paid: 0, partial: 0, unpaid: 0 }, hourly: [], recentSales: [], topProducts: [], locations: [],
       warehouseName: 'All Warehouses', currency: '', showCustomerNames: false, lastUpdatedAt: null,
-      knownIds: new Set(), newSaleIds: new Set(), bumpCount: false, bumpTotal: false, timer: null, clockTimer: null, freshTimer: null,
+      knownIds: new Set(), newSaleIds: new Set(), bumpCount: false, bumpTotal: false,
+      timer: null, clockTimer: null, freshTimer: null, noticeTimer: null, nextRefreshAt: null,
+      isFullscreen: false, newSaleNotice: null, audioContext: null,
     };
   },
   computed: {
@@ -123,6 +142,7 @@ export default {
     lastSaleRelative() { return this.relative(this.lastSaleAt); },
     lastSaleAbsolute() { return this.lastSaleAt ? new Date(this.lastSaleAt).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) : 'No sales yet'; },
     updatedRelative() { return this.relative(this.lastUpdatedAt); },
+    nextRefreshSeconds() { return this.nextRefreshAt ? Math.max(0, Math.ceil((this.nextRefreshAt - this.now) / 1000)) : 0; },
   },
   methods: {
     money(value) {
@@ -142,10 +162,42 @@ export default {
     svgBarY(count) { return 198 - this.svgBarHeight(count); },
     productWidth(product) { const max = Math.max(1, ...this.topProducts.map(item => Number(item.quantity || 0))); return Math.max(5, Number(product.quantity || 0) / max * 100); },
     saleTime(date) { return date ? new Date(date).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) : '—'; },
+    locationDateTime(date) {
+      if (!date) return '—';
+      return new Date(date).toLocaleString([], { year:'numeric', month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    },
     toggleTheme() {
       this.theme = this.theme === 'dark' ? 'light' : 'dark';
       try { localStorage.setItem('rtsd_theme', this.theme); } catch (e) { /* storage may be blocked */ }
     },
+    toggleSound() {
+      this.soundEnabled = !this.soundEnabled;
+      try { localStorage.setItem('rtsd_sound', this.soundEnabled ? 'on' : 'off'); } catch (e) { /* storage may be blocked */ }
+      if (this.soundEnabled) this.prepareAudio();
+    },
+    prepareAudio() {
+      if (!this.audioContext) {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (AudioContext) this.audioContext = new AudioContext();
+      }
+      if (this.audioContext?.state === 'suspended') this.audioContext.resume().catch(() => {});
+    },
+    playSaleSound() {
+      if (!this.soundEnabled) return;
+      this.prepareAudio();
+      if (!this.audioContext) return;
+      const oscillator = this.audioContext.createOscillator(), gain = this.audioContext.createGain(), start = this.audioContext.currentTime;
+      oscillator.type = 'sine'; oscillator.frequency.setValueAtTime(740, start); oscillator.frequency.exponentialRampToValueAtTime(980, start + .16);
+      gain.gain.setValueAtTime(.0001, start); gain.gain.exponentialRampToValueAtTime(.12, start + .025); gain.gain.exponentialRampToValueAtTime(.0001, start + .24);
+      oscillator.connect(gain); gain.connect(this.audioContext.destination); oscillator.start(start); oscillator.stop(start + .25);
+    },
+    async toggleFullscreen() {
+      try {
+        if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
+        else await document.exitFullscreen();
+      } catch (e) { /* browser or embedding may block fullscreen */ }
+    },
+    syncFullscreen() { this.isFullscreen = !!document.fullscreenElement; },
     async fetchData() {
       if (this.fetching) return;
       this.fetching = true;
@@ -155,6 +207,7 @@ export default {
           this.accessExpired = true;
           this.hasError = true;
           clearTimeout(this.timer);
+          this.nextRefreshAt = null;
           return;
         }
         if (!response.ok) throw new Error(String(response.status));
@@ -171,19 +224,35 @@ export default {
         const ids = new Set(this.recentSales.map(sale => sale.id));
         const fresh = previousIds.size ? this.recentSales.filter(sale => !previousIds.has(sale.id)).map(sale => sale.id) : [];
         this.knownIds = ids;
-        if (fresh.length || (previousCount && this.todayCount > previousCount)) this.pulse(fresh, previousTotal);
+        if (fresh.length || (previousCount && this.todayCount > previousCount)) {
+          this.pulse(fresh, previousTotal, this.recentSales.find(sale => fresh.includes(sale.id)) || null);
+        }
         this.lastUpdatedAt = new Date().toISOString(); this.hasError = false; this.accessExpired = false; this.schedule();
       } catch (error) { this.hasError = true; if (!this.accessExpired) this.schedule(); }
       finally { this.loading = false; this.fetching = false; }
     },
-    pulse(ids, previousTotal) {
+    pulse(ids, previousTotal, newestSale) {
       this.newSaleIds = new Set(ids); this.bumpCount = true; this.bumpTotal = this.todayTotal > previousTotal;
       clearTimeout(this.freshTimer); this.freshTimer = setTimeout(() => { this.newSaleIds = new Set(); this.bumpCount = false; this.bumpTotal = false; }, 5000);
+      if (newestSale) {
+        this.newSaleNotice = newestSale; this.playSaleSound(); clearTimeout(this.noticeTimer);
+        this.noticeTimer = setTimeout(() => { this.newSaleNotice = null; }, 4500);
+      }
     },
-    schedule() { clearTimeout(this.timer); this.timer = setTimeout(this.fetchData, this.refreshSeconds * 1000); },
+    schedule() {
+      clearTimeout(this.timer); this.nextRefreshAt = Date.now() + this.refreshSeconds * 1000;
+      this.timer = setTimeout(this.fetchData, this.refreshSeconds * 1000);
+    },
   },
-  mounted() { this.fetchData(); this.clockTimer = setInterval(() => { this.now = Date.now(); }, 1000); },
-  beforeUnmount() { clearTimeout(this.timer); clearTimeout(this.freshTimer); clearInterval(this.clockTimer); },
+  mounted() {
+    this.fetchData(); this.clockTimer = setInterval(() => { this.now = Date.now(); }, 1000);
+    document.addEventListener('fullscreenchange', this.syncFullscreen);
+  },
+  beforeUnmount() {
+    clearTimeout(this.timer); clearTimeout(this.freshTimer); clearTimeout(this.noticeTimer); clearInterval(this.clockTimer);
+    document.removeEventListener('fullscreenchange', this.syncFullscreen);
+    if (this.audioContext) this.audioContext.close().catch(() => {});
+  },
 };
 </script>
 
@@ -239,7 +308,11 @@ header {
 }
 .dark .theme-toggle { color:#d8deea; }
 .theme-toggle:hover { border-color:#6d28d9;color:#6d28d9; }
+.theme-toggle.active { border-color:rgba(109,40,217,.35);color:#6d28d9;background:rgba(109,40,217,.07); }
+.dark .theme-toggle.active { border-color:rgba(139,108,240,.45);color:#b9a5ff;background:rgba(139,108,240,.12); }
 .theme-toggle svg { width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round; }
+.header-meta { gap:10px; }
+.clock { margin-left:8px; }
 .live { color:#389e0d;border-color:#b7eb8f;background:#f6ffed; }
 .live i { background:#52c41a;box-shadow:0 0 0 4px rgba(82,196,26,.12); }
 .dark .live { color:#6ee7b7;border-color:rgba(52,211,153,.24);background:rgba(16,185,129,.08); }
@@ -290,8 +363,10 @@ main { padding:20px clamp(20px,2vw,32px) 28px; }
 }
 .tr.th {
   min-height:38px;color:var(--muted);font-size:11px;font-weight:600;
-  letter-spacing:.025em;text-transform:none;
+  padding-right:10px;padding-left:10px;border-bottom-color:var(--line);border-radius:8px 8px 0 0;
+  background:#fafafa;letter-spacing:.025em;text-transform:none;
 }
+.dark .tr.th { background:rgba(255,255,255,.045); }
 .tr>strong { font-weight:600; }
 .status { padding:4px 9px;font-size:11px;font-weight:600; }
 .status.paid { color:#389e0d;background:#f6ffed; }
@@ -300,21 +375,42 @@ main { padding:20px clamp(20px,2vw,32px) 28px; }
 .dark .status.paid { color:#6ee7b7;background:rgba(16,185,129,.12); }
 .dark .status.partial { color:#fde68a;background:rgba(245,158,11,.12); }
 .dark .status.unpaid { color:#fca5a5;background:rgba(239,68,68,.12); }
-.location {
-  min-height:62px;padding:12px 3px;grid-template-columns:28px minmax(0,1fr) auto;
+.location-table { overflow-x:auto; }
+.location-row {
+  min-width:610px;min-height:62px;padding:11px 10px;display:grid;
+  grid-template-columns:40px minmax(130px,1fr) 100px 120px 170px;align-items:center;gap:10px;
+  border-bottom:1px solid var(--line);color:var(--text);font-size:13px;
   transition:background-color .18s ease,box-shadow .18s ease;
 }
-.location>span { color:#6d28d9;font-size:12px; }
-.location div strong { color:var(--text);font-size:14px;font-weight:600; }
-.location small { margin-top:5px;font-size:12px; }
-.location>b { color:var(--text);font-size:14px;font-weight:600; }
+.location-row:last-child { border-bottom:0; }
+.location-row>span:first-child { color:#6d28d9; }
+.location-row>strong { overflow:hidden;color:var(--text);font-size:13px;font-weight:600;text-overflow:ellipsis;white-space:nowrap; }
+.location-row>b { color:var(--text);font-size:13px;font-weight:600;font-variant-numeric:tabular-nums; }
+.location-row>time { color:var(--text);font-size:12px;font-variant-numeric:tabular-nums; }
+.location-row>:nth-child(n+3) { text-align:right; }
+.location-head {
+  min-height:38px;border-radius:8px 8px 0 0;background:#fafafa;
+  color:var(--muted);font-size:11px;font-weight:600;letter-spacing:.025em;
+}
+.location-head>span:first-child { color:var(--muted); }
+.dark .location-head { background:rgba(255,255,255,.045); }
+.sale-notice {
+  position:fixed;z-index:20;top:88px;right:24px;min-width:280px;padding:13px 15px;
+  display:grid;grid-template-columns:1fr auto;gap:3px 18px;border:1px solid rgba(109,40,217,.22);
+  border-radius:9px;background:var(--panel);box-shadow:0 12px 32px rgba(15,23,42,.14);
+}
+.sale-notice span { grid-column:1/-1;color:#6d28d9;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em; }
+.sale-notice strong,.sale-notice b { color:var(--text);font-size:14px; }
+.sale-notice b { text-align:right;font-variant-numeric:tabular-nums; }
+.notice-enter-active,.notice-leave-active { transition:opacity .2s ease,transform .2s ease; }
+.notice-enter-from,.notice-leave-to { opacity:0;transform:translateY(-8px); }
 .empty { font-size:13px; }
 @media(hover:hover) and (pointer:fine){
-  .tr:not(.th):hover,.location:hover {
+  .tr:not(.th):hover,.location-row:not(.location-head):hover {
     background:rgba(109,40,217,.055);
     box-shadow:inset 3px 0 0 #6d28d9;
   }
-  .dark .tr:not(.th):hover,.dark .location:hover {
+  .dark .tr:not(.th):hover,.dark .location-row:not(.location-head):hover {
     background:rgba(139,108,240,.11);
     box-shadow:inset 3px 0 0 #8b6cf0;
   }
@@ -332,5 +428,8 @@ main { padding:20px clamp(20px,2vw,32px) 28px; }
   .chart{height:210px;overflow-x:auto}
   .chart svg{min-width:760px}
   .theme-toggle{width:32px;height:32px}
+  .header-meta{gap:6px}
+  .clock{margin-left:2px}
+  .sale-notice{top:78px;right:12px;left:12px;min-width:0}
 }
 </style>
