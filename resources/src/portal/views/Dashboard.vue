@@ -47,24 +47,21 @@
 
       <!-- ══ Headline figures ═══════════════════════════════════════ -->
       <div class="row row-deck row-cards mb-3 pc-dashboard-stats">
-        <div class="col-6 col-sm-6 col-xl-3">
-          <StatCard :label="$t('total_paid')" :value="money(d.total_paid)" icon="wallet" tone="primary" :sub="tr('all_time', 'All time')" />
-        </div>
-        <div class="col-6 col-sm-6 col-xl-3">
+        <div class="col-6 col-md-4">
           <StatCard :label="tr('invoiced_this_month', 'Invoiced this month')" :value="money(d.month.invoiced)" icon="receipt" tone="blue" :change="d.month.change_invoiced" :sub="d.month.label" />
         </div>
-        <div class="col-6 col-sm-6 col-xl-3">
+        <div class="col-6 col-md-4">
           <StatCard :label="tr('paid_this_month', 'Paid this month')" :value="money(d.month.paid)" icon="chart-bar" tone="teal" :change="d.month.change_paid" :sub="d.month.label" />
         </div>
-        <div class="col-6 col-sm-6 col-xl-3">
+        <div class="col-12 col-md-4">
           <StatCard :label="$t('total_invoices')" :value="number(d.total_invoices)" icon="file-invoice" tone="green"
             :sub="tr('average_invoice_sub', 'average {amount}', { amount: money(d.average_invoice) })" />
         </div>
       </div>
 
       <!-- ══ Needs attention ═════════════════════════════════════════ -->
-      <div v-if="d.alerts.length" class="row row-cards mb-3 pc-dashboard-attention">
-        <div v-for="(alert, i) in d.alerts" :key="i" class="col-md-6 col-xl-4">
+      <div v-if="visibleAlerts.length" class="row row-cards mb-3 pc-dashboard-attention">
+        <div v-for="(alert, i) in visibleAlerts" :key="i" class="col-md-6 col-xl-4">
           <div class="card h-100 pc-attention-card" :class="`border-${alert.tone}`">
             <div class="card-body">
               <div class="d-flex align-items-start gap-2 mb-2">
@@ -136,10 +133,10 @@
         </div>
       </div>
 
-      <div class="row row-cards mb-3">
+      <div class="row row-cards mb-3 align-items-start">
         <!-- ══ Latest invoices ═══════════════════════════════════════ -->
         <div class="col-xl-8">
-          <div class="card h-100 pc-dashboard-panel pc-recent-panel">
+          <div class="card pc-dashboard-panel pc-recent-panel">
             <div class="card-header">
               <h3 class="card-title">{{ $t('recent_invoices') }}</h3>
               <div class="card-actions">
@@ -197,7 +194,7 @@
 
         <!-- ══ Payment mix ═══════════════════════════════════════════ -->
         <div class="col-xl-4">
-          <div class="card h-100 pc-dashboard-panel pc-payment-mix-panel">
+          <div class="card pc-dashboard-panel pc-payment-mix-panel">
             <div class="card-header">
               <div>
                 <h3 class="card-title">{{ tr('payment_mix', 'Payment mix') }}</h3>
@@ -207,24 +204,24 @@
             <div class="card-body">
               <EmptyState v-if="!d.by_method.length" icon="credit-card-off" :title="$t('no_payments_yet')" />
               <template v-else>
-                <div class="rst-donut mb-3">
-                  <RstChart type="doughnut" :height="180" :legend="false" :total="methodTotal"
-                    :labels="d.by_method.map(m => m.label)"
-                    :series="[{ data: d.by_method.map(m => m.total), colors: slots.slice(0, d.by_method.length) }]"
-                    :aria-label="tr('payment_mix', 'Payment mix')" />
-                  <div class="rst-donut-centre">
-                    <div class="text-secondary small">{{ $t('paid') }}</div>
-                    <div class="h3 mb-0">{{ money(methodTotal) }}</div>
+                <div class="pc-payment-mix-total">
+                  <span class="pc-payment-mix-total-icon"><i class="ti ti-wallet"></i></span>
+                  <span>
+                    <small>{{ tr('total_received', 'Total received') }}</small>
+                    <strong>{{ money(methodTotal) }}</strong>
+                  </span>
+                  <span class="badge bg-primary-lt">{{ d.by_method.length }} {{ tr('methods', 'method(s)') }}</span>
+                </div>
+                <div class="pc-payment-method-list">
+                  <div v-for="(row, i) in d.by_method" :key="row.label" class="pc-payment-method" :style="{ '--method-color': `var(--rst-${slots[i % slots.length]})` }">
+                    <div class="pc-payment-method-head">
+                      <span><i class="ti ti-credit-card"></i>{{ row.label }}</span>
+                      <strong>{{ money(row.total) }}</strong>
+                    </div>
+                    <div class="pc-payment-method-track"><span :style="{ width: row.share + '%' }"></span></div>
+                    <div class="pc-payment-method-share">{{ row.share }}%</div>
                   </div>
                 </div>
-                <ul class="rst-legend">
-                  <li v-for="(row, i) in d.by_method" :key="row.label">
-                    <span class="rst-swatch" :style="{ background: `var(--rst-${slots[i]})` }"></span>
-                    <span class="rst-legend-label">{{ row.label }}</span>
-                    <span class="rst-legend-value">{{ money(row.total) }}</span>
-                    <span class="badge bg-secondary-lt">{{ row.share }}%</span>
-                  </li>
-                </ul>
               </template>
             </div>
           </div>
@@ -344,6 +341,9 @@ export default {
       return best && best.gross > 0 ? best.label : '—';
     },
     methodTotal() { return this.d.by_method.reduce((s, m) => s + (Number(m.total) || 0), 0); },
+    visibleAlerts() {
+      return this.d.alerts.filter((alert) => !(Number(this.d.total_due) > 0 && alert.url === '/invoices'));
+    },
     liveRows() {
       const l = this.d.live;
       return [

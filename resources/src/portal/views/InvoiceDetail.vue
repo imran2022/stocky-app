@@ -1,6 +1,7 @@
 <template>
   <div>
     <PageActions>
+      <span v-if="invoice" :class="badge(invoiceTone(invoice.payment_status))">{{ statusLabel(invoice.payment_status) }}</span>
       <router-link to="/invoices" class="btn btn-outline-secondary"><i class="ti ti-arrow-left me-1"></i>{{ $t('back_to_invoices') }}</router-link>
       <a v-if="invoice" :href="`/api/portal/invoices/${invoice.id}/pdf`" target="_blank" rel="noopener" class="btn btn-primary">
         <i class="ti ti-download me-1"></i>{{ $t('download_pdf') }}
@@ -13,24 +14,6 @@
     </div>
 
     <template v-else-if="invoice">
-      <section class="pc-invoice-overview d-none d-md-flex">
-        <div class="pc-invoice-overview-mark"><i class="ti ti-file-invoice"></i></div>
-        <div class="pc-invoice-overview-copy">
-          <div class="pc-eyebrow">{{ $t('invoice') }}</div>
-          <h1 class="font-monospace">{{ invoice.Ref }}</h1>
-          <div class="pc-invoice-overview-meta">
-            <span><i class="ti ti-calendar"></i>{{ invoice.date }}</span>
-            <span v-if="invoice.warehouse_name"><i class="ti ti-building-warehouse"></i>{{ invoice.warehouse_name }}</span>
-          </div>
-        </div>
-        <div class="pc-invoice-overview-status">
-          <span :class="badge(invoiceTone(invoice.payment_status))">{{ statusLabel(invoice.payment_status) }}</span>
-          <a :href="`/api/portal/invoices/${invoice.id}/pdf`" target="_blank" rel="noopener" class="btn btn-primary">
-            <i class="ti ti-download me-1"></i>{{ $t('download_pdf') }}
-          </a>
-        </div>
-      </section>
-
       <div class="pc-invoice-detail-intro d-md-none">
         <div>
           <div class="pc-eyebrow">{{ $t('invoice') }}</div>
@@ -44,7 +27,7 @@
         <div class="col-4 col-md-6 col-xl-3"><StatCard :label="$t('total')" :value="money(invoice.GrandTotal)" icon="receipt" tone="blue" :sub="invoice.date" /></div>
         <div class="col-4 col-md-6 col-xl-3"><StatCard :label="$t('paid')" :value="money(invoice.paid_amount)" icon="check" tone="green" /></div>
         <div class="col-4 col-md-6 col-xl-3"><StatCard :label="$t('due')" :value="money(invoice.due)" icon="alert-circle" :tone="Number(invoice.due) > 0 ? 'red' : 'teal'" /></div>
-        <div class="col-md-6 col-xl-3 d-none d-md-block"><StatCard :label="$t('status')" :value="statusLabel(invoice.payment_status)" icon="tag" :tone="invoiceTone(invoice.payment_status)" /></div>
+        <div class="col-md-6 col-xl-3 d-none d-md-block"><StatCard :label="$t('date')" :value="invoice.date" icon="calendar" tone="purple" :sub="invoice.warehouse_name || ''" /></div>
       </div>
 
       <a :href="`/api/portal/invoices/${invoice.id}/pdf`" target="_blank" rel="noopener" class="btn btn-primary btn-lg w-100 mb-3 d-md-none">
@@ -59,7 +42,6 @@
                 <h3 class="card-title">{{ $t('items') }}</h3>
                 <p class="card-subtitle">{{ $t('items_count', (invoice.details || []).length) }}</p>
               </div>
-              <div class="card-actions"><span :class="badge(invoiceTone(invoice.payment_status))">{{ statusLabel(invoice.payment_status) }}</span></div>
             </div>
             <div class="pc-invoice-items-desktop table-responsive">
               <table class="table table-vcenter card-table">
@@ -82,7 +64,7 @@
 
         <div class="col-xl-4">
           <aside class="card pc-payment-summary">
-            <div class="card-header"><h3 class="card-title">{{ tr('payment_summary', 'Payment summary') }}</h3><span :class="badge(invoiceTone(invoice.payment_status))">{{ statusLabel(invoice.payment_status) }}</span></div>
+            <div class="card-header"><h3 class="card-title">{{ tr('payment_summary', 'Payment summary') }}</h3></div>
             <div class="card-body">
               <dl class="pc-summary-list">
                 <div><dt>{{ $t('subtotal') }}</dt><dd>{{ money(invoice.subtotal != null ? invoice.subtotal : invoice.GrandTotal) }}</dd></div>
@@ -92,7 +74,7 @@
                 <div v-if="Number(invoice.shipping) > 0"><dt>{{ $t('shipping') }}</dt><dd>{{ money(invoice.shipping) }}</dd></div>
                 <div class="pc-summary-total"><dt>{{ $t('total') }}</dt><dd>{{ money(invoice.GrandTotal) }}</dd></div>
                 <div><dt>{{ $t('paid') }}</dt><dd class="text-success">{{ money(invoice.paid_amount) }}</dd></div>
-                <div class="pc-summary-due"><dt>{{ $t('amount_due') }}</dt><dd :class="Number(invoice.due) > 0 ? 'text-danger' : ''">{{ money(invoice.due) }}</dd></div>
+                <div class="pc-summary-due" :class="{ 'has-due': Number(invoice.due) > 0 }"><dt>{{ $t('amount_due') }}</dt><dd :class="Number(invoice.due) > 0 ? 'text-danger' : ''">{{ money(invoice.due) }}</dd></div>
               </dl>
             </div>
           </aside>
