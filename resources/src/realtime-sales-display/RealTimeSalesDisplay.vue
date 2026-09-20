@@ -286,6 +286,7 @@ main { padding:20px clamp(20px,2vw,32px) 28px; }
 .tr {
   min-width:720px;min-height:48px;padding:9px 4px;gap:14px;
   color:var(--text);font-size:13px;
+  transition:background-color .18s ease,box-shadow .18s ease;
 }
 .tr.th {
   min-height:38px;color:var(--muted);font-size:11px;font-weight:600;
@@ -299,12 +300,25 @@ main { padding:20px clamp(20px,2vw,32px) 28px; }
 .dark .status.paid { color:#6ee7b7;background:rgba(16,185,129,.12); }
 .dark .status.partial { color:#fde68a;background:rgba(245,158,11,.12); }
 .dark .status.unpaid { color:#fca5a5;background:rgba(239,68,68,.12); }
-.location { min-height:62px;padding:12px 3px;grid-template-columns:28px minmax(0,1fr) auto; }
+.location {
+  min-height:62px;padding:12px 3px;grid-template-columns:28px minmax(0,1fr) auto;
+  transition:background-color .18s ease,box-shadow .18s ease;
+}
 .location>span { color:#6d28d9;font-size:12px; }
 .location div strong { color:var(--text);font-size:14px;font-weight:600; }
 .location small { margin-top:5px;font-size:12px; }
 .location>b { color:var(--text);font-size:14px;font-weight:600; }
 .empty { font-size:13px; }
+@media(hover:hover) and (pointer:fine){
+  .tr:not(.th):hover,.location:hover {
+    background:rgba(109,40,217,.055);
+    box-shadow:inset 3px 0 0 #6d28d9;
+  }
+  .dark .tr:not(.th):hover,.dark .location:hover {
+    background:rgba(139,108,240,.11);
+    box-shadow:inset 3px 0 0 #8b6cf0;
+  }
+}
 @media(max-width:1000px){
   .top-grid,.bottom-grid{grid-template-columns:1fr}
   .chart{height:250px}
