@@ -7,6 +7,7 @@
             <span class="live-dot" :class="{ paused: paused || hasError }"></span>
             {{ hasError ? $t('Failed') : (paused ? $t('Pause') : 'LIVE') }}
           </a-tag>
+          <a-button type="primary" ghost @click="openDisplaySetup">Display setup</a-button>
           <span style="font-variant-numeric: tabular-nums">{{ serverClock }}</span>
         </a-space>
       </template>
@@ -156,6 +157,49 @@
         </a-col>
       </a-row>
     </template>
+
+    <a-modal
+      v-model:open="displaySetupOpen"
+      title="Live Sales Display"
+      :confirm-loading="displayGenerating"
+      :ok-text="displayUrl ? 'Generate new token' : 'Generate display link'"
+      @ok="generateDisplayToken"
+    >
+      <a-alert
+        type="info"
+        show-icon
+        message="Creates a read-only, 24-hour display link. Generating a new link revokes the previous one."
+        style="margin-bottom: 16px"
+      />
+      <a-alert v-if="displayError" type="error" show-icon :message="displayError" style="margin-bottom: 16px" />
+      <a-form layout="vertical">
+        <a-form-item label="Warehouse scope">
+          <a-select
+            v-model:value="displayWarehouseId"
+            allow-clear
+            :options="warehouseOptions"
+            placeholder="All permitted warehouses"
+          />
+        </a-form-item>
+        <a-form-item label="Refresh interval">
+          <a-select
+            v-model:value="displayRefreshSeconds"
+            :options="[10, 30, 60, 120].map(s => ({ value: s, label: s + ' seconds' }))"
+          />
+        </a-form-item>
+        <a-form-item style="margin-bottom: 8px">
+          <a-checkbox v-model:checked="displayShowCustomerNames">Show customer names on the public display</a-checkbox>
+        </a-form-item>
+      </a-form>
+      <div v-if="displayUrl" class="display-link-result">
+        <a-input :value="displayUrl" readonly @focus="event => event.target.select()" />
+        <a-space>
+          <a-button @click="copyDisplayUrl">Copy link</a-button>
+          <a-button type="primary" @click="openDisplay">Open display</a-button>
+        </a-space>
+        <small>Expires: {{ displayExpiresLabel }}</small>
+      </div>
+    </a-modal>
   </div>
 </template>
 
@@ -189,6 +233,14 @@ const isFetching = ref(false);
 const paused = ref(false);
 const hasError = ref(false);
 const soundEnabled = ref(false);
+const displaySetupOpen = ref(false);
+const displayGenerating = ref(false);
+const displayWarehouseId = ref(undefined);
+const displayRefreshSeconds = ref(30);
+const displayShowCustomerNames = ref(false);
+const displayUrl = ref('');
+const displayExpiresAt = ref('');
+const displayError = ref('');
 
 const todayCount = ref(0);
 const todayTotal = ref(0);
@@ -222,6 +274,11 @@ let audioCtx = null;
 
 const warehouseOptions = computed(() => warehouses.value.map(w => ({ value: w.id, label: w.name })));
 const averageSale = computed(() => (todayCount.value ? todayTotal.value / todayCount.value : 0));
+const displayExpiresLabel = computed(() => {
+  if (!displayExpiresAt.value) return '';
+  const date = new Date(displayExpiresAt.value);
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString();
+});
 
 const serverClock = computed(() => {
   if (serverTimeAt.value && serverTimeFetchedAt.value) {
@@ -429,6 +486,42 @@ function toggleSound() {
   if (soundEnabled.value) playBeep();
 }
 
+function openDisplaySetup() {
+  displayWarehouseId.value = warehouseId.value;
+  displayRefreshSeconds.value = refreshSeconds.value;
+  displayError.value = '';
+  displaySetupOpen.value = true;
+}
+
+async function generateDisplayToken() {
+  displayGenerating.value = true;
+  displayError.value = '';
+  try {
+    const data = await http.post('real-time-sales-display/generate', {
+      warehouse_id: displayWarehouseId.value || 0,
+      refresh_seconds: displayRefreshSeconds.value,
+      show_customer_names: displayShowCustomerNames.value,
+    });
+    displayUrl.value = data?.url || '';
+    displayExpiresAt.value = data?.expires_at || '';
+  } catch (error) {
+    displayUrl.value = '';
+    displayExpiresAt.value = '';
+    displayError.value = error?.data?.message || 'Could not generate the display link.';
+  } finally {
+    displayGenerating.value = false;
+  }
+}
+
+async function copyDisplayUrl() {
+  if (!displayUrl.value) return;
+  try { await navigator.clipboard.writeText(displayUrl.value); } catch (e) { /* browser may block clipboard */ }
+}
+
+function openDisplay() {
+  if (displayUrl.value) window.open(displayUrl.value, '_blank', 'noopener');
+}
+
 onMounted(() => {
   try { soundEnabled.value = localStorage.getItem('rts_sound_enabled') === '1'; } catch (e) { /* ignore */ }
   fetchCounterData();
@@ -472,4 +565,13 @@ onBeforeUnmount(() => {
   100% { transform: scale(1); }
 }
 :deep(.row-new) td { background: rgba(109, 40, 217, 0.08) !important; }
+.display-link-result {
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(109, 40, 217, 0.2);
+  border-radius: 8px;
+  background: rgba(109, 40, 217, 0.04);
+}
+.display-link-result small { color: #8c8c8c; }
 </style>

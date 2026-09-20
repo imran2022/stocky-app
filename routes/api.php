@@ -1730,6 +1730,9 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     // Customer Display: secure token generation
     Route::post('customer-display/generate', [CustomerDisplayController::class, 'generate']);
 
+    // Real-time Sales Display: permission-scoped, read-only display token.
+    Route::post('real-time-sales-display/generate', [\App\Http\Controllers\Api\RealTimeSalesDisplayController::class, 'generate']);
+
     // ------------------------------- QuickBooks Integration ------------------------\\
     // ------------------------------------------------------------------\\
     Route::get('quickbooks/status', 'QuickBooksController@status');
@@ -1878,6 +1881,9 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety'])->group(function (
 // Public minimal endpoints for customer display (no auth)
 Route::post('pos/customer-display/broadcast', [CustomerDisplayController::class, 'broadcastCart']);
 Route::get('pos/customer-display/last-cart', [CustomerDisplayController::class, 'lastCart']);
+// Token validation is performed inside the controller on every poll.
+Route::get('real-time-sales-display/data', [\App\Http\Controllers\Api\RealTimeSalesDisplayController::class, 'data'])
+    ->middleware('throttle:120,1');
 // Public Invoice URL: no auth, looked up by an unguessable token rather
 // than the sale's own id — see PublicInvoiceController's own docblock.
 Route::get('public/invoice/{token}', 'PublicInvoiceController@show');

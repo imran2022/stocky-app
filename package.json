@@ -5,9 +5,10 @@
     "scripts": {
         "dev": "node --max-old-space-size=4096 node_modules/vite/bin/vite.js build --watch",
         "clean:js": "node -e \"require('fs').rmSync('public/js',{recursive:true,force:true})\"",
-        "build": "npm run clean:js && npm run build:admin && npm run build:customer-display && npm run build:portal && npm run build:storefront",
+        "build": "npm run clean:js && npm run build:admin && npm run build:customer-display && npm run build:realtime-sales-display && npm run build:portal && npm run build:storefront",
         "build:admin": "node --max-old-space-size=4096 node_modules/vite/bin/vite.js build",
         "build:customer-display": "vite build -c vite.customer-display.config.js",
+        "build:realtime-sales-display": "vite build -c vite.realtime-sales-display.config.js",
         "build:portal": "vite build -c vite.portal.config.js",
         "build:storefront": "vite build -c vite.storefront.config.js",
         "vue3:build": "npm run build",

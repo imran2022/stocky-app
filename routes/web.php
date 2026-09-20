@@ -488,7 +488,7 @@ Route::group(['middleware' => ['web', 'auth:web', 'Is_Active', 'request.safety']
             }
 
             return redirect('/next');
-        })->where('vue', '^(?!'.$storeExclusion.'api|setup|update|password|online_store|customer-display|order-ready|quickbooks|salla|xero|google-sheets|portal|recruit|api-docs|next|csrf-token|login|logout).*$');
+        })->where('vue', '^(?!'.$storeExclusion.'api|setup|update|password|online_store|customer-display|real-time-sales-display|order-ready|quickbooks|salla|xero|google-sheets|portal|recruit|api-docs|next|csrf-token|login|logout).*$');
 
 });
 
@@ -547,6 +547,11 @@ Route::get('/customer-display', function (HttpRequest $request) {
 
     return view('customer_display');
 })->middleware(['web']);
+
+// Standalone management display. Both this page and its polling API validate
+// the same scoped, expiring token; no authenticated SPA session is required.
+Route::get('/real-time-sales-display', [\App\Http\Controllers\Api\RealTimeSalesDisplayController::class, 'page'])
+    ->middleware(['web']);
 
 // -------------------- Public Order Ready Screen (token-guarded) --------------------
 // Customer-facing kitchen token board (Preparing / Ready). Self-contained page,
