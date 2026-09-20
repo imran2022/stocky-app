@@ -174,12 +174,15 @@ export default {
 <style scoped>
 :global(*) { box-sizing: border-box; }
 .customer-display-container {
-  --bg:#08111f; --panel:rgba(14,27,46,.94); --solid:#111e31; --line:rgba(148,163,184,.15);
+  --bg:#060b16; --panel:rgba(13,28,48,.91); --solid:rgba(16,31,52,.96); --line:rgba(148,163,184,.15);
   --muted:#8ea0b8; --text:#f8fafc; --accent:#fb923c; --green:#34d399;
   height:100vh; height:100dvh; min-height:540px; overflow:hidden; display:grid;
   grid-template-rows:auto minmax(0,1fr); color:var(--text);
-  background:radial-gradient(circle at 8% 0%,rgba(30,64,175,.2),transparent 28%),
-    radial-gradient(circle at 96% 100%,rgba(249,115,22,.1),transparent 30%),var(--bg);
+  background:
+    radial-gradient(circle at 5% 8%,rgba(37,99,235,.22),transparent 30%),
+    radial-gradient(circle at 78% 8%,rgba(124,58,237,.12),transparent 28%),
+    radial-gradient(circle at 98% 96%,rgba(249,115,22,.12),transparent 32%),
+    linear-gradient(145deg,#07101f 0%,#081424 48%,#07101b 100%);
   font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
 }
 .customer-display-container.light {
@@ -215,6 +218,7 @@ export default {
   align-items:center; column-gap:12px; }
 .table-head { min-height:46px; padding:0 20px; border-bottom:1px solid var(--line); color:var(--muted); background:rgba(0,0,0,.08);
   font-size:11px; font-weight:800; letter-spacing:.075em; text-transform:uppercase; }
+.table-head .unit { text-align:right; }
 .items-scroll { min-height:0; padding:8px 10px 12px; overflow-y:auto; overscroll-behavior:contain; scrollbar-color:rgba(148,163,184,.35) transparent; scrollbar-width:thin; }
 .items-scroll::-webkit-scrollbar { width:6px; } .items-scroll::-webkit-scrollbar-thumb { border-radius:99px; background:rgba(148,163,184,.35); }
 .item-row { min-height:68px; padding:9px 10px; border-bottom:1px solid var(--line); animation:row-in .36s ease both; }

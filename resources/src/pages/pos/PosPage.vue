@@ -5586,9 +5586,13 @@ export default {
         const cdRate = this.posRate || 1;
         const payload = {
           currency: this.posCurrencySymbol || '',
-          discount: (this.sale && String(this.sale.discount_Method || '2') === '1')
-            ? (this.sale.discount || 0)
-            : ((this.sale && this.sale.discount ? this.sale.discount : 0) * cdRate),
+          // Customer display needs the monetary discount, not the raw input.
+          // For percentage mode sale.discount is e.g. `5`, while this helper
+          // resolves the real amount and also includes redeemed points.
+          discount: (
+            Number(this.getCurrentSaleDiscountAmount ? this.getCurrentSaleDiscountAmount() : 0)
+            + Number(this.promotionDiscount || 0)
+          ) * cdRate,
           TaxNet: (this.sale && this.sale.TaxNet ? this.sale.TaxNet : 0) * cdRate,
             shipping: (this.sale && this.sale.shipping ? this.sale.shipping : 0) * cdRate,
           GrandTotal: (this.GrandTotal || 0) * cdRate,
