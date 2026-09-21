@@ -82,6 +82,8 @@
           <article><span>Reporting warehouses</span><strong>{{ locations.length }}</strong><small>{{ locations.reduce((sum, item) => sum + Number(item.total_invoice || 0), 0) }} invoices today</small></article>
           <article><span>Average / warehouse</span><strong>{{ money(averageWarehouseSales) }}</strong><small>Based on today’s sales</small></article>
           <article><span>Top warehouse share</span><strong>{{ topWarehouseShare }}%</strong><small>Of total sales today</small></article>
+          <article><span>Sales velocity</span><strong>{{ salesVelocity.toFixed(1) }} / hour</strong><small>Since the first sale today</small></article>
+          <article><span>Peak sales hour</span><strong>{{ peakSalesHour.label }}</strong><small>{{ peakSalesHour.count ? `${money(peakSalesHour.total)} · ${peakSalesHour.count} sales` : 'No sales yet' }}</small></article>
         </section>
 
         <section class="dashboard-grid" :class="{ 'manager-layout': isManager }">
@@ -162,6 +164,19 @@ export default {
     topWarehouse() { return this.locations.length ? this.locations[0] : null; },
     averageWarehouseSales() { return this.locations.length ? this.todayTotal / this.locations.length : 0; },
     topWarehouseShare() { return this.todayTotal && this.topWarehouse ? Math.round(Number(this.topWarehouse.amount || 0) / this.todayTotal * 100) : 0; },
+    salesVelocity() {
+      const activeHours = this.hourly.filter(item => Number(item.count || 0) > 0).map(item => Number(item.hour));
+      if (!activeHours.length) return 0;
+      const currentHour = new Date(this.lastSuccessfulSyncAt || this.now).getHours();
+      return this.todayCount / Math.max(1, Math.max(currentHour, activeHours[activeHours.length - 1]) - activeHours[0] + 1);
+    },
+    peakSalesHour() {
+      const peak = this.hourly.reduce((best, item) => Number(item.total || 0) > Number(best.total || 0) ? item : best, {});
+      const count = Number(peak.count || 0), hour = Number(peak.hour || 0);
+      if (!count) return { label:'—', total:0, count:0 };
+      const time = value => `${String(value % 12 || 12).padStart(2, '0')}:00 ${value < 12 || value === 24 ? 'AM' : 'PM'}`;
+      return { label:`${time(hour)} – ${time(hour + 1)}`, total:Number(peak.total || 0), count };
+    },
     trend() { return this.yesterdayTotal ? (this.todayTotal - this.yesterdayTotal) / this.yesterdayTotal * 100 : (this.todayTotal > 0 ? 100 : 0); },
     trendText() { const value = Math.abs(this.trend); return `${this.trend >= 0 ? '+' : '-'}${value >= 100 ? value.toFixed(0) : value.toFixed(1)}%`; },
     dateLabel() { return new Date(this.now).toLocaleDateString([], { weekday:'short', day:'2-digit', month:'short', year:'numeric' }); },
@@ -423,7 +438,7 @@ main { padding:20px clamp(20px,2vw,32px) 28px; }
 }
 .dashboard-grid.manager-layout { grid-template-areas:"locations chart" "recent products"; }
 .chart-panel { grid-area:chart; }.products { grid-area:products; }.recent { grid-area:recent; }.locations { grid-area:locations; }
-.manager-summary { margin-top:16px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px; }
+.manager-summary { margin-top:16px;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px; }
 .manager-summary article { min-width:0;padding:13px 15px;border:1px solid var(--line);border-radius:8px;background:var(--panel); }
 .manager-summary span,.manager-summary small { display:block;color:var(--muted);font-size:11px; }
 .manager-summary strong { display:block;margin:5px 0 3px;overflow:hidden;color:var(--text);font-size:17px;text-overflow:ellipsis;white-space:nowrap; }
@@ -441,7 +456,8 @@ main { padding:20px clamp(20px,2vw,32px) 28px; }
 .ticker-window { min-width:0;overflow:hidden; }
 .ticker-track { width:max-content;display:flex;align-items:center;animation:ticker-scroll 34s linear infinite; }
 .ticker-track>span { padding:0 22px;display:flex;align-items:center;gap:8px;border-right:1px solid var(--line);white-space:nowrap;font-size:12px; }
-.ticker-track b,.ticker-track em { color:var(--text);font-style:normal; }.ticker-track i,.ticker-track small { color:var(--muted);font-style:normal; }
+.ticker-track>span>* { color:var(--text);font:inherit;font-size:12px;font-style:normal;font-weight:500; }
+.ticker-track>span>*+*::before { margin-right:8px;color:var(--text);content:'·'; }
 @keyframes ticker-scroll { to { transform:translateX(-50%); } }
 .panel { padding:20px; }
 .panel-title { min-height:28px;margin-bottom:16px;align-items:center; }
@@ -540,6 +556,7 @@ main { padding:20px clamp(20px,2vw,32px) 28px; }
   .manager-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
   .chart{height:250px}
 }
+@media(min-width:1001px) and (max-width:1350px){.manager-summary{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:620px){
   header{height:68px}
   main{padding:12px}
