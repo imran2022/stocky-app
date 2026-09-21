@@ -232,6 +232,21 @@ export default {
         ) {
           return;
         }
+
+        // The POS product autocomplete and parent-SKU variant picker own
+        // Escape while they are open. This listener runs in capture phase,
+        // so without this narrow guard it would open Clear Cart before those
+        // controls could close themselves. Everywhere else Esc keeps its
+        // existing clear-cart behaviour.
+        if (e.key === "Escape" && typeof document !== "undefined") {
+          const variantPickerOpen = document.querySelector(".pos-variant-picker-backdrop");
+          const productSearchOpen =
+            e.target &&
+            e.target.classList &&
+            e.target.classList.contains("pos-shell-search-input") &&
+            document.querySelector(".pos-product-suggestions");
+          if (variantPickerOpen || productSearchOpen) return;
+        }
       } catch (e2) { /* ignore */ }
 
       // Never hijack typing in form fields — preserves existing

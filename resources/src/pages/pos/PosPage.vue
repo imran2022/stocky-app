@@ -686,23 +686,48 @@
               <path d="M3 7V4h3M14 4h3v3M17 13v3h-3M6 16H3v-3"/><path d="M5 10h10"/>
             </svg>
             <input
+              ref="productSearchInput"
               type="text"
               :placeholder="$t('Scan_Search_Product_by_Code_Name')"
               v-model="search_input"
-              @keyup="search"
+              role="combobox"
+              aria-autocomplete="list"
+              :aria-expanded="Boolean(product_filter && product_filter.length)"
+              aria-controls="pos-product-suggestions"
+              :aria-activedescendant="productSearchActiveIndex >= 0 ? `pos-product-suggestion-${productSearchActiveIndex}` : undefined"
+              @input="onProductSearchInput"
+              @keydown.down.prevent="moveProductSearchHighlight(1)"
+              @keydown.up.prevent="moveProductSearchHighlight(-1)"
+              @keydown.enter.prevent="selectHighlightedProduct"
+              @keydown.esc.prevent="closeProductSearchSuggestions"
               class="pos-shell-search-input"
               style="width: 100%; height: 36px; padding: 0 12px 0 38px; background: #ffffff; border: 1px solid #e6e6ec; border-radius: 8px; font-size: 13px; color: #1f1f2c; outline: none; font-family: inherit; transition: border-color 120ms ease, box-shadow 120ms ease;"
             />
-            <ul v-if="product_filter && product_filter.length" style="position: absolute; top: calc(100% + 4px); left: 0; right: 0; margin: 0; padding: 4px; list-style: none; background: #ffffff; border: 1px solid #e6e6ec; border-radius: 10px; box-shadow: 0 8px 24px rgba(20,20,40,0.08); max-height: 280px; overflow: auto; z-index: 10;">
+            <div v-if="product_filter && product_filter.length" class="pos-product-suggestions">
+            <ul id="pos-product-suggestions" role="listbox">
               <li
-                v-for="product_fil in product_filter"
-                :key="product_fil.id"
-                @mousedown="SearchProduct(product_fil)"
+                v-for="(product_fil, productIndex) in product_filter"
+                :id="`pos-product-suggestion-${productIndex}`"
+                :key="`${product_fil.id}-${product_fil.product_variant_id || 'base'}`"
+                ref="productSuggestionItems"
+                role="option"
+                :aria-selected="productIndex === productSearchActiveIndex"
+                :class="{ 'is-active': productIndex === productSearchActiveIndex }"
+                @mouseenter="productSearchActiveIndex = productIndex"
+                @mousedown.prevent="selectProductSearchResult(product_fil)"
                 class="pos-shell-autocomplete-item"
-                style="padding: 8px 12px; font-size: 13px; color: #1f1f2c; cursor: pointer; border-radius: 6px;">
-                {{ getResultValue(product_fil) }}
+              >
+                <span class="pos-product-suggestion-main">
+                  <strong>{{ product_fil.code }}</strong>
+                  <span>{{ product_fil.name }}</span>
+                </span>
+                <kbd v-if="productIndex === productSearchActiveIndex">Enter</kbd>
               </li>
             </ul>
+            <div class="pos-product-suggestions-help" aria-hidden="true">
+              <span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>Enter</kbd> Select</span><span><kbd>Esc</kbd> Close</span>
+            </div>
+            </div>
           </div>
           <!-- Scanner button (matches POS.html ghost lg button) -->
           <button @click="showModal" :title="$t('Scan')" class="pos-shell-action-btn" style="height: 36px; padding: 0 12px; background: transparent; color: #1f1f2c; border: 1px solid #e6e6ec; border-radius: 8px; font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; transition: all 120ms ease;">
@@ -1026,6 +1051,76 @@
         <a href="#" class="dropdown-item" @click.prevent="logoutUser">{{ $t('logout') || 'Logout' }}</a>
       </b-dropdown>
     </nav>
+
+    <!-- Parent-SKU variant picker. Selection still delegates to the existing
+         SearchProduct() path, preserving all stock/cart/batch/serial logic. -->
+    <transition name="pos-variant-picker">
+      <div
+        v-if="variantPickerOpen"
+        class="pos-variant-picker-backdrop"
+        @mousedown.self="closeVariantPicker"
+      >
+        <section
+          ref="variantPickerDialog"
+          class="pos-variant-picker"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="pos-variant-picker-title"
+          tabindex="-1"
+          @keydown.down.prevent="moveVariantPickerHighlight(1)"
+          @keydown.up.prevent="moveVariantPickerHighlight(-1)"
+          @keydown.enter.prevent="confirmVariantPickerSelection"
+          @keydown.esc.prevent="closeVariantPicker"
+        >
+          <header class="pos-variant-picker-header">
+            <div>
+              <div class="pos-variant-picker-heading">
+                <h2 id="pos-variant-picker-title">{{ tf('Select_a_variant', 'Select a variant') }}</h2>
+                <span><lucide-icon name="package" /> {{ tf('Variable_Product', 'Variable product') }}</span>
+              </div>
+              <p>{{ variantPickerParentName }} · {{ tf('SKU', 'SKU') }}: {{ variantPickerParentCode }}</p>
+            </div>
+            <button type="button" class="pos-variant-picker-close" :aria-label="tf('Close', 'Close')" @click="closeVariantPicker">
+              <lucide-icon name="x" />
+            </button>
+          </header>
+
+          <div class="pos-variant-picker-list" role="listbox">
+            <button
+              v-for="(variant, variantIndex) in variantPickerVariants"
+              :key="`${variant.id}-${variant.product_variant_id}`"
+              type="button"
+              role="option"
+              class="pos-variant-picker-row"
+              :class="{ 'is-selected': variantIndex === variantPickerIndex }"
+              :aria-selected="variantIndex === variantPickerIndex"
+              @mouseenter="variantPickerIndex = variantIndex"
+              @focus="variantPickerIndex = variantIndex"
+              @click="variantPickerIndex = variantIndex"
+              @dblclick="confirmVariantPickerSelection"
+            >
+              <span class="pos-variant-picker-radio"><i></i></span>
+              <span class="pos-variant-picker-copy">
+                <strong>{{ variantOptionName(variant) }}</strong>
+                <small>{{ tf('SKU', 'SKU') }} {{ variant.code }}</small>
+              </span>
+              <span class="pos-variant-picker-stock">{{ formatNumber(variant.qte_sale, 2) }} {{ variant.unitSale || tf('In_Stock', 'in stock') }}</span>
+              <strong class="pos-variant-picker-price">{{ formatPriceWithCurrentCurrency(variant.Unit_price, 2) }}</strong>
+            </button>
+          </div>
+
+          <footer class="pos-variant-picker-footer">
+            <span><kbd>↑</kbd><kbd>↓</kbd> {{ tf('Choose', 'Choose') }} · <kbd>Enter</kbd> {{ tf('Add_to_cart', 'Add to cart') }}</span>
+            <div>
+              <button type="button" class="pos-variant-picker-cancel" @click="closeVariantPicker">{{ tf('Cancel', 'Cancel') }}</button>
+              <button type="button" class="pos-variant-picker-add" @click="confirmVariantPickerSelection">
+                <lucide-icon name="shopping-cart" /> {{ tf('Add_to_cart', 'Add to cart') }}
+              </button>
+            </div>
+          </footer>
+        </section>
+      </div>
+    </transition>
 
     <!-- ============================================================
          MODALS (preserved verbatim from original; teleport to body)
@@ -4497,6 +4592,12 @@ export default {
       timer:null,
       search_input:'',
       product_filter:[],
+      productSearchActiveIndex: -1,
+      variantPickerOpen: false,
+      variantPickerVariants: [],
+      variantPickerIndex: 0,
+      variantPickerParentCode: '',
+      variantPickerParentName: '',
       isLoading: true,
       load_product: true,
       GrandTotal: 0,
@@ -7733,19 +7834,152 @@ export default {
     },
 
     // ==================== SEARCH METHODS ====================
-    search(){
+    onProductSearchInput(event) {
+      if (event && event.target) this.search_input = event.target.value;
+      this.productSearchActiveIndex = -1;
+      this.search();
+    },
+
+    setProductSearchResults(results) {
+      this.product_filter = Array.isArray(results) ? results : [];
+      this.productSearchActiveIndex = this.product_filter.length ? 0 : -1;
+      this.scrollProductSearchHighlightIntoView();
+    },
+
+    closeProductSearchSuggestions() {
+      if (this.timer) {
+        clearTimeout(this.timer);
+        this.timer = null;
+      }
+      this.product_filter = [];
+      this.productSearchActiveIndex = -1;
+    },
+
+    moveProductSearchHighlight(direction) {
+      const total = Array.isArray(this.product_filter) ? this.product_filter.length : 0;
+      if (!total) return;
+      const current = this.productSearchActiveIndex < 0 ? 0 : this.productSearchActiveIndex;
+      this.productSearchActiveIndex = (current + direction + total) % total;
+      this.scrollProductSearchHighlightIntoView();
+    },
+
+    scrollProductSearchHighlightIntoView() {
+      this.$nextTick(() => {
+        const refs = this.$refs && this.$refs.productSuggestionItems;
+        const rows = Array.isArray(refs) ? refs : (refs ? [refs] : []);
+        const row = rows[this.productSearchActiveIndex];
+        if (row && typeof row.scrollIntoView === 'function') {
+          row.scrollIntoView({ block: 'nearest' });
+        }
+      });
+    },
+
+    selectHighlightedProduct() {
+      if (this.product_filter && this.product_filter.length) {
+        const index = this.productSearchActiveIndex >= 0 ? this.productSearchActiveIndex : 0;
+        this.selectProductSearchResult(this.product_filter[index]);
+        return;
+      }
+      // Enter should not make the cashier wait for the normal typing debounce.
+      this.search(true);
+    },
+
+    selectProductSearchResult(result) {
+      if (!result) return;
+      this.productSearchActiveIndex = -1;
+      this.SearchProduct(result);
+    },
+
+    openVariantPicker(variants, parentCode) {
+      const rows = Array.isArray(variants) ? variants.filter(Boolean) : [];
+      if (!rows.length) return;
+      if (this.timer) {
+        clearTimeout(this.timer);
+        this.timer = null;
+      }
+      this.variantPickerVariants = rows;
+      this.variantPickerIndex = 0;
+      this.variantPickerParentCode = String(parentCode || rows[0].product_code || '').trim();
+      this.variantPickerParentName = this.parentProductName(rows[0]);
+      this.variantPickerOpen = true;
+      this.search_input = '';
+      this.product_filter = [];
+      this.productSearchActiveIndex = -1;
+      this.$nextTick(() => {
+        const dialog = this.$refs && this.$refs.variantPickerDialog;
+        if (dialog && typeof dialog.focus === 'function') dialog.focus();
+      });
+    },
+
+    closeVariantPicker() {
+      this.variantPickerOpen = false;
+      this.variantPickerVariants = [];
+      this.variantPickerIndex = 0;
+      this.variantPickerParentCode = '';
+      this.variantPickerParentName = '';
+      this.$nextTick(() => {
+        const input = this.$refs && this.$refs.productSearchInput;
+        if (input && typeof input.focus === 'function') input.focus();
+      });
+    },
+
+    moveVariantPickerHighlight(direction) {
+      const total = this.variantPickerVariants.length;
+      if (!total) return;
+      this.variantPickerIndex = (this.variantPickerIndex + direction + total) % total;
+    },
+
+    confirmVariantPickerSelection() {
+      const selected = this.variantPickerVariants[this.variantPickerIndex];
+      if (!selected) return;
+      this.variantPickerOpen = false;
+      this.variantPickerVariants = [];
+      this.variantPickerIndex = 0;
+      this.variantPickerParentCode = '';
+      this.variantPickerParentName = '';
+      this.SearchProduct(selected);
+    },
+
+    parentProductName(product) {
+      const name = String(product && product.name ? product.name : '').trim();
+      return name.split(/\s+-\s+Variant:\s*/i)[0] || name;
+    },
+
+    variantOptionName(product) {
+      const name = String(product && product.name ? product.name : '').trim();
+      const parts = name.split(/\s+-\s+Variant:\s*/i);
+      return parts.length > 1 ? parts.slice(1).join(' - ') : name;
+    },
+
+    search(immediate = false){
       if (this.timer) {
             clearTimeout(this.timer);
             this.timer = null;
       }
       if (this.search_input.length < 2) {
-        return this.product_filter= [];
+        this.setProductSearchResults([]);
+        return;
       }
       if (this.sale.warehouse_id != "" &&  this.sale.warehouse_id != null) {
         this.timer = setTimeout(() => {
 
           let barcode = this.search_input.trim();
           let weight = null;
+          // A parent SKU represents the variable product, not a sellable line.
+          // Resolve it before 13-digit scale/barcode handling so numeric parent
+          // SKUs also open the picker instead of being mistaken for a weight code.
+          const normalizedSearch = barcode.toLowerCase();
+          const parentVariants = this.products_pos.filter(product =>
+            product.product_variant_id != null &&
+            String(product.product_code || '').trim().toLowerCase() === normalizedSearch &&
+            this.productFitsVehicle(product) &&
+            (product.product_type === 'is_service' || this.isOversellingAllowed || Number(product.qte_sale || 0) > 0)
+          );
+          if (parentVariants.length) {
+            this.openVariantPicker(parentVariants, barcode);
+            return;
+          }
+
           if (barcode.length === 13 && !isNaN(barcode)) {
             // Play sound only if barcode scanning sound is enabled
             if (this.pos_settings.barcode_scanning_sound) {
@@ -7789,9 +8023,9 @@ export default {
 
             this.makeToast("danger", "Invalid product code scanned", this.$t("Error"));
             this.search_input= '';
-            this.product_filter = [];
+            this.setProductSearchResults([]);
           }
-          
+
           const product_filter = this.products_pos.filter(product =>
             this.productFitsVehicle(product) &&
             (product.product_type === 'is_service' || this.isOversellingAllowed || Number(product.qte_sale || 0) > 0) &&
@@ -7809,7 +8043,7 @@ export default {
             }
             this.Check_Product_Exist(product_filter[0], product_filter[0].id, weight = null);
           }else {
-            this.product_filter = this.products_pos.filter(product => {
+            this.setProductSearchResults(this.products_pos.filter(product => {
               // Hide parts that do not fit the selected vehicle.
               if (!this.productFitsVehicle(product)) return false;
               // Hide out-of-stock products from search results unless overselling is allowed.
@@ -7825,9 +8059,9 @@ export default {
                 productCode.includes(term) ||
                 barcodeStr.includes(term)
               );
-            });
+            }));
           }
-        }, 800);
+        }, immediate ? 0 : 800);
       } else {
         this.makeToast(
           "warning",
@@ -7874,6 +8108,7 @@ export default {
         NProgress.done();
         this.search_input= '';
         this.product_filter = [];
+        this.productSearchActiveIndex = -1;
 
       }else{
           this.makeToast(
@@ -8374,6 +8609,9 @@ export default {
     Selected_Warehouse(value) {
       this.search_input = '';
       this.product_filter = [];
+      this.productSearchActiveIndex = -1;
+      this.variantPickerOpen = false;
+      this.variantPickerVariants = [];
 
       // If warehouse is cleared, reset product lists and avoid calling API/cache.
       if (!value) {
@@ -10299,6 +10537,7 @@ export default {
         this.product.product_variant_id = result.product_variant_id;
         this.Get_Product_Details(result.id, result.product_variant_id, result);
         this.search_input = '';
+        this.productSearchActiveIndex = -1;
         if (this.$refs && this.$refs.product_autocomplete) {
           this.$refs.product_autocomplete.value = "";
         }
@@ -21237,5 +21476,316 @@ html.pos-active:fullscreen .layout-sidebar-large .main-content-wrap {
 @media (prefers-reduced-motion: reduce) {
   .qac-avatar, .qac-more-label svg, .qac-btn, .qac-close { transition: none; }
   .qac-dot { animation: none; opacity: 1; }
+}
+
+/* Product search keyboard navigation */
+.pos-product-suggestions {
+  position: absolute;
+  z-index: 1060;
+  top: calc(100% + 4px);
+  right: 0;
+  left: 0;
+  overflow: hidden;
+  border: 1px solid #e6e6ec;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 12px 30px rgba(20, 20, 40, .12);
+}
+.pos-product-suggestions ul {
+  max-height: 238px;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+}
+.pos-product-suggestions .pos-shell-autocomplete-item {
+  position: relative;
+  min-height: 38px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-radius: 6px;
+  color: #1f1f2c;
+  cursor: pointer;
+  font-size: 13px;
+}
+.pos-product-suggestions .pos-shell-autocomplete-item::before {
+  position: absolute;
+  top: 7px;
+  bottom: 7px;
+  left: 0;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: transparent;
+  content: '';
+}
+.pos-product-suggestions .pos-shell-autocomplete-item.is-active {
+  background: #f3f0ff;
+}
+.pos-product-suggestions .pos-shell-autocomplete-item.is-active::before {
+  background: #6f53d9;
+}
+.pos-product-suggestion-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pos-product-suggestion-main strong {
+  flex: 0 0 auto;
+  color: #1f1f2c;
+  font-size: 12px;
+  font-weight: 700;
+}
+.pos-product-suggestion-main span {
+  overflow: hidden;
+  color: #454559;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pos-product-suggestions kbd,
+.pos-variant-picker kbd {
+  min-width: 20px;
+  padding: 2px 5px;
+  border: 1px solid #ddd8f6;
+  border-radius: 5px;
+  color: #6550bd;
+  background: #fff;
+  box-shadow: none;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: center;
+}
+.pos-product-suggestions-help {
+  min-height: 30px;
+  padding: 5px 10px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border-top: 1px solid #eeeeF3;
+  color: #8d8da0;
+  background: #fafafd;
+  font-size: 10px;
+}
+.pos-product-suggestions-help span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Variable-product parent SKU picker */
+.pos-variant-picker-backdrop {
+  position: fixed;
+  z-index: 2060;
+  inset: 0;
+  padding: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(24, 27, 42, .48);
+}
+.pos-variant-picker {
+  width: min(640px, 100%);
+  max-height: min(720px, calc(100vh - 48px));
+  overflow: hidden;
+  border: 1px solid #ebe9f5;
+  border-radius: 14px;
+  outline: none;
+  background: #fff;
+  box-shadow: 0 26px 70px rgba(20, 20, 40, .22);
+}
+.pos-variant-picker-header {
+  padding: 20px 22px 17px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  border-bottom: 1px solid #eeeeF3;
+}
+.pos-variant-picker-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.pos-variant-picker-heading h2 {
+  margin: 0;
+  color: #1f1f2c;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.pos-variant-picker-heading > span {
+  height: 25px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 6px;
+  color: #6547d5;
+  background: #f0edff;
+  font-size: 11px;
+  font-weight: 700;
+}
+.pos-variant-picker-heading svg { width: 13px; height: 13px; }
+.pos-variant-picker-header p {
+  margin: 6px 0 0;
+  color: #77778b;
+  font-size: 12px;
+}
+.pos-variant-picker-close {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 8px;
+  color: #77778b;
+  background: transparent;
+  cursor: pointer;
+}
+.pos-variant-picker-close:hover { color: #1f1f2c; background: #f4f3f8; }
+.pos-variant-picker-close svg { width: 18px; height: 18px; }
+.pos-variant-picker-list {
+  max-height: min(430px, calc(100vh - 250px));
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+}
+.pos-variant-picker-row {
+  width: 100%;
+  min-height: 64px;
+  padding: 10px 13px;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #e6e6ec;
+  border-radius: 10px;
+  color: #1f1f2c;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+.pos-variant-picker-row:hover { border-color: #cfc7f4; background: #fcfbff; }
+.pos-variant-picker-row.is-selected {
+  border-color: #7659e2;
+  background: #f7f5ff;
+  box-shadow: 0 0 0 2px rgba(111, 83, 217, .09);
+}
+.pos-variant-picker-radio {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid #b9b7c6;
+  border-radius: 50%;
+}
+.pos-variant-picker-row.is-selected .pos-variant-picker-radio { border-color: #6f53d9; }
+.pos-variant-picker-radio i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: transparent;
+}
+.pos-variant-picker-row.is-selected .pos-variant-picker-radio i { background: #6f53d9; }
+.pos-variant-picker-copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.pos-variant-picker-copy strong { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.pos-variant-picker-copy small { color: #8d8da0; font-size: 11px; }
+.pos-variant-picker-stock {
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: #16834a;
+  background: #ecf9f1;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.pos-variant-picker-price {
+  min-width: 95px;
+  color: #6f53d9;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+.pos-variant-picker-footer {
+  min-height: 68px;
+  padding: 12px 16px 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px solid #eeeeF3;
+  background: #fafafd;
+}
+.pos-variant-picker-footer > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #8d8da0;
+  font-size: 11px;
+}
+.pos-variant-picker-footer > div { display: flex; align-items: center; gap: 8px; }
+.pos-variant-picker-cancel,
+.pos-variant-picker-add {
+  height: 40px;
+  padding: 0 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.pos-variant-picker-cancel { border: 1px solid #dfdde8; color: #454559; background: #fff; }
+.pos-variant-picker-add { min-width: 132px; border: 1px solid #6f53d9; color: #fff; background: #6f53d9; }
+.pos-variant-picker-add:hover { background: #5f44ca; }
+.pos-variant-picker-add svg { width: 15px; height: 15px; }
+.pos-variant-picker-enter-active,
+.pos-variant-picker-leave-active { transition: opacity 150ms ease; }
+.pos-variant-picker-enter-active .pos-variant-picker,
+.pos-variant-picker-leave-active .pos-variant-picker { transition: transform 150ms ease, opacity 150ms ease; }
+.pos-variant-picker-enter-from,
+.pos-variant-picker-leave-to { opacity: 0; }
+.pos-variant-picker-enter-from .pos-variant-picker,
+.pos-variant-picker-leave-to .pos-variant-picker { opacity: 0; transform: translateY(8px) scale(.985); }
+
+@media (max-width: 575.98px) {
+  .pos-product-suggestions-help { gap: 9px; }
+  .pos-variant-picker-backdrop { padding: 0; align-items: flex-end; }
+  .pos-variant-picker {
+    width: 100%;
+    max-height: 92vh;
+    max-height: 92dvh;
+    border-radius: 16px 16px 0 0;
+  }
+  .pos-variant-picker-header { padding: 17px 16px 14px; }
+  .pos-variant-picker-heading h2 { font-size: 18px; }
+  .pos-variant-picker-list { max-height: calc(92dvh - 205px); padding: 12px; }
+  .pos-variant-picker-row {
+    grid-template-columns: 20px minmax(0, 1fr) auto;
+    gap: 10px;
+  }
+  .pos-variant-picker-stock { grid-column: 2; justify-self: start; }
+  .pos-variant-picker-price { grid-column: 3; grid-row: 1 / span 2; min-width: 0; }
+  .pos-variant-picker-footer { padding: 11px 12px calc(11px + env(safe-area-inset-bottom)); }
+  .pos-variant-picker-footer > span { display: none; }
+  .pos-variant-picker-footer > div { width: 100%; }
+  .pos-variant-picker-cancel,
+  .pos-variant-picker-add { flex: 1 1 0; }
 }
 </style>
