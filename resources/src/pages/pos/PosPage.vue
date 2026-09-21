@@ -1072,7 +1072,7 @@
           @keydown.enter.prevent="confirmVariantPickerSelection"
           @keydown.esc.prevent="closeVariantPicker"
         >
-          <header class="pos-variant-picker-header">
+          <div class="pos-variant-picker-header">
             <div>
               <div class="pos-variant-picker-heading">
                 <h2 id="pos-variant-picker-title">{{ tf('Select_a_variant', 'Select a variant') }}</h2>
@@ -1083,7 +1083,7 @@
             <button type="button" class="pos-variant-picker-close" :aria-label="tf('Close', 'Close')" @click="closeVariantPicker">
               <lucide-icon name="x" />
             </button>
-          </header>
+          </div>
 
           <div class="pos-variant-picker-list" role="listbox">
             <button
@@ -1109,7 +1109,7 @@
             </button>
           </div>
 
-          <footer class="pos-variant-picker-footer">
+          <div class="pos-variant-picker-footer">
             <span><kbd>↑</kbd><kbd>↓</kbd> {{ tf('Choose', 'Choose') }} · <kbd>Enter</kbd> {{ tf('Add_to_cart', 'Add to cart') }}</span>
             <div>
               <button type="button" class="pos-variant-picker-cancel" @click="closeVariantPicker">{{ tf('Cancel', 'Cancel') }}</button>
@@ -1117,7 +1117,7 @@
                 <lucide-icon name="shopping-cart" /> {{ tf('Add_to_cart', 'Add to cart') }}
               </button>
             </div>
-          </footer>
+          </div>
         </section>
       </div>
     </transition>
@@ -21589,6 +21589,7 @@ html.pos-active:fullscreen .layout-sidebar-large .main-content-wrap {
   background: rgba(24, 27, 42, .48);
 }
 .pos-variant-picker {
+  position: relative;
   width: min(640px, 100%);
   max-height: min(720px, calc(100vh - 48px));
   overflow: hidden;
@@ -21599,11 +21600,10 @@ html.pos-active:fullscreen .layout-sidebar-large .main-content-wrap {
   box-shadow: 0 26px 70px rgba(20, 20, 40, .22);
 }
 .pos-variant-picker-header {
-  padding: 20px 22px 17px;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 18px;
+  min-height: 88px;
+  padding: 20px 64px 17px 22px;
+  display: block;
+  position: relative;
   border-bottom: 1px solid #eeeeF3;
 }
 .pos-variant-picker-heading {
@@ -21638,8 +21638,14 @@ html.pos-active:fullscreen .layout-sidebar-large .main-content-wrap {
   font-size: 12px;
 }
 .pos-variant-picker-close {
+  position: absolute !important;
+  top: 14px !important;
+  right: 14px !important;
+  bottom: auto !important;
+  left: auto !important;
   width: 34px;
   height: 34px;
+  margin: 0 !important;
   padding: 0;
   display: inline-flex;
   align-items: center;
@@ -21723,21 +21729,29 @@ html.pos-active:fullscreen .layout-sidebar-large .main-content-wrap {
 .pos-variant-picker-footer {
   min-height: 68px;
   padding: 12px 16px 12px 20px;
-  display: flex;
+  display: flex !important;
+  flex-direction: row !important;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end !important;
   gap: 16px;
   border-top: 1px solid #eeeeF3;
   background: #fafafd;
 }
 .pos-variant-picker-footer > span {
+  margin-right: auto;
   display: flex;
   align-items: center;
   gap: 5px;
   color: #8d8da0;
   font-size: 11px;
 }
-.pos-variant-picker-footer > div { display: flex; align-items: center; gap: 8px; }
+.pos-variant-picker-footer > div {
+  margin-left: auto;
+  display: flex !important;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
 .pos-variant-picker-cancel,
 .pos-variant-picker-add {
   height: 40px;
@@ -21773,7 +21787,8 @@ html.pos-active:fullscreen .layout-sidebar-large .main-content-wrap {
     max-height: 92dvh;
     border-radius: 16px 16px 0 0;
   }
-  .pos-variant-picker-header { padding: 17px 16px 14px; }
+  .pos-variant-picker-header { min-height: 82px; padding: 17px 56px 14px 16px; }
+  .pos-variant-picker-close { top: 12px !important; right: 12px !important; }
   .pos-variant-picker-heading h2 { font-size: 18px; }
   .pos-variant-picker-list { max-height: calc(92dvh - 205px); padding: 12px; }
   .pos-variant-picker-row {
@@ -21782,9 +21797,9 @@ html.pos-active:fullscreen .layout-sidebar-large .main-content-wrap {
   }
   .pos-variant-picker-stock { grid-column: 2; justify-self: start; }
   .pos-variant-picker-price { grid-column: 3; grid-row: 1 / span 2; min-width: 0; }
-  .pos-variant-picker-footer { padding: 11px 12px calc(11px + env(safe-area-inset-bottom)); }
+  .pos-variant-picker-footer { min-height: 66px; padding: 11px 12px calc(11px + env(safe-area-inset-bottom)); }
   .pos-variant-picker-footer > span { display: none; }
-  .pos-variant-picker-footer > div { width: 100%; }
+  .pos-variant-picker-footer > div { width: 100%; margin-left: 0; }
   .pos-variant-picker-cancel,
   .pos-variant-picker-add { flex: 1 1 0; }
 }
