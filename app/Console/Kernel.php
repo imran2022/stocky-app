@@ -56,7 +56,8 @@ class Kernel extends ConsoleKernel
             \App\Models\RealTimeSalesDisplay::query()
                 ->where(function ($query) {
                     $query->where('expires_at', '<', now()->subDays(90))
-                        ->orWhere('revoked_at', '<', now()->subDays(90));
+                        ->orWhere('revoked_at', '<', now()->subDays(90))
+                        ->orWhere('archived_at', '<', now()->subDays(90));
                 })
                 ->delete();
         })->dailyAt('02:45')->name('real-time-sales-displays:cleanup')->withoutOverlapping();

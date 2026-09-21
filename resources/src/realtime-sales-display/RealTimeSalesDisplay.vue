@@ -3,7 +3,7 @@
     <header>
       <div class="brand">
         <span class="logo"><img :src="logo" alt=""></span>
-        <div><h1>{{ company }}</h1><p>Live sales overview · {{ warehouseName }}</p></div>
+        <div><h1>{{ company }}</h1><p>{{ displayName }} · {{ warehouseName }}</p></div>
       </div>
       <div class="header-meta">
         <span class="live" :class="{ offline: hasError }"><i></i>{{ hasError ? 'CONNECTION LOST' : 'LIVE' }}</span>
@@ -29,6 +29,11 @@
         <strong>Display access expired</strong>
         <span>Generate a new link from the Real-time Sales Counter page.</span>
       </section>
+      <section v-else-if="hasError" class="connection-warning" role="status">
+        <div><strong>Connection interrupted</strong><span>Showing the last successfully synced data.</span></div>
+        <div><b>{{ consecutiveFailures }}</b><span>failed attempt{{ consecutiveFailures === 1 ? '' : 's' }} · retrying in {{ nextRefreshSeconds }}s</span></div>
+        <small>Last successful sync: {{ lastSuccessfulSyncLabel }}</small>
+      </section>
       <section class="kpis">
         <article :class="{ bump: bumpCount }">
           <div><p>Sales today</p><strong>{{ todayCount }}</strong></div>
@@ -49,18 +54,37 @@
         <div><i class="partial"></i><span>Partial</span><strong>{{ statuses.partial }}</strong></div>
         <div><i class="unpaid"></i><span>Unpaid</span><strong>{{ statuses.unpaid }}</strong></div>
         <div class="due"><span>Sales due</span><strong>{{ money(todayDue) }}</strong></div>
-        <div class="updated">{{ hasError ? `Retrying in ${nextRefreshSeconds}s` : `Updated ${updatedRelative} · Next ${nextRefreshSeconds}s` }}</div>
+        <div class="updated">Last sync {{ updatedRelative }} · {{ hasError ? `Retry ${nextRefreshSeconds}s` : `Next ${nextRefreshSeconds}s` }}</div>
+      </section>
+
+      <section v-if="recentSales.length" class="sales-ticker" aria-label="Latest sales">
+        <strong>Latest sales</strong>
+        <div class="ticker-window"><div class="ticker-track">
+          <template v-for="copy in 2" :key="copy">
+            <span v-for="sale in recentSales" :key="`${copy}-${sale.id}`">
+              <b>{{ sale.Ref || 'Sale' }}</b><i>{{ sale.warehouse_name || 'Warehouse' }}</i><em>{{ money(sale.grand_total) }}</em><small>{{ saleTime(sale.date) }}</small>
+            </span>
+          </template>
+        </div></div>
       </section>
 
       <transition name="notice">
         <div v-if="newSaleNotice" class="sale-notice" role="status" aria-live="polite">
-          <span>New sale</span><strong>{{ newSaleNotice.Ref || 'Sale recorded' }}</strong><b>{{ money(newSaleNotice.grand_total) }}</b>
+          <span>New sale received</span><strong>{{ newSaleNotice.Ref || 'Sale recorded' }}</strong><b>{{ money(newSaleNotice.grand_total) }}</b>
+          <small>{{ newSaleNotice.warehouse_name || warehouseName }} · {{ saleTime(newSaleNotice.date) }}</small>
         </div>
       </transition>
 
       <section v-if="loading" class="loading"><i></i><span>Loading live sales…</span></section>
       <template v-else>
-        <section class="grid top-grid">
+        <section v-if="isManager" class="manager-summary">
+          <article><span>Top warehouse</span><strong>{{ topWarehouse?.name || '—' }}</strong><small>{{ topWarehouse ? money(topWarehouse.amount) : 'No sales yet' }}</small></article>
+          <article><span>Reporting warehouses</span><strong>{{ locations.length }}</strong><small>{{ locations.reduce((sum, item) => sum + Number(item.total_invoice || 0), 0) }} invoices today</small></article>
+          <article><span>Average / warehouse</span><strong>{{ money(averageWarehouseSales) }}</strong><small>Based on today’s sales</small></article>
+          <article><span>Top warehouse share</span><strong>{{ topWarehouseShare }}%</strong><small>Of total sales today</small></article>
+        </section>
+
+        <section class="dashboard-grid" :class="{ 'manager-layout': isManager }">
           <article class="panel chart-panel">
             <div class="panel-title">
               <h2>Hourly sales today</h2>
@@ -76,7 +100,6 @@
             </div>
             <div class="chart"><apexchart type="bar" height="250" :options="hourlyChartOptions" :series="hourlyChartSeries" /></div>
           </article>
-
           <article class="panel products">
             <div class="panel-title"><h2>Top products today</h2><span>By quantity</span></div>
             <div v-if="!topProducts.length" class="empty">No sales yet</div>
@@ -86,9 +109,6 @@
               <p><strong>{{ quantity(product.quantity) }}</strong><small>{{ money(product.total) }}</small></p>
             </div>
           </article>
-        </section>
-
-        <section class="grid bottom-grid">
           <article class="panel recent" :class="{ 'show-customers': showCustomerNames }">
             <div class="panel-title"><h2>Recent sales</h2><span>Latest {{ recentSales.length }}</span></div>
             <div class="table">
@@ -101,9 +121,8 @@
               </div>
             </div>
           </article>
-
           <article class="panel locations">
-            <div class="panel-title"><h2>Sales by warehouse</h2></div>
+            <div class="panel-title"><h2>{{ isManager ? 'Warehouse performance' : 'Sales by warehouse' }}</h2><span v-if="isManager">Ranked by today’s sales</span></div>
             <div class="location-table">
               <div class="location-row location-head"><span>S/N</span><span>Name</span><span>Total invoice</span><span>Amount</span><span>Last sale</span></div>
               <div v-if="!locations.length" class="empty">No sales yet</div>
@@ -129,8 +148,9 @@ export default {
       loading: true, fetching: false, hasError: false, accessExpired: false, now: Date.now(), refreshSeconds: 30,
       todayCount: 0, todayTotal: 0, todayPaid: 0, todayDue: 0, yesterdayTotal: 0, lastSaleAt: null,
       statuses: { paid: 0, partial: 0, unpaid: 0 }, hourly: [], recentSales: [], topProducts: [], locations: [],
-      warehouseName: 'All Warehouses', currency: '', showCustomerNames: false, lastUpdatedAt: null,
-      chartMetric: 'count', accessExpiresAt: null,
+      warehouseName: 'All Warehouses', displayName: 'Live Sales Display', layoutProfile: 'standard',
+      currency: '', showCustomerNames: false, lastUpdatedAt: null, lastSuccessfulSyncAt: null,
+      consecutiveFailures: 0, chartMetric: 'count', accessExpiresAt: null,
       knownIds: new Set(), newSaleIds: new Set(), bumpCount: false, bumpTotal: false,
       timer: null, clockTimer: null, freshTimer: null, noticeTimer: null, nextRefreshAt: null,
       isFullscreen: false, newSaleNotice: null, audioContext: null,
@@ -138,6 +158,10 @@ export default {
   },
   computed: {
     averageSale() { return this.todayCount ? this.todayTotal / this.todayCount : 0; },
+    isManager() { return this.layoutProfile === 'manager'; },
+    topWarehouse() { return this.locations.length ? this.locations[0] : null; },
+    averageWarehouseSales() { return this.locations.length ? this.todayTotal / this.locations.length : 0; },
+    topWarehouseShare() { return this.todayTotal && this.topWarehouse ? Math.round(Number(this.topWarehouse.amount || 0) / this.todayTotal * 100) : 0; },
     trend() { return this.yesterdayTotal ? (this.todayTotal - this.yesterdayTotal) / this.yesterdayTotal * 100 : (this.todayTotal > 0 ? 100 : 0); },
     trendText() { const value = Math.abs(this.trend); return `${this.trend >= 0 ? '+' : '-'}${value >= 100 ? value.toFixed(0) : value.toFixed(1)}%`; },
     dateLabel() { return new Date(this.now).toLocaleDateString([], { weekday:'short', day:'2-digit', month:'short', year:'numeric' }); },
@@ -145,6 +169,7 @@ export default {
     lastSaleRelative() { return this.relative(this.lastSaleAt); },
     lastSaleAbsolute() { return this.lastSaleAt ? new Date(this.lastSaleAt).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) : 'No sales yet'; },
     updatedRelative() { return this.relative(this.lastUpdatedAt); },
+    lastSuccessfulSyncLabel() { return this.lastSuccessfulSyncAt ? new Date(this.lastSuccessfulSyncAt).toLocaleString() : 'No successful sync yet'; },
     nextRefreshSeconds() { return this.nextRefreshAt ? Math.max(0, Math.ceil((this.nextRefreshAt - this.now) / 1000)) : 0; },
     tokenExpiresSoon() { return this.accessExpiresAt && (new Date(this.accessExpiresAt).getTime() - this.now) <= 3600000; },
     tokenExpiryText() {
@@ -243,7 +268,9 @@ export default {
       if (this.fetching) return;
       this.fetching = true;
       try {
-        const response = await fetch(`/api/real-time-sales-display/data?token=${encodeURIComponent(this.token)}`, { headers:{ Accept:'application/json' } });
+        const failedAttempts = this.consecutiveFailures;
+        const url = `/api/real-time-sales-display/data?token=${encodeURIComponent(this.token)}&failed_attempts=${failedAttempts}`;
+        const response = await fetch(url, { headers:{ Accept:'application/json' } });
         if (response.status === 403) {
           this.accessExpired = true;
           this.hasError = true;
@@ -261,6 +288,8 @@ export default {
         this.hourly = Array.isArray(data.hourly) ? data.hourly : []; this.recentSales = Array.isArray(data.recent_sales) ? data.recent_sales : [];
         this.topProducts = Array.isArray(data.top_products) ? data.top_products : []; this.locations = Array.isArray(data.sales_by_location) ? data.sales_by_location : [];
         this.warehouseName = data.selected_warehouse_name || 'All Warehouses'; this.currency = data.currency || '';
+        this.displayName = data.display_name || 'Live Sales Display';
+        this.layoutProfile = data.layout_profile === 'manager' ? 'manager' : 'standard';
         this.accessExpiresAt = data.expires_at || this.accessExpiresAt;
         this.showCustomerNames = !!data.show_customer_names; this.refreshSeconds = Math.max(10, Number(data.refresh_seconds || 30));
         const ids = new Set(this.recentSales.map(sale => sale.id));
@@ -269,8 +298,14 @@ export default {
         if (fresh.length || (previousCount && this.todayCount > previousCount)) {
           this.pulse(fresh, previousTotal, this.recentSales.find(sale => fresh.includes(sale.id)) || null);
         }
-        this.lastUpdatedAt = new Date().toISOString(); this.hasError = false; this.accessExpired = false; this.schedule();
-      } catch (error) { this.hasError = true; if (!this.accessExpired) this.schedule(); }
+        this.lastUpdatedAt = data.server_time || new Date().toISOString();
+        this.lastSuccessfulSyncAt = this.lastUpdatedAt;
+        this.consecutiveFailures = 0; this.hasError = false; this.accessExpired = false; this.schedule();
+      } catch (error) {
+        this.consecutiveFailures += 1;
+        this.hasError = true;
+        if (!this.accessExpired) this.schedule(this.retryDelay());
+      }
       finally { this.loading = false; this.fetching = false; }
     },
     pulse(ids, previousTotal, newestSale) {
@@ -281,9 +316,12 @@ export default {
         this.noticeTimer = setTimeout(() => { this.newSaleNotice = null; }, 4500);
       }
     },
-    schedule() {
-      clearTimeout(this.timer); this.nextRefreshAt = Date.now() + this.refreshSeconds * 1000;
-      this.timer = setTimeout(this.fetchData, this.refreshSeconds * 1000);
+    retryDelay() {
+      return [5, 10, 30, 60][Math.min(this.consecutiveFailures - 1, 3)];
+    },
+    schedule(delaySeconds = this.refreshSeconds) {
+      clearTimeout(this.timer); this.nextRefreshAt = Date.now() + delaySeconds * 1000;
+      this.timer = setTimeout(this.fetchData, delaySeconds * 1000);
     },
   },
   mounted() {
@@ -379,7 +417,32 @@ main { padding:20px clamp(20px,2vw,32px) 28px; }
 .payment-strip strong { font-size:14px; }
 .payment-strip .due strong { color:#6d28d9; }
 .payment-strip .updated { font-size:12px; }
-.top-grid,.bottom-grid { grid-template-columns:minmax(0,14fr) minmax(340px,10fr); }
+.dashboard-grid {
+  margin-top:16px;display:grid;grid-template-columns:minmax(0,14fr) minmax(340px,10fr);
+  grid-template-areas:"chart products" "recent locations";gap:16px;
+}
+.dashboard-grid.manager-layout { grid-template-areas:"locations chart" "recent products"; }
+.chart-panel { grid-area:chart; }.products { grid-area:products; }.recent { grid-area:recent; }.locations { grid-area:locations; }
+.manager-summary { margin-top:16px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px; }
+.manager-summary article { min-width:0;padding:13px 15px;border:1px solid var(--line);border-radius:8px;background:var(--panel); }
+.manager-summary span,.manager-summary small { display:block;color:var(--muted);font-size:11px; }
+.manager-summary strong { display:block;margin:5px 0 3px;overflow:hidden;color:var(--text);font-size:17px;text-overflow:ellipsis;white-space:nowrap; }
+.connection-warning {
+  margin-bottom:16px;padding:12px 15px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 20px;
+  border:1px solid #ffe58f;border-radius:8px;color:#874d00;background:#fffbe6;
+}
+.dark .connection-warning { border-color:rgba(245,158,11,.3);color:#fde68a;background:rgba(245,158,11,.1); }
+.connection-warning>div { display:flex;align-items:center;gap:8px; }
+.connection-warning>div:nth-child(2) { justify-content:flex-end; }
+.connection-warning span,.connection-warning small { color:var(--muted);font-size:11px; }
+.connection-warning small { grid-column:1/-1; }
+.sales-ticker { margin-top:10px;height:38px;display:flex;align-items:center;overflow:hidden;border:1px solid var(--line);border-radius:8px;background:var(--panel); }
+.sales-ticker>strong { height:100%;padding:0 14px;display:flex;align-items:center;flex:none;border-right:1px solid var(--line);color:#6d28d9;font-size:11px;text-transform:uppercase;letter-spacing:.04em; }
+.ticker-window { min-width:0;overflow:hidden; }
+.ticker-track { width:max-content;display:flex;align-items:center;animation:ticker-scroll 34s linear infinite; }
+.ticker-track>span { padding:0 22px;display:flex;align-items:center;gap:8px;border-right:1px solid var(--line);white-space:nowrap;font-size:12px; }
+.ticker-track b,.ticker-track em { color:var(--text);font-style:normal; }.ticker-track i,.ticker-track small { color:var(--muted);font-style:normal; }
+@keyframes ticker-scroll { to { transform:translateX(-50%); } }
 .panel { padding:20px; }
 .panel-title { min-height:28px;margin-bottom:16px;align-items:center; }
 .panel-title h2 { color:var(--text);font-size:16px;font-weight:600;letter-spacing:0; }
@@ -457,6 +520,7 @@ main { padding:20px clamp(20px,2vw,32px) 28px; }
 .sale-notice span { grid-column:1/-1;color:#6d28d9;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em; }
 .sale-notice strong,.sale-notice b { color:var(--text);font-size:14px; }
 .sale-notice b { text-align:right;font-variant-numeric:tabular-nums; }
+.sale-notice small { grid-column:1/-1;color:var(--muted);font-size:11px; }
 .notice-enter-active,.notice-leave-active { transition:opacity .2s ease,transform .2s ease; }
 .notice-enter-from,.notice-leave-to { opacity:0;transform:translateY(-8px); }
 .empty { font-size:13px; }
@@ -471,7 +535,9 @@ main { padding:20px clamp(20px,2vw,32px) 28px; }
   }
 }
 @media(max-width:1000px){
-  .top-grid,.bottom-grid{grid-template-columns:1fr}
+  .dashboard-grid{grid-template-columns:1fr;grid-template-areas:"chart" "products" "recent" "locations"}
+  .dashboard-grid.manager-layout{grid-template-areas:"locations" "chart" "recent" "products"}
+  .manager-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
   .chart{height:250px}
 }
 @media(max-width:620px){
@@ -488,5 +554,9 @@ main { padding:20px clamp(20px,2vw,32px) 28px; }
   .expiry{display:none}
   .metric-switch button{min-width:52px;padding:4px 7px}
   .sale-notice{top:78px;right:12px;left:12px;min-width:0}
+  .connection-warning{grid-template-columns:1fr;gap:5px}.connection-warning>div:nth-child(2){justify-content:flex-start}.connection-warning small{grid-column:auto}
+  .sales-ticker>strong{padding:0 10px}.ticker-track>span{padding:0 14px}
+  .manager-summary{gap:8px}.manager-summary article{padding:11px}.manager-summary strong{font-size:15px}
 }
+@media(prefers-reduced-motion:reduce){.ticker-track{animation:none}}
 </style>

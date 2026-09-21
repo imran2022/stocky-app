@@ -14,12 +14,17 @@ class RealTimeSalesDisplay extends Model
         'warehouse_ids',
         'refresh_seconds',
         'show_customer_names',
+        'layout_profile',
         'created_by',
         'scope_user_id',
         'view_all_records',
         'expires_at',
         'last_seen_at',
+        'last_successful_sync_at',
+        'last_failure_count',
+        'last_recovered_at',
         'revoked_at',
+        'archived_at',
     ];
 
     protected $hidden = [
@@ -32,12 +37,16 @@ class RealTimeSalesDisplay extends Model
         'warehouse_ids' => 'array',
         'refresh_seconds' => 'integer',
         'show_customer_names' => 'boolean',
+        'last_failure_count' => 'integer',
         'created_by' => 'integer',
         'scope_user_id' => 'integer',
         'view_all_records' => 'boolean',
         'expires_at' => 'datetime',
         'last_seen_at' => 'datetime',
+        'last_successful_sync_at' => 'datetime',
+        'last_recovered_at' => 'datetime',
         'revoked_at' => 'datetime',
+        'archived_at' => 'datetime',
     ];
 
     public function creator()
@@ -52,6 +61,6 @@ class RealTimeSalesDisplay extends Model
 
     public function isAccessible(): bool
     {
-        return ! $this->revoked_at && $this->expires_at && $this->expires_at->isFuture();
+        return ! $this->archived_at && ! $this->revoked_at && $this->expires_at && $this->expires_at->isFuture();
     }
 }

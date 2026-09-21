@@ -160,12 +160,14 @@
 
     <a-modal
       v-model:open="displaySetupOpen"
+      wrap-class-name="live-sales-display-modal"
       title="Live Sales Displays"
       :width="1080"
       :confirm-loading="displayGenerating"
-      ok-text="Create display"
+      :ok-text="editingDisplayId ? 'Save changes' : 'Create display'"
       cancel-text="Close"
-      @ok="generateDisplayToken"
+      @ok="saveDisplay"
+      @cancel="resetDisplayForm"
     >
       <a-alert
         type="info"
@@ -192,8 +194,18 @@
             :options="[10, 30, 60, 120].map(s => ({ value: s, label: s + ' seconds' }))"
           />
         </a-form-item>
+        <a-form-item label="Layout profile">
+          <a-select
+            v-model:value="displayLayoutProfile"
+            :options="[
+              { value: 'standard', label: 'Live TV Display' },
+              { value: 'manager', label: 'Manager Screen' },
+            ]"
+          />
+        </a-form-item>
         <a-form-item class="display-customer-toggle" style="margin-bottom: 8px">
           <a-checkbox v-model:checked="displayShowCustomerNames">Show customer names on the public display</a-checkbox>
+          <a-button v-if="editingDisplayId" type="link" size="small" @click="resetDisplayForm">Cancel editing</a-button>
         </a-form-item>
       </a-form>
 
@@ -202,14 +214,14 @@
         <a-button size="small" :loading="displayLoadingActive" @click="loadDisplays">Refresh list</a-button>
       </div>
       <a-table
-        size="small" row-key="id" :columns="displayColumns" :data-source="displayRows"
-        :loading="displayLoadingActive" :pagination="false" :scroll="{ x: 980, y: 360 }"
+        class="display-desktop-table" size="small" row-key="id" :columns="displayColumns" :data-source="displayRows"
+        :loading="displayLoadingActive" :pagination="false" :scroll="{ x: 1380, y: 360 }"
         :locale="{ emptyText: 'No display links created yet' }"
       >
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'name'">
             <strong>{{ record.name }}</strong>
-            <small class="display-cell-note">{{ record.refresh_seconds }}s refresh{{ record.show_customer_names ? ' · customer names on' : '' }}</small>
+            <small class="display-cell-note">{{ displayProfileLabel(record.layout_profile) }} · {{ record.refresh_seconds }}s refresh{{ record.show_customer_names ? ' · customer names on' : '' }}</small>
           </template>
           <template v-else-if="column.key === 'status'">
             <a-tag :color="displayStatusColor(record.status)">{{ displayStatusLabel(record.status) }}</a-tag>
@@ -223,20 +235,61 @@
           <template v-else-if="column.key === 'last_seen_at'">
             <span>{{ record.last_seen_at ? relativeFromNow(record.last_seen_at) + ' ago' : 'Not opened yet' }}</span>
           </template>
+          <template v-else-if="column.key === 'last_successful_sync_at'">
+            <span>{{ record.last_successful_sync_at ? relativeFromNow(record.last_successful_sync_at) + ' ago' : 'Never' }}</span>
+            <small v-if="record.last_failure_count" class="display-cell-note">Recovered after {{ record.last_failure_count }} failures</small>
+          </template>
           <template v-else-if="column.key === 'actions'">
             <a-space :size="4">
               <a-button type="link" size="small" :disabled="!record.url" @click="copyDisplayUrl(record.url)">Copy</a-button>
               <a-button type="link" size="small" :disabled="!record.url" @click="openDisplay(record.url)">Open</a-button>
+              <a-button type="link" size="small" @click="editDisplay(record)">Edit</a-button>
               <a-popconfirm title="Regenerate this link? Its previous URL will stop working." @confirm="regenerateDisplay(record)">
                 <a-button type="link" size="small" :loading="displayActionId === record.id">Regenerate</a-button>
               </a-popconfirm>
               <a-popconfirm v-if="record.active" title="Revoke this display link?" @confirm="revokeDisplay(record)">
                 <a-button type="link" danger size="small" :loading="displayActionId === record.id">Revoke</a-button>
               </a-popconfirm>
+              <a-popconfirm title="Archive this display? Its public link will stop working immediately." @confirm="archiveDisplay(record)">
+                <a-button type="link" danger size="small" :loading="displayActionId === record.id">Remove</a-button>
+              </a-popconfirm>
             </a-space>
           </template>
         </template>
       </a-table>
+
+      <div class="display-mobile-list">
+        <a-spin :spinning="displayLoadingActive">
+          <a-empty v-if="!displayRows.length" description="No display links created yet" />
+          <article v-for="record in displayRows" :key="record.id" class="display-mobile-card">
+            <div class="display-mobile-head">
+              <div><strong>{{ record.name }}</strong><small>{{ record.warehouse_name }}</small></div>
+              <a-tag :color="displayStatusColor(record.status)">{{ displayStatusLabel(record.status) }}</a-tag>
+            </div>
+            <div class="display-mobile-meta">
+              <span>{{ displayProfileLabel(record.layout_profile) }}</span>
+              <span>{{ record.refresh_seconds }}s refresh</span>
+              <span>Sync: {{ record.last_successful_sync_at ? relativeFromNow(record.last_successful_sync_at) + ' ago' : 'Never' }}</span>
+              <span v-if="record.last_failure_count">Recovered: {{ record.last_failure_count }} failures</span>
+            </div>
+            <div class="display-mobile-actions">
+              <a-button size="small" :disabled="!record.url" @click="copyDisplayUrl(record.url)">Copy</a-button>
+              <a-button size="small" :disabled="!record.url" @click="openDisplay(record.url)">Open</a-button>
+              <a-button size="small" @click="editDisplay(record)">Edit</a-button>
+              <a-dropdown :trigger="['click']">
+                <a-button size="small">More</a-button>
+                <template #overlay>
+                  <a-menu>
+                    <a-menu-item @click="regenerateDisplay(record)">Regenerate link</a-menu-item>
+                    <a-menu-item v-if="record.active" danger @click="revokeDisplay(record)">Revoke link</a-menu-item>
+                    <a-menu-item danger @click="confirmArchiveDisplay(record)">Remove / archive</a-menu-item>
+                  </a-menu>
+                </template>
+              </a-dropdown>
+            </div>
+          </article>
+        </a-spin>
+      </div>
     </a-modal>
   </div>
 </template>
@@ -253,7 +306,7 @@
  */
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { message } from 'ant-design-vue';
+import { message, Modal } from 'ant-design-vue';
 import {
   PauseOutlined, CaretRightOutlined, ReloadOutlined, SoundOutlined, RiseOutlined, FallOutlined,
 } from '@ant-design/icons-vue';
@@ -280,6 +333,8 @@ const displayName = ref('');
 const displayWarehouseId = ref(undefined);
 const displayRefreshSeconds = ref(30);
 const displayShowCustomerNames = ref(false);
+const displayLayoutProfile = ref('standard');
+const editingDisplayId = ref(null);
 const displayRows = ref([]);
 const displayError = ref('');
 
@@ -322,7 +377,8 @@ const displayColumns = [
   { title: 'Created by / time', key: 'created', width: 175 },
   { title: 'Expires', key: 'expires_at', width: 165 },
   { title: 'Last seen', key: 'last_seen_at', width: 115 },
-  { title: 'Actions', key: 'actions', width: 270, fixed: 'right' },
+  { title: 'Last sync', key: 'last_successful_sync_at', width: 145 },
+  { title: 'Actions', key: 'actions', width: 360, fixed: 'right' },
 ];
 
 const serverClock = computed(() => {
@@ -532,6 +588,7 @@ function toggleSound() {
 }
 
 async function openDisplaySetup() {
+  resetDisplayForm();
   displayWarehouseId.value = warehouseId.value;
   displayRefreshSeconds.value = refreshSeconds.value;
   displayError.value = '';
@@ -551,7 +608,26 @@ async function loadDisplays() {
   }
 }
 
-async function generateDisplayToken() {
+function resetDisplayForm() {
+  editingDisplayId.value = null;
+  displayName.value = '';
+  displayWarehouseId.value = undefined;
+  displayRefreshSeconds.value = 30;
+  displayShowCustomerNames.value = false;
+  displayLayoutProfile.value = 'standard';
+}
+
+function editDisplay(record) {
+  editingDisplayId.value = record.id;
+  displayName.value = record.name || '';
+  displayWarehouseId.value = record.warehouse_id || undefined;
+  displayRefreshSeconds.value = record.refresh_seconds || 30;
+  displayShowCustomerNames.value = !!record.show_customer_names;
+  displayLayoutProfile.value = record.layout_profile === 'manager' ? 'manager' : 'standard';
+  displayError.value = '';
+}
+
+async function saveDisplay() {
   if (!displayName.value.trim()) {
     message.warning('Enter a display name.');
     return;
@@ -559,14 +635,21 @@ async function generateDisplayToken() {
   displayGenerating.value = true;
   displayError.value = '';
   try {
-    await http.post('real-time-sales-display/generate', {
+    const payload = {
       name: displayName.value.trim(),
       warehouse_id: displayWarehouseId.value || 0,
       refresh_seconds: displayRefreshSeconds.value,
       show_customer_names: displayShowCustomerNames.value,
-    });
-    message.success('Display link created');
-    displayName.value = '';
+      layout_profile: displayLayoutProfile.value,
+    };
+    if (editingDisplayId.value) {
+      await http.patch(`real-time-sales-display/${editingDisplayId.value}`, payload);
+      message.success('Display settings updated');
+    } else {
+      await http.post('real-time-sales-display/generate', payload);
+      message.success('Display link created');
+    }
+    resetDisplayForm();
     await loadDisplays();
   } catch (error) {
     displayError.value = error?.data?.errors?.name?.[0] || error?.data?.message || 'Could not create the display link.';
@@ -633,6 +716,36 @@ async function revokeDisplay(record) {
   }
 }
 
+async function archiveDisplay(record) {
+  displayActionId.value = record.id;
+  displayError.value = '';
+  try {
+    await http.delete(`real-time-sales-display/${record.id}`);
+    if (editingDisplayId.value === record.id) resetDisplayForm();
+    message.success(`${record.name} removed from active management`);
+    await loadDisplays();
+  } catch (error) {
+    displayError.value = error?.data?.message || 'Could not archive the display.';
+  } finally {
+    displayActionId.value = null;
+  }
+}
+
+function confirmArchiveDisplay(record) {
+  Modal.confirm({
+    title: `Remove ${record.name}?`,
+    content: 'The public link will stop working immediately. The record will be retained temporarily for audit.',
+    okText: 'Remove display',
+    okType: 'danger',
+    cancelText: 'Cancel',
+    onOk: () => archiveDisplay(record),
+  });
+}
+
+function displayProfileLabel(profile) {
+  return profile === 'manager' ? 'Manager Screen' : 'Live TV Display';
+}
+
 function displayStatusColor(status) {
   return { online: 'success', active: 'processing', idle: 'warning', expired: 'default', revoked: 'error' }[status] || 'default';
 }
@@ -686,7 +799,7 @@ onBeforeUnmount(() => {
 :deep(.row-new) td { background: rgba(109, 40, 217, 0.08) !important; }
 .display-create-grid {
   display: grid;
-  grid-template-columns: minmax(220px, 1.4fr) minmax(190px, 1fr) minmax(150px, .7fr);
+  grid-template-columns: minmax(200px, 1.35fr) minmax(175px, 1fr) minmax(145px, .75fr) minmax(155px, .85fr);
   column-gap: 14px;
   padding: 14px 14px 6px;
   border: 1px solid rgba(109, 40, 217, 0.16);
@@ -705,8 +818,21 @@ onBeforeUnmount(() => {
 .display-list-heading strong { font-size: 14px; }
 .display-list-heading small,.display-cell-note { color: #8c8c8c; font-size: 11px; }
 .display-cell-note { margin-top: 3px; display: block; }
+.display-mobile-list { display: none; }
 @media (max-width: 760px) {
   .display-create-grid { grid-template-columns: 1fr; }
   .display-customer-toggle { grid-column: auto; }
+  .display-desktop-table { display: none; }
+  .display-mobile-list { display: block; max-height: 390px; overflow-y: auto; }
+  .display-mobile-card { padding: 13px 0; border-bottom: 1px solid rgba(5, 5, 5, .08); }
+  .display-mobile-card:last-child { border-bottom: 0; }
+  .display-mobile-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .display-mobile-head>div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .display-mobile-head strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+  .display-mobile-head small,.display-mobile-meta { color: #8c8c8c; font-size: 11px; }
+  .display-mobile-meta { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 5px 12px; }
+  .display-mobile-actions { margin-top: 10px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+  .display-mobile-actions :deep(.ant-btn) { width: 100%; padding-inline: 6px; }
+  :global(.live-sales-display-modal .ant-modal-body) { max-height: calc(100vh - 150px); overflow-y: auto; }
 }
 </style>

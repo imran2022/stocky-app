@@ -25,6 +25,7 @@ class RealTimeSalesDisplayController extends Controller
         $user = $this->authorizedUser($request);
         $this->migrateLegacyDisplay($user);
         $query = RealTimeSalesDisplay::with(['creator:id,firstname,lastname,username', 'warehouse:id,name'])
+            ->whereNull('archived_at')
             ->latest('id')
             ->limit(50);
         $this->applyDisplayVisibility($query, $user);
@@ -42,6 +43,7 @@ class RealTimeSalesDisplayController extends Controller
             'warehouse_id' => ['nullable', 'integer'],
             'refresh_seconds' => ['nullable', 'integer', 'min:10', 'max:120'],
             'show_customer_names' => ['nullable', 'boolean'],
+            'layout_profile' => ['nullable', 'in:standard,manager'],
         ]);
 
         $allowedWarehouseIds = $this->allowedWarehouseIds($user);
@@ -63,6 +65,7 @@ class RealTimeSalesDisplayController extends Controller
             'warehouse_ids' => $warehouseId ? [$warehouseId] : $allowedWarehouseIds,
             'warehouse_id' => $warehouseId ?: null,
             'show_customer_names' => $request->boolean('show_customer_names', false),
+            'layout_profile' => $request->input('layout_profile') === 'manager' ? 'manager' : 'standard',
             'refresh_seconds' => min(120, max(10, (int) $request->input('refresh_seconds', 30))),
             'created_by' => (int) $user->id,
             'scope_user_id' => (int) $user->id,
@@ -92,6 +95,7 @@ class RealTimeSalesDisplayController extends Controller
         $this->migrateLegacyDisplay($user);
         $query = RealTimeSalesDisplay::with(['creator:id,firstname,lastname,username', 'warehouse:id,name'])
             ->whereNull('revoked_at')
+            ->whereNull('archived_at')
             ->where('expires_at', '>', now())
             ->latest('id');
         $this->applyDisplayVisibility($query, $user);
@@ -161,6 +165,56 @@ class RealTimeSalesDisplayController extends Controller
         return response()->json(['message' => 'Display access revoked.']);
     }
 
+    public function update(Request $request, int $id)
+    {
+        $user = $this->authorizedUser($request);
+        $display = $this->visibleDisplay($id, $user);
+        $request->validate([
+            'name' => ['required', 'string', 'max:100'],
+            'warehouse_id' => ['nullable', 'integer'],
+            'refresh_seconds' => ['nullable', 'integer', 'min:10', 'max:120'],
+            'show_customer_names' => ['nullable', 'boolean'],
+            'layout_profile' => ['nullable', 'in:standard,manager'],
+        ]);
+
+        $allowedWarehouseIds = $this->allowedWarehouseIds($user);
+        if (empty($allowedWarehouseIds)) {
+            return response()->json(['message' => 'No warehouse is available to this user.'], 422);
+        }
+
+        $warehouseId = (int) $request->input('warehouse_id', 0);
+        if ($warehouseId !== 0 && ! in_array($warehouseId, $allowedWarehouseIds, true)) {
+            return response()->json(['message' => 'The selected warehouse is not available to this user.'], 422);
+        }
+
+        $display->update([
+            'name' => trim((string) $request->input('name')),
+            'warehouse_id' => $warehouseId ?: null,
+            'warehouse_ids' => $warehouseId ? [$warehouseId] : $allowedWarehouseIds,
+            'refresh_seconds' => min(120, max(10, (int) $request->input('refresh_seconds', 30))),
+            'show_customer_names' => $request->boolean('show_customer_names', false),
+            'layout_profile' => $request->input('layout_profile') === 'manager' ? 'manager' : 'standard',
+        ]);
+        $display->load(['creator:id,firstname,lastname,username', 'warehouse:id,name']);
+
+        return response()->json([
+            'message' => 'Display settings updated.',
+            'display' => $this->displayResource($display),
+        ]);
+    }
+
+    public function archive(Request $request, int $id)
+    {
+        $user = $this->authorizedUser($request);
+        $display = $this->visibleDisplay($id, $user);
+        $display->update([
+            'revoked_at' => $display->revoked_at ?: now(),
+            'archived_at' => now(),
+        ]);
+
+        return response()->json(['message' => 'Display archived and its link disabled.']);
+    }
+
     public function page(Request $request)
     {
         $config = $this->tokenConfig((string) $request->query('token', ''));
@@ -183,6 +237,24 @@ class RealTimeSalesDisplayController extends Controller
         $payload = Cache::remember($cacheKey, now()->addSeconds(8), function () use ($config) {
             return $this->buildPayload($config);
         });
+
+        if (! empty($config['display_id'])) {
+            $displayId = (int) $config['display_id'];
+            $failedAttempts = min(999, max(0, (int) $request->query('failed_attempts', 0)));
+            $syncUpdate = ['last_successful_sync_at' => now()];
+            if ($failedAttempts > 0) {
+                $syncUpdate['last_failure_count'] = $failedAttempts;
+                $syncUpdate['last_recovered_at'] = now();
+            }
+            $syncQuery = RealTimeSalesDisplay::whereKey($displayId);
+            if ($failedAttempts === 0) {
+                $syncQuery->where(function ($query) {
+                    $query->whereNull('last_successful_sync_at')
+                        ->orWhere('last_successful_sync_at', '<=', now()->subSeconds(30));
+                });
+            }
+            $syncQuery->update($syncUpdate);
+        }
 
         return response()->json($payload);
     }
@@ -208,6 +280,8 @@ class RealTimeSalesDisplayController extends Controller
                 'warehouse_ids' => array_map('intval', $display->warehouse_ids ?: []),
                 'selected_warehouse_id' => (int) ($display->warehouse_id ?: 0),
                 'show_customer_names' => (bool) $display->show_customer_names,
+                'display_name' => (string) $display->name,
+                'layout_profile' => $display->layout_profile === 'manager' ? 'manager' : 'standard',
                 'refresh_seconds' => (int) $display->refresh_seconds,
                 'view_all_records' => (bool) $display->view_all_records,
                 'user_id' => (int) $display->scope_user_id,
@@ -289,7 +363,7 @@ class RealTimeSalesDisplayController extends Controller
 
     private function visibleDisplay(int $id, $user): RealTimeSalesDisplay
     {
-        $query = RealTimeSalesDisplay::query()->whereKey($id);
+        $query = RealTimeSalesDisplay::query()->whereKey($id)->whereNull('archived_at');
         $this->applyDisplayVisibility($query, $user);
 
         return $query->firstOrFail();
@@ -329,10 +403,14 @@ class RealTimeSalesDisplayController extends Controller
             'warehouse_name' => $display->warehouse?->name ?: 'All permitted warehouses',
             'refresh_seconds' => (int) $display->refresh_seconds,
             'show_customer_names' => (bool) $display->show_customer_names,
+            'layout_profile' => $display->layout_profile === 'manager' ? 'manager' : 'standard',
             'created_by' => $creatorName,
             'created_at' => $display->created_at?->toIso8601String(),
             'expires_at' => $display->expires_at?->toIso8601String(),
             'last_seen_at' => $display->last_seen_at?->toIso8601String(),
+            'last_successful_sync_at' => $display->last_successful_sync_at?->toIso8601String(),
+            'last_failure_count' => (int) $display->last_failure_count,
+            'last_recovered_at' => $display->last_recovered_at?->toIso8601String(),
             'revoked_at' => $display->revoked_at?->toIso8601String(),
             'status' => $status,
             'active' => $active,
@@ -486,6 +564,8 @@ class RealTimeSalesDisplayController extends Controller
                 ? (Warehouse::whereKey($warehouseIds[0])->value('name') ?: 'All Warehouses')
                 : 'All Warehouses',
             'show_customer_names' => (bool) ($config['show_customer_names'] ?? false),
+            'display_name' => (string) ($config['display_name'] ?? 'Live Sales Display'),
+            'layout_profile' => ($config['layout_profile'] ?? 'standard') === 'manager' ? 'manager' : 'standard',
             'refresh_seconds' => (int) ($config['refresh_seconds'] ?? 30),
             'expires_at' => $config['expires_at'] ?? null,
             'currency' => optional($setting?->Currency)->symbol ?: optional($setting?->Currency)->code ?: '',

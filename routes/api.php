@@ -1736,6 +1736,8 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     Route::post('real-time-sales-display/generate', [\App\Http\Controllers\Api\RealTimeSalesDisplayController::class, 'generate']);
     Route::post('real-time-sales-display/{id}/regenerate', [\App\Http\Controllers\Api\RealTimeSalesDisplayController::class, 'regenerate']);
     Route::post('real-time-sales-display/{id}/revoke', [\App\Http\Controllers\Api\RealTimeSalesDisplayController::class, 'revoke']);
+    Route::patch('real-time-sales-display/{id}', [\App\Http\Controllers\Api\RealTimeSalesDisplayController::class, 'update']);
+    Route::delete('real-time-sales-display/{id}', [\App\Http\Controllers\Api\RealTimeSalesDisplayController::class, 'archive']);
 
     // ------------------------------- QuickBooks Integration ------------------------\\
     // ------------------------------------------------------------------\\
