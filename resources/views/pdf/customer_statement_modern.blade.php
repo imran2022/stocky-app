@@ -37,6 +37,10 @@
         'refund' => 'Refund',
         'service' => 'Service Job',
         'service_payment' => 'Service Payment',
+        'purchase' => 'Purchase',
+        'purchase_payment' => 'Purchase Payment',
+        'purchase_return' => 'Purchase Return',
+        'return_refund' => 'Return Refund',
     ];
 
     $periodText = ($fromDate || $toDate)
@@ -134,7 +138,7 @@
     <table style="margin-bottom: 15px;">
         <tr>
             <td style="width: 55%; vertical-align: top;">
-                <span class="label">Customer</span>
+                <span class="label">{{ $partyLabel ?? 'Customer' }}</span>
                 <div style="font-size: 10.5pt; font-weight: bold; color: #1e293b;">{{ $client['name'] ?? '-' }}</div>
                 @if(!empty($client['adresse']))
                     <div style="font-size: 8.5pt; color: #64748b; margin-top: 2px;">{{ $client['adresse'] }}</div>

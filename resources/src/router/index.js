@@ -269,6 +269,7 @@ const CustomerForm = lazy('CustomerForm', () => import('../pages/people/Customer
 const Suppliers = lazy('Suppliers', () => import('../pages/people/Suppliers.vue'));
 const SupplierForm = lazy('SupplierForm', () => import('../pages/people/SupplierForm.vue'));
 const SupplierDetails = lazy('SupplierDetails', () => import('../pages/people/SupplierDetails.vue'));
+const SupplierStatement = lazy('SupplierStatement', () => import('../pages/people/SupplierStatement.vue'));
 const Users = lazy('Users', () => import('../pages/people/Users.vue'));
 const UserForm = lazy('UserForm', () => import('../pages/people/UserForm.vue'));
 // --- HRM (Wave C) ---
@@ -506,6 +507,7 @@ const routes = [
             { path: 'suppliers/create', name: 'supplier-create', component: SupplierForm, meta: { title: 'Add Supplier', permission: 'Suppliers_add' } },
             { path: 'suppliers/:id/edit', name: 'supplier-edit', component: SupplierForm, meta: { title: 'Edit Supplier', permission: 'Suppliers_view' } },
             { path: 'suppliers/:id/details', name: 'supplier-details', component: SupplierDetails, meta: { title: 'Supplier Details', permission: 'Suppliers_view' } },
+            { path: 'suppliers/:id/statement', name: 'supplier-statement', component: SupplierStatement, meta: { title: 'Supplier Statement', permission: 'Suppliers_view' } },
             { path: 'users', name: 'users', component: Users, meta: { title: 'Users', permission: 'users_view' } },
             { path: 'users/create', name: 'user-create', component: UserForm, meta: { title: 'Add User', permission: 'users_add' } },
             { path: 'users/:id/edit', name: 'user-edit', component: UserForm, meta: { title: 'Edit User', permission: 'users_view' } },

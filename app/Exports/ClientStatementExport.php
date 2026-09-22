@@ -43,9 +43,9 @@ class ClientStatementExport implements FromCollection, ShouldAutoSize, WithEvent
     public function headings(): array
     {
         $rows = [];
-        $rows[] = ['Customer Account Statement'];
+        $rows[] = [$this->meta['title'] ?? 'Customer Account Statement'];
         if (! empty($this->meta['client_name'])) {
-            $rows[] = ['Customer:', $this->meta['client_name']];
+            $rows[] = [($this->meta['party_label'] ?? 'Customer').':', $this->meta['client_name']];
         }
         if (! empty($this->meta['period'])) {
             $rows[] = ['Period:', $this->meta['period']];
@@ -82,6 +82,10 @@ class ClientStatementExport implements FromCollection, ShouldAutoSize, WithEvent
             'refund' => 'Refund',
             'service' => 'Service Job',
             'service_payment' => 'Service Payment',
+            'purchase' => 'Purchase',
+            'purchase_payment' => 'Purchase Payment',
+            'purchase_return' => 'Purchase Return',
+            'return_refund' => 'Return Refund',
             default => ucfirst(str_replace('_', ' ', $type)),
         };
     }

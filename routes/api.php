@@ -647,6 +647,12 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     Route::get('provider_details/purchases', 'ProvidersController@supplierPurchases');
     Route::get('provider_details/payments', 'ProvidersController@supplierPayments');
     Route::get('provider_details/returns', 'ProvidersController@supplierReturns');
+    // Supplier account statement + full ledger PDF. These intentionally use
+    // Suppliers_view, just like the supplier details page.
+    Route::get('providers/{id}/statement', 'ProviderStatementController@index');
+    Route::get('providers/{id}/statement/pdf', 'ProviderStatementController@pdf');
+    Route::get('providers/{id}/statement/excel', 'ProviderStatementController@excel');
+    Route::get('providers/{id}/ledger/pdf', 'ProviderStatementController@ledgerPdf');
 
     Route::post('providers/delete/by_selection', 'ProvidersController@delete_by_selection');
     Route::post('pay_supplier_due', 'ProvidersController@pay_supplier_due');

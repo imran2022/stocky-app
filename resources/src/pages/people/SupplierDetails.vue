@@ -8,7 +8,12 @@
             {{ $t('Back') }}
           </a-button>
           <a-button
-            v-if="auth.can('Reports_suppliers')"
+            @click="$router.push(`/suppliers/${id}/statement`)"
+          >
+            <template #icon><FileTextOutlined /></template>
+            Statement
+          </a-button>
+          <a-button
             :loading="downloadingReport"
             @click="downloadSupplierReport"
           >
@@ -190,7 +195,7 @@ import { useI18n } from 'vue-i18n';
 import {
   LeftOutlined, ShoppingCartOutlined, DollarOutlined, CheckCircleOutlined,
   ExclamationCircleOutlined, CalculatorOutlined, CreditCardOutlined,
-  FilePdfOutlined,
+  FilePdfOutlined, FileTextOutlined,
 } from '@ant-design/icons-vue';
 import PageHeader from '../../components/PageHeader.vue';
 import ReportTab from '../../components/ReportTab.vue';
@@ -296,7 +301,7 @@ async function downloadSupplierReport() {
       .trim()
       .replace(/[^a-z0-9_-]+/gi, '_')
       .replace(/^_+|_+$/g, '') || id;
-    await http.download(`report/provider_pdf/${id}`, `Supplier_Report_${safeName}.pdf`);
+    await http.download(`providers/${id}/ledger/pdf`, `Supplier_Ledger_${safeName}.pdf`);
   } catch (e) {
     message.error(t('Failed'));
   } finally {
