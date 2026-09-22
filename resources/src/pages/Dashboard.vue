@@ -70,18 +70,18 @@
         </a-col>
       </a-row>
 
-      <!-- ================= Sales/Purchases + Top selling ================= -->
+      <!-- ================= Sales/Purchases + Today's hourly sales ======== -->
       <a-row :gutter="[16, 16]" style="margin-top: 16px">
         <a-col :xs="24" :xl="16">
           <a-card class="chart-card" :title="$t('Sales_And_Purchases')">
-            <apexchart v-if="salesChart.series.length" :key="'area-' + loadCount" type="area" height="320" :options="salesChart.options" :series="salesChart.series" />
+            <apexchart v-if="salesChart.series.length" :key="'sales-mix-' + loadCount" type="line" height="320" :options="salesChart.options" :series="salesChart.series" />
             <a-empty v-else :description="$t('No_data_available')" style="padding: 48px 0" />
           </a-card>
         </a-col>
         <a-col :xs="24" :xl="8">
-          <a-card class="chart-card" :title="$t('Top_Selling_Products')">
-            <apexchart v-if="donutChart.series.length" :key="'donut-' + loadCount" type="donut" height="320" :options="donutChart.options" :series="donutChart.series" />
-            <a-empty v-else :description="$t('No_data_available')" style="padding: 48px 0" />
+          <a-card class="chart-card" :title="$t('Hourly_Sales_Today')">
+            <apexchart v-if="hourlyChart.series[0]?.data.length" :key="'hourly-bars-' + loadCount" type="bar" height="320" :options="hourlyChart.options" :series="hourlyChart.series" />
+            <a-empty v-else :description="$t('No_sales_today')" style="padding: 48px 0" />
           </a-card>
         </a-col>
       </a-row>
@@ -90,13 +90,13 @@
       <a-row :gutter="[16, 16]" style="margin-top: 16px">
         <a-col :xs="24" :xl="12">
           <a-card class="chart-card" :title="$t('Payment_Sent_Received')">
-            <apexchart v-if="paymentChart.series.length" :key="'area-' + loadCount" type="area" height="300" :options="paymentChart.options" :series="paymentChart.series" />
+            <apexchart v-if="paymentChart.series.length" :key="'payment-mix-' + loadCount" type="line" height="300" :options="paymentChart.options" :series="paymentChart.series" />
             <a-empty v-else :description="$t('No_data_available')" style="padding: 48px 0" />
           </a-card>
         </a-col>
         <a-col :xs="24" :xl="12">
           <a-card class="chart-card" :title="$t('Top_Customers')">
-            <apexchart v-if="customerChart.series.length" :key="'pie-' + loadCount" type="pie" height="300" :options="customerChart.options" :series="customerChart.series" />
+            <apexchart v-if="customerChart.series.length" :key="'customer-bars-' + loadCount" type="bar" height="300" :options="customerChart.options" :series="customerChart.series" />
             <a-empty v-else :description="$t('No_data_available')" style="padding: 48px 0" />
           </a-card>
         </a-col>
@@ -221,15 +221,15 @@
         </a-col>
       </a-row>
 
-      <!-- ================= Today's sales by hour + Sales by Warehouse (Build M7) ================= -->
+      <!-- ================= Top products + Sales by Warehouse ================= -->
       <a-row :gutter="[16, 16]" style="margin-top: 16px">
-        <a-col :xs="24" :xl="14">
-          <a-card class="chart-card" :title="$t('Hourly_Sales_Today')">
-            <apexchart v-if="hourlyChart.series[0]?.data.length" :key="'hourly-' + loadCount" type="area" height="300" :options="hourlyChart.options" :series="hourlyChart.series" />
-            <a-empty v-else :description="$t('No_sales_today')" style="padding: 48px 0" />
+        <a-col :xs="24" :xl="12">
+          <a-card class="chart-card" :title="$t('Top_Selling_Products')">
+            <apexchart v-if="donutChart.series.length" :key="'donut-' + loadCount" type="donut" height="300" :options="donutChart.options" :series="donutChart.series" />
+            <a-empty v-else :description="$t('No_data_available')" style="padding: 48px 0" />
           </a-card>
         </a-col>
-        <a-col :xs="24" :xl="10">
+        <a-col :xs="24" :xl="12">
           <a-card :title="$t('Sales_by_Warehouse')" style="height: 100%">
             <a-table
               :columns="warehouseColumns" :data-source="salesByWarehouse"
@@ -476,30 +476,48 @@ function onPeriodChange() {
 const CHART_BASE = { background: 'transparent', foreColor: '#8c8c8c', fontFamily: 'inherit', toolbar: { show: false } };
 const GRID = { borderColor: 'rgba(128,128,128,0.2)', strokeDashArray: 4 };
 
+function compactNumber(value) {
+  const n = Number(value) || 0;
+  const sign = n < 0 ? '−' : '';
+  const absolute = Math.abs(n);
+  if (absolute >= 1000000) return `${sign}${(absolute / 1000000).toFixed(absolute >= 10000000 ? 0 : 1)}M`;
+  if (absolute >= 1000) return `${sign}${(absolute / 1000).toFixed(absolute >= 10000 ? 0 : 1)}K`;
+  return `${sign}${Math.round(absolute)}`;
+}
+
 // Cohesive, modern categorical palette shared across every dashboard chart.
 const PALETTE = ['#6366f1', '#22d3ee', '#f59e0b', '#ec4899', '#10b981', '#8b5cf6', '#0ea5e9', '#f43f5e'];
 
-// Today's Sales by Hour — smooth gradient area chart (same "modern" style
-// as the Payment Sent/Received chart above on this same Dashboard), with
-// hover markers for a more interactive feel than a plain bar chart.
+// Compact columns expose the busiest hour immediately. Tooltip retains both
+// the invoice count and the existing sales amount.
 const hourlyChart = computed(() => {
   const totals = hourlySalesToday.value.map(h => Number(h.total) || 0);
+  const counts = hourlySalesToday.value.map(h => Number(h.count) || 0);
+  const peak = Math.max(...counts, 0);
   return {
-    series: [{ name: t('Sales'), data: hourlySalesToday.value.map(h => Number(h.count) || 0) }],
+    series: [{
+      name: t('Invoices'),
+      data: counts.map((count, hour) => ({
+        x: `${String(hour).padStart(2, '0')}h`,
+        y: count,
+        fillColor: peak > 0 && count === peak ? '#f59e0b' : '#6366f1',
+      })),
+    }],
     options: {
-      chart: { ...CHART_BASE, type: 'area' },
-      colors: ['#6d28d9'],
-      stroke: { curve: 'smooth', width: 3 },
-      fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.45, opacityTo: 0.05, stops: [0, 95] } },
-      markers: { size: 0, hover: { size: 6 }, strokeWidth: 2, strokeColors: '#fff' },
+      chart: { ...CHART_BASE, type: 'bar' },
+      colors: ['#6366f1'],
+      plotOptions: { bar: { columnWidth: '58%', borderRadius: 4, borderRadiusApplication: 'end' } },
+      stroke: { width: 0 },
       dataLabels: { enabled: false },
       xaxis: {
-        categories: Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, '0')}h`),
         axisBorder: { show: false }, axisTicks: { show: false },
+        labels: { rotate: 0, hideOverlappingLabels: true },
       },
-      yaxis: { labels: { formatter: v => Math.round(v) } },
+      yaxis: { min: 0, forceNiceScale: true, labels: { formatter: v => Math.round(v) } },
       grid: GRID,
-      tooltip: { theme: 'light', y: { formatter: (val, { dataPointIndex }) => `${val} (${money(totals[dataPointIndex] || 0)})` } },
+      legend: { show: false },
+      tooltip: { theme: 'light', y: { formatter: (val, { dataPointIndex }) => `${Math.round(val)} ${t('Invoices')} · ${money(totals[dataPointIndex] || 0)}` } },
+      responsive: [{ breakpoint: 575, options: { plotOptions: { bar: { columnWidth: '72%', borderRadius: 3 } }, xaxis: { labels: { show: false } } } }],
     },
   };
 });
@@ -511,25 +529,30 @@ const warehouseColumns = computed(() => [
 ]);
 
 function buildCharts(days, salesData, purchasesData, products, customers, pay) {
-  // Modernized (2026-09-20, client request): smooth gradient area chart,
-  // matching the Payment Sent/Received chart's style below, instead of the
-  // previous flat grouped bar chart — easier to read the trend at a glance.
+  const sales = (salesData || []).map(v => Number(v) || 0);
+  const purchases = (purchasesData || []).map(v => Number(v) || 0);
+  const difference = sales.map((value, i) => value - (purchases[i] || 0));
+
   salesChart.value = {
     series: [
-      { name: t('Sales'), data: salesData },
-      { name: t('Purchases'), data: purchasesData },
+      { name: t('Sales'), type: 'column', data: sales },
+      { name: t('Purchases'), type: 'column', data: purchases },
+      { name: `${t('Sales')} − ${t('Purchases')}`, type: 'line', data: difference },
     ],
     options: {
-      chart: { ...CHART_BASE, type: 'area' },
-      colors: ['#6366f1', '#22d3ee'],
-      stroke: { curve: 'smooth', width: 2.5 },
-      fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.4, opacityTo: 0.04, stops: [0, 95] } },
-      markers: { size: 0, hover: { size: 5 } },
+      chart: { ...CHART_BASE, type: 'line', stacked: false },
+      colors: ['#6366f1', '#22d3ee', '#10b981'],
+      plotOptions: { bar: { columnWidth: '48%', borderRadius: 4, borderRadiusApplication: 'end' } },
+      stroke: { curve: 'straight', width: [0, 0, 3] },
+      markers: { size: [0, 0, 3], hover: { size: 5 }, strokeWidth: 0 },
+      fill: { opacity: [0.95, 0.9, 1] },
       dataLabels: { enabled: false },
-      legend: { labels: { colors: '#595959' } },
-      xaxis: { categories: days, axisBorder: { show: false }, axisTicks: { show: false } },
+      legend: { position: 'top', horizontalAlign: 'right', labels: { colors: '#595959' }, markers: { radius: 6 } },
+      xaxis: { categories: days, axisBorder: { show: false }, axisTicks: { show: false }, labels: { hideOverlappingLabels: true } },
+      yaxis: { labels: { formatter: compactNumber } },
       grid: GRID,
       tooltip: { theme: 'light', shared: true, y: { formatter: v => money(v) } },
+      responsive: [{ breakpoint: 575, options: { legend: { position: 'bottom', horizontalAlign: 'center' }, plotOptions: { bar: { columnWidth: '62%', borderRadius: 3 } } } }],
     },
   };
   donutChart.value = {
@@ -545,35 +568,47 @@ function buildCharts(days, salesData, purchasesData, products, customers, pay) {
       tooltip: { theme: 'light' },
     },
   };
-  // Payment sent / received — smooth area, red vs green like legacy.
+  const received = (pay.received || []).map(v => Number(v) || 0);
+  const sent = (pay.sent || []).map(v => Number(v) || 0);
+  const sentBelowAxis = sent.map(v => -v);
+  const cashFlow = received.map((value, i) => value - (sent[i] || 0));
+
   paymentChart.value = {
     series: [
-      { name: t('Sent'), data: pay.sent },
-      { name: t('Received'), data: pay.received },
+      { name: t('Received'), type: 'column', data: received },
+      { name: t('Sent'), type: 'column', data: sentBelowAxis },
+      { name: `${t('Received')} − ${t('Sent')}`, type: 'line', data: cashFlow },
     ],
     options: {
-      chart: { ...CHART_BASE, type: 'area' },
-      colors: ['#f43f5e', '#10b981'],
-      stroke: { curve: 'smooth', width: 2.5 },
-      fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.4, opacityTo: 0.04, stops: [0, 95] } },
+      chart: { ...CHART_BASE, type: 'line', stacked: false },
+      colors: ['#10b981', '#f43f5e', '#6366f1'],
+      plotOptions: { bar: { columnWidth: '48%', borderRadius: 4 } },
+      stroke: { curve: 'straight', width: [0, 0, 3] },
+      markers: { size: [0, 0, 3], hover: { size: 5 }, strokeWidth: 0 },
+      fill: { opacity: [0.95, 0.9, 1] },
       dataLabels: { enabled: false },
-      legend: { labels: { colors: '#595959' } },
-      xaxis: { categories: pay.days, axisBorder: { show: false }, axisTicks: { show: false } },
+      legend: { position: 'top', horizontalAlign: 'right', labels: { colors: '#595959' }, markers: { radius: 6 } },
+      xaxis: { categories: pay.days, axisBorder: { show: false }, axisTicks: { show: false }, labels: { hideOverlappingLabels: true } },
+      yaxis: { labels: { formatter: compactNumber } },
       grid: GRID,
-      tooltip: { theme: 'light' },
+      tooltip: { theme: 'light', shared: true, y: { formatter: (v, ctx) => money(ctx.seriesIndex === 1 ? Math.abs(v) : v) } },
+      responsive: [{ breakpoint: 575, options: { legend: { position: 'bottom', horizontalAlign: 'center' }, plotOptions: { bar: { columnWidth: '62%', borderRadius: 3 } } } }],
     },
   };
-  // Top customers — pie, purple family.
+
   customerChart.value = {
-    series: customers.map(c => c.value),
+    series: [{ name: t('Invoices'), data: customers.map(c => Number(c.value) || 0) }],
     options: {
-      chart: { ...CHART_BASE, type: 'pie' },
-      labels: customers.map(c => c.name),
+      chart: { ...CHART_BASE, type: 'bar' },
       colors: PALETTE,
-      stroke: { colors: ['#ffffff'], width: 3 },
-      legend: { position: 'bottom', labels: { colors: '#595959' } },
-      dataLabels: { enabled: true, formatter: v => `${Math.floor(v)}%` },
-      tooltip: { theme: 'light' },
+      plotOptions: { bar: { horizontal: true, distributed: true, barHeight: '52%', borderRadius: 5, borderRadiusApplication: 'end' } },
+      xaxis: { categories: customers.map(c => c.name), min: 0, forceNiceScale: true, labels: { formatter: v => Math.round(v) } },
+      yaxis: { labels: { maxWidth: 150 } },
+      grid: { ...GRID, xaxis: { lines: { show: true } }, yaxis: { lines: { show: false } } },
+      legend: { show: false },
+      dataLabels: { enabled: true, textAnchor: 'start', offsetX: 6, style: { fontSize: '12px', fontWeight: 700, colors: ['#ffffff'] }, formatter: v => Math.round(v) },
+      tooltip: { theme: 'light', y: { formatter: v => `${Math.round(v)} ${t('Invoices')}` } },
+      responsive: [{ breakpoint: 575, options: { plotOptions: { bar: { barHeight: '48%' } }, yaxis: { labels: { maxWidth: 105 } }, xaxis: { labels: { show: false } } } }],
     },
   };
 }
