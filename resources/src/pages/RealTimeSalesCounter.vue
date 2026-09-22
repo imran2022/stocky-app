@@ -129,7 +129,7 @@
             >
               <template #bodyCell="{ column, record }">
                 <template v-if="column.key === 'client_name'">{{ record.client_name || '-' }}</template>
-                <template v-else-if="column.key === 'grand_total'">{{ money(record.grand_total) }}</template>
+                <template v-else-if="column.key === 'grand_total'"><span class="live-sales-amount">{{ money(record.grand_total) }}</span></template>
                 <template v-else-if="column.key === 'payment_status'">
                   <a-tag :color="payStatusColor(record.payment_status)">{{ record.payment_status }}</a-tag>
                 </template>
@@ -466,7 +466,7 @@ const hourlyOptions = computed(() => {
 const recentColumns = computed(() => [
   { title: t('Reference'), dataIndex: 'Ref', key: 'Ref' },
   { title: t('Customer'), key: 'client_name' },
-  { title: t('Total'), key: 'grand_total', align: 'right' },
+  { title: t('Total'), key: 'grand_total', align: 'right', width: 160, className: 'live-sales-amount-column' },
   { title: t('payment_status'), key: 'payment_status', width: 110 },
   { title: t('Time') || 'Time', key: 'time', width: 90 },
 ]);
@@ -797,6 +797,8 @@ onBeforeUnmount(() => {
   100% { transform: scale(1); }
 }
 :deep(.row-new) td { background: rgba(109, 40, 217, 0.08) !important; }
+:deep(.live-sales-amount-column) { text-align: right !important; }
+.live-sales-amount { display:block;width:100%;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap; }
 .display-create-grid {
   display: grid;
   grid-template-columns: minmax(200px, 1.35fr) minmax(175px, 1fr) minmax(145px, .75fr) minmax(155px, .85fr);

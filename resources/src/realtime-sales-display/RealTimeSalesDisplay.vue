@@ -114,18 +114,34 @@
           <article class="panel recent" :class="{ 'show-customers': showCustomerNames }">
             <div class="panel-title"><h2>Recent sales</h2><span>Latest {{ recentSales.length }}</span></div>
             <div class="table">
-              <div class="tr th"><span>Reference</span><span v-if="showCustomerNames">Customer</span><span>Warehouse</span><span>Status</span><span>Total</span><span>Time</span></div>
+              <div class="tr th"><span>Reference</span><span v-if="showCustomerNames">Customer</span><span>Warehouse</span><span>Status</span><span class="sale-total">Total</span><span>Time</span></div>
               <div v-if="!recentSales.length" class="empty">No sales yet</div>
               <div v-for="sale in recentSales" :key="sale.id" class="tr" :class="{ fresh: newSaleIds.has(sale.id) }">
                 <strong>{{ sale.Ref }}</strong><span v-if="showCustomerNames">{{ sale.client_name || '—' }}</span>
                 <span>{{ sale.warehouse_name || '—' }}</span><span><b class="status" :class="sale.payment_status">{{ sale.payment_status }}</b></span>
-                <strong>{{ money(sale.grand_total) }}</strong><span>{{ saleTime(sale.date) }}</span>
+                <strong class="sale-total">{{ money(sale.grand_total) }}</strong><span>{{ saleTime(sale.date) }}</span>
               </div>
             </div>
           </article>
-          <article class="panel locations">
-            <div class="panel-title"><h2>{{ isManager ? 'Warehouse performance' : 'Sales by warehouse' }}</h2><span v-if="isManager">Ranked by today’s sales</span></div>
-            <div class="location-table">
+          <article class="panel locations" :class="{ 'manager-locations': isManager }">
+            <div class="panel-title"><h2>{{ isManager ? 'Warehouse Performance' : 'Sales by warehouse' }}</h2><span v-if="isManager" class="period-pill">Today <b>⌄</b></span></div>
+            <div v-if="isManager" class="performance-table">
+              <div class="performance-row performance-head"><span>#</span><span>Warehouse</span><span>Revenue</span><span>Sales</span><span>Avg Sale</span><span>Last Sale</span><span>vs Yesterday</span></div>
+              <div v-if="!locations.length" class="empty">No sales yet</div>
+              <div v-for="(location,index) in locations" :key="location.warehouse_id || index" class="performance-row">
+                <span class="performance-rank">{{ index + 1 }}</span>
+                <div class="warehouse-cell"><strong>{{ location.name }}</strong><i><b :style="{ width: `${warehouseBarWidth(location)}%` }"></b></i></div>
+                <strong class="performance-money">{{ money(location.amount) }}</strong>
+                <span class="performance-number">{{ location.total_invoice }}</span>
+                <span class="performance-money">{{ money(warehouseAverage(location)) }}</span>
+                <time>{{ locationTime(location.last_sale) }}</time>
+                <span class="performance-trend" :class="warehouseTrend(location).direction">
+                  <b>{{ warehouseTrend(location).direction === 'down' ? '↓' : warehouseTrend(location).direction === 'up' ? '↑' : '—' }}</b>
+                  {{ warehouseTrend(location).label }}
+                </span>
+              </div>
+            </div>
+            <div v-else class="location-table">
               <div class="location-row location-head"><span>S/N</span><span>Name</span><span>Total invoice</span><span>Amount</span><span>Last sale</span></div>
               <div v-if="!locations.length" class="empty">No sales yet</div>
               <div v-for="(location,index) in locations" :key="location.warehouse_id || index" class="location-row">
@@ -242,7 +258,23 @@ export default {
       return `${Math.floor(seconds / 3600)}h ago`;
     },
     productWidth(product) { const max = Math.max(1, ...this.topProducts.map(item => Number(item.quantity || 0))); return Math.max(5, Number(product.quantity || 0) / max * 100); },
+    warehouseBarWidth(location) {
+      const max = Math.max(1, ...this.locations.map(item => Number(item.amount || 0)));
+      return Math.max(4, Number(location.amount || 0) / max * 100);
+    },
+    warehouseAverage(location) {
+      const count = Number(location.total_invoice || 0);
+      return count ? Number(location.amount || 0) / count : 0;
+    },
+    warehouseTrend(location) {
+      const today = Number(location.amount || 0), yesterday = Number(location.yesterday_amount || 0);
+      const value = yesterday ? (today - yesterday) / yesterday * 100 : (today > 0 ? 100 : 0);
+      const direction = value > 0 ? 'up' : value < 0 ? 'down' : 'flat';
+      const absolute = Math.abs(value);
+      return { direction, label: `${value > 0 ? '+' : value < 0 ? '-' : ''}${absolute >= 100 ? absolute.toFixed(0) : absolute.toFixed(1)}%` };
+    },
     saleTime(date) { return date ? new Date(date).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) : '—'; },
+    locationTime(date) { return date ? new Date(date).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) : '—'; },
     locationDateTime(date) {
       if (!date) return '—';
       return new Date(date).toLocaleString([], { year:'numeric', month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit' });
@@ -491,7 +523,7 @@ main { padding:20px clamp(20px,2vw,32px) 28px; }
 .product p strong { color:var(--text);font-size:13px; }
 .product p small { font-size:11px; }
 .tr {
-  min-width:720px;min-height:48px;padding:9px 4px;gap:14px;
+  min-width:720px;min-height:48px;padding:9px 10px;gap:14px;
   color:var(--text);font-size:13px;
   transition:background-color .18s ease,box-shadow .18s ease;
 }
@@ -502,6 +534,7 @@ main { padding:20px clamp(20px,2vw,32px) 28px; }
 }
 .dark .tr.th { background:rgba(255,255,255,.045); }
 .tr>strong { font-weight:600; }
+.tr>.sale-total { width:100%;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap; }
 .status { padding:4px 9px;font-size:11px;font-weight:600; }
 .status.paid { color:#389e0d;background:#f6ffed; }
 .status.partial { color:#d48806;background:#fffbe6; }
@@ -528,6 +561,37 @@ main { padding:20px clamp(20px,2vw,32px) 28px; }
 }
 .location-head>span:first-child { color:var(--muted); }
 .dark .location-head { background:rgba(255,255,255,.045); }
+.period-pill {
+  min-width:78px;height:30px;padding:0 10px;display:flex;align-items:center;justify-content:space-between;gap:10px;
+  border:1px solid var(--line);border-radius:7px;color:var(--text)!important;background:var(--panel);
+  box-shadow:0 1px 2px rgba(15,23,42,.04);font-size:12px!important;font-weight:500;
+}
+.period-pill b { color:var(--muted);font-size:14px;font-weight:500;line-height:1; }
+.performance-table { overflow-x:auto; }
+.performance-row {
+  min-width:790px;min-height:53px;padding:10px 10px;display:grid;
+  grid-template-columns:28px minmax(180px,1.65fr) minmax(115px,1fr) 58px minmax(100px,.85fr) 82px minmax(104px,.9fr);
+  align-items:center;gap:12px;border-bottom:1px solid var(--line);color:var(--text);font-size:12px;
+  transition:background-color .18s ease,box-shadow .18s ease;
+}
+.performance-row:last-child { border-bottom:0; }
+.performance-head {
+  min-height:38px;border-radius:8px 8px 0 0;color:var(--muted);background:#fafafa;
+  font-size:11px;font-weight:600;letter-spacing:.025em;
+}
+.dark .performance-head { background:rgba(255,255,255,.045); }
+.performance-head>:nth-child(n+3):not(:last-child),.performance-money,.performance-number { text-align:right; }
+.performance-rank { color:var(--muted);font-variant-numeric:tabular-nums; }
+.warehouse-cell { min-width:0;display:grid;grid-template-columns:minmax(0,1fr) 70px;align-items:center;gap:12px; }
+.warehouse-cell strong { overflow:hidden;color:var(--text);font-weight:600;text-overflow:ellipsis;white-space:nowrap; }
+.warehouse-cell i { height:9px;display:block;overflow:hidden;border-radius:3px;background:rgba(109,40,217,.08); }
+.warehouse-cell i b { height:100%;display:block;border-radius:inherit;background:linear-gradient(90deg,#7c3aed,#8b5cf6); }
+.performance-money,.performance-number,.performance-row time { font-variant-numeric:tabular-nums;white-space:nowrap; }
+.performance-money { color:var(--text);font-weight:600; }
+.performance-row time { color:var(--text);text-align:right; }
+.performance-trend { display:flex;align-items:center;justify-content:flex-end;gap:6px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap; }
+.performance-trend b { font-size:17px;line-height:1; }
+.performance-trend.up { color:#16a34a; }.performance-trend.down { color:#ef4444; }.performance-trend.flat { color:var(--muted); }
 .sale-notice {
   position:fixed;z-index:20;top:88px;right:24px;min-width:280px;padding:13px 15px;
   display:grid;grid-template-columns:1fr auto;gap:3px 18px;border:1px solid rgba(109,40,217,.22);
@@ -541,11 +605,11 @@ main { padding:20px clamp(20px,2vw,32px) 28px; }
 .notice-enter-from,.notice-leave-to { opacity:0;transform:translateY(-8px); }
 .empty { font-size:13px; }
 @media(hover:hover) and (pointer:fine){
-  .tr:not(.th):hover,.location-row:not(.location-head):hover {
+  .tr:not(.th):hover,.location-row:not(.location-head):hover,.performance-row:not(.performance-head):hover {
     background:rgba(109,40,217,.055);
     box-shadow:inset 3px 0 0 #6d28d9;
   }
-  .dark .tr:not(.th):hover,.dark .location-row:not(.location-head):hover {
+  .dark .tr:not(.th):hover,.dark .location-row:not(.location-head):hover,.dark .performance-row:not(.performance-head):hover {
     background:rgba(139,108,240,.11);
     box-shadow:inset 3px 0 0 #8b6cf0;
   }

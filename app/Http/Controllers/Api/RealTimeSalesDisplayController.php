@@ -512,6 +512,19 @@ class RealTimeSalesDisplayController extends Controller
         $lastSaleExpression = $driver === 'sqlite'
             ? "MAX(sales.date || ' ' || COALESCE(sales.time, '00:00:00'))"
             : "MAX(CONCAT(sales.date, ' ', COALESCE(sales.time, '00:00:00')))";
+        $yesterdayQuery = Sale::query()
+            ->whereNull('sales.deleted_at')
+            ->where('sales.date', $yesterday)
+            ->whereIn('sales.warehouse_id', $warehouseIds);
+        if (empty($config['view_all_records'])) {
+            $yesterdayQuery->where('sales.user_id', (int) ($config['user_id'] ?? 0));
+        }
+        $yesterdayByLocation = (clone $yesterdayQuery)
+            ->select('sales.warehouse_id', DB::raw('COALESCE(SUM(sales.GrandTotal),0) as amount'))
+            ->groupBy('sales.warehouse_id')
+            ->pluck('amount', 'sales.warehouse_id');
+        $yesterdayTotal = (float) ((clone $yesterdayQuery)->sum('GrandTotal') ?? 0);
+
         $salesByLocation = (clone $base)
             ->leftJoin('warehouses', 'sales.warehouse_id', '=', 'warehouses.id')
             ->select(
@@ -529,17 +542,9 @@ class RealTimeSalesDisplayController extends Controller
                 'name' => $row->warehouse_name ?: '—',
                 'total_invoice' => (int) $row->total_invoice,
                 'amount' => (float) $row->amount,
+                'yesterday_amount' => (float) ($yesterdayByLocation->get($row->warehouse_id, 0) ?? 0),
                 'last_sale' => $row->last_sale ? Carbon::parse($row->last_sale)->toIso8601String() : null,
             ])->values();
-
-        $yesterdayQuery = Sale::query()
-            ->whereNull('sales.deleted_at')
-            ->where('sales.date', $yesterday)
-            ->whereIn('sales.warehouse_id', $warehouseIds);
-        if (empty($config['view_all_records'])) {
-            $yesterdayQuery->where('sales.user_id', (int) ($config['user_id'] ?? 0));
-        }
-        $yesterdayTotal = (float) $yesterdayQuery->sum('GrandTotal');
 
         $setting = Setting::with('Currency')->first();
 
