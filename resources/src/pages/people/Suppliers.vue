@@ -76,6 +76,9 @@
             </a-button>
             <template #overlay>
               <a-menu @click="({ key }) => onAction(key, record)">
+                <a-menu-item v-if="auth.can('Suppliers_view')" key="statement">
+                  <FileTextOutlined /> Supplier Statement
+                </a-menu-item>
                 <a-menu-item v-if="Number(record.due) > 0 && auth.can('pay_supplier_due')" key="pay-due">
                   <DollarOutlined /> {{ $t('pay_all_purchase_due_at_a_time') }}
                 </a-menu-item>
@@ -176,7 +179,7 @@ import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, DollarOutlined, RollbackOutlined,
-  EyeOutlined, MoreOutlined, ShopOutlined,
+  EyeOutlined, MoreOutlined, ShopOutlined, FileTextOutlined,
 } from '@ant-design/icons-vue';
 import PageHeader from '../../components/PageHeader.vue';
 import DataTable from '../../components/DataTable.vue';
@@ -252,6 +255,7 @@ watch(() => crud.total.value, () => { if (!initialLoading.value) loadTotals(); }
 /* --------------------------------------------------- row action dispatch */
 function onAction(key, record) {
   const go = {
+    statement: () => router.push(`/suppliers/${record.id}/statement`),
     'pay-due': () => openPay(record, 'due'),
     'pay-return': () => openPay(record, 'return'),
     details: () => router.push(`/suppliers/${record.id}/details`),

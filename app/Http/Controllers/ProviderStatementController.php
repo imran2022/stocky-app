@@ -38,11 +38,7 @@ class ProviderStatementController extends Controller
         $settings = Setting::whereNull('deleted_at')->first();
         $helpers = new helpers;
 
-        $html = view('pdf.customer_statement_modern', array_merge($data, [
-            // The shared template deliberately keeps the exact customer
-            // statement layout; only the party label and data are changed.
-            'client' => $data['provider'],
-            'partyLabel' => 'Supplier',
+        $html = view('pdf.supplier_statement_modern', array_merge($data, [
             'setting' => $settings,
             'symbol' => $helpers->Get_Currency(),
             'priceFormat' => $settings['price_format'] ?? null,

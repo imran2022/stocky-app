@@ -1,12 +1,12 @@
 {{--
-    Customer Account Statement — Modern layout (Build M4, 2026-09-19).
+    Supplier Account Statement — same Modern layout as Customer Statement.
     Styled to match the "Modern" Sale Invoice layout
     (resources/views/pdf/sale_pdf_modern.blade.php): same slate/blue palette,
     same header block (logo + company on the left, big title on the right),
     same label/value typography. Not user-customizable (self-styled by
     design, same as the Modern invoice).
 
-    Data: $client, $entries, $opening_balance, $current_opening_balance,
+    Data: $provider, $entries, $opening_balance, $current_opening_balance,
     $closing_balance, $fromDate, $toDate, $setting, $symbol, $priceFormat —
     all supplied by ClientStatementController@pdf, built from the same
     App\Services\ClientStatementService the customer portal statement uses.
@@ -29,14 +29,12 @@
     }
 
     $typeLabels = [
-        'invoice' => 'Invoice',
-        'payment' => 'Payment',
+        'purchase' => 'Purchase',
+        'purchase_payment' => 'Purchase Payment',
         'opening' => 'Opening Balance',
         'opening_payment' => 'Opening Balance Payment',
-        'return' => 'Sale Return',
-        'refund' => 'Refund',
-        'service' => 'Service Job',
-        'service_payment' => 'Service Payment',
+        'purchase_return' => 'Purchase Return',
+        'return_refund' => 'Return Refund',
     ];
 
     $periodText = ($fromDate || $toDate)
@@ -48,7 +46,7 @@
 <head>
     <meta charset="utf-8">
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-    <title>Account Statement - {{ $client['name'] ?? '' }}</title>
+    <title>Supplier Statement - {{ $provider['name'] ?? '' }}</title>
     <style>
         @page { size: A4; margin: 0; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -134,13 +132,13 @@
     <table style="margin-bottom: 15px;">
         <tr>
             <td style="width: 55%; vertical-align: top;">
-                <span class="label">Customer</span>
-                <div style="font-size: 10.5pt; font-weight: bold; color: #1e293b;">{{ $client['name'] ?? '-' }}</div>
-                @if(!empty($client['adresse']))
-                    <div style="font-size: 8.5pt; color: #64748b; margin-top: 2px;">{{ $client['adresse'] }}</div>
+                <span class="label">Supplier</span>
+                <div style="font-size: 10.5pt; font-weight: bold; color: #1e293b;">{{ $provider['name'] ?? '-' }}</div>
+                @if(!empty($provider['adresse']))
+                    <div style="font-size: 8.5pt; color: #64748b; margin-top: 2px;">{{ $provider['adresse'] }}</div>
                 @endif
-                @if(!empty($client['phone']))
-                    <div style="font-size: 8.5pt; color: #64748b;">{{ $client['phone'] }}</div>
+                @if(!empty($provider['phone']))
+                    <div style="font-size: 8.5pt; color: #64748b;">{{ $provider['phone'] }}</div>
                 @endif
             </td>
             <td style="width: 45%; vertical-align: top;">
