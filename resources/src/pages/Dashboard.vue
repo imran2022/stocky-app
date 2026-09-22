@@ -74,7 +74,7 @@
       <a-row :gutter="[16, 16]" style="margin-top: 16px">
         <a-col :xs="24" :xl="16">
           <a-card class="chart-card" :title="$t('Sales_And_Purchases')">
-            <apexchart v-if="salesChart.series.length" :key="'sales-bars-' + loadCount" type="bar" height="320" :options="salesChart.options" :series="salesChart.series" />
+            <apexchart v-if="salesChart.series.length" :key="'sales-area-' + loadCount" type="area" height="320" :options="salesChart.options" :series="salesChart.series" />
             <a-empty v-else :description="$t('No_data_available')" style="padding: 48px 0" />
           </a-card>
         </a-col>
@@ -90,7 +90,7 @@
       <a-row :gutter="[16, 16]" style="margin-top: 16px">
         <a-col :xs="24" :xl="12">
           <a-card class="chart-card" :title="$t('Payment_Sent_Received')">
-            <apexchart v-if="paymentChart.series.length" :key="'payment-bars-' + loadCount" type="bar" height="300" :options="paymentChart.options" :series="paymentChart.series" />
+            <apexchart v-if="paymentChart.series.length" :key="'payment-area-' + loadCount" type="area" height="300" :options="paymentChart.options" :series="paymentChart.series" />
             <a-empty v-else :description="$t('No_data_available')" style="padding: 48px 0" />
           </a-card>
         </a-col>
@@ -546,17 +546,18 @@ function buildCharts(days, salesData, purchasesData, products, customers, pay) {
       { name: t('Purchases'), data: purchases },
     ],
     options: {
-      chart: { ...CHART_BASE, type: 'bar', stacked: false },
+      chart: { ...CHART_BASE, type: 'area', stacked: false },
       colors: ['#6366f1', '#22d3ee'],
-      plotOptions: { bar: { columnWidth: '58%', borderRadius: 4, borderRadiusApplication: 'end' } },
-      stroke: { width: 0 },
+      stroke: { curve: 'smooth', width: 2.5 },
+      fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.28, opacityTo: 0.03, stops: [0, 95] } },
+      markers: { size: 0, hover: { size: 5 }, strokeWidth: 2, strokeColors: '#ffffff' },
       dataLabels: { enabled: false },
       legend: { position: 'top', horizontalAlign: 'right', labels: { colors: '#595959' }, markers: { radius: 6 } },
       xaxis: { categories: days, axisBorder: { show: false }, axisTicks: { show: false }, labels: { hideOverlappingLabels: true } },
       yaxis: { min: 0, forceNiceScale: true, labels: { formatter: compactNumber } },
       grid: GRID,
       tooltip: { theme: 'light', shared: true, y: { formatter: v => money(v) } },
-      responsive: [{ breakpoint: 575, options: { legend: { position: 'bottom', horizontalAlign: 'center' }, plotOptions: { bar: { columnWidth: '62%', borderRadius: 3 } } } }],
+      responsive: [{ breakpoint: 575, options: { legend: { position: 'bottom', horizontalAlign: 'center' }, stroke: { width: 2 } } }],
     },
   };
   donutChart.value = {
@@ -581,17 +582,18 @@ function buildCharts(days, salesData, purchasesData, products, customers, pay) {
       { name: t('Sent'), data: sent },
     ],
     options: {
-      chart: { ...CHART_BASE, type: 'bar', stacked: false },
+      chart: { ...CHART_BASE, type: 'area', stacked: false },
       colors: ['#10b981', '#f43f5e'],
-      plotOptions: { bar: { columnWidth: '58%', borderRadius: 4, borderRadiusApplication: 'end' } },
-      stroke: { width: 0 },
+      stroke: { curve: 'smooth', width: 2.5 },
+      fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.26, opacityTo: 0.03, stops: [0, 95] } },
+      markers: { size: 0, hover: { size: 5 }, strokeWidth: 2, strokeColors: '#ffffff' },
       dataLabels: { enabled: false },
       legend: { position: 'top', horizontalAlign: 'right', labels: { colors: '#595959' }, markers: { radius: 6 } },
       xaxis: { categories: pay.days, axisBorder: { show: false }, axisTicks: { show: false }, labels: { hideOverlappingLabels: true } },
       yaxis: { min: 0, forceNiceScale: true, labels: { formatter: compactNumber } },
       grid: GRID,
       tooltip: { theme: 'light', shared: true, y: { formatter: v => money(v) } },
-      responsive: [{ breakpoint: 575, options: { legend: { position: 'bottom', horizontalAlign: 'center' }, plotOptions: { bar: { columnWidth: '62%', borderRadius: 3 } } } }],
+      responsive: [{ breakpoint: 575, options: { legend: { position: 'bottom', horizontalAlign: 'center' }, stroke: { width: 2 } } }],
     },
   };
 
