@@ -5845,6 +5845,7 @@ class ReportController extends BaseController
         $provider = Provider::where('deleted_at', '=', null)->findOrFail($id);
 
         $purchases = Purchase::where('deleted_at', '=', null)
+            ->where('statut', 'received')
             ->where('payment_statut', '!=', 'paid')
             ->where('provider_id', $id)
             ->get();
@@ -5881,6 +5882,8 @@ class ReportController extends BaseController
             ->sum('paid_amount');
 
         $data['due'] = $data['total_amount'] - $data['total_paid'];
+        $data['opening_balance'] = (float) ($provider->opening_balance ?? 0);
+        $data['total_due'] = $data['due'] + $data['opening_balance'];
 
         $data['total_amount_return'] = DB::table('purchase_returns')
             ->where('deleted_at', '=', null)
@@ -5913,7 +5916,7 @@ class ReportController extends BaseController
 
         $pdf = \PDF::loadHTML($html, 'UTF-8');
 
-        return $pdf->download('report_provider.pdf');
+        return $pdf->download('Supplier_Report_'.$provider->id.'.pdf');
 
     }
 

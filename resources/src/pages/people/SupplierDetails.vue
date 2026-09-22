@@ -8,6 +8,14 @@
             {{ $t('Back') }}
           </a-button>
           <a-button
+            v-if="auth.can('Reports_suppliers')"
+            :loading="downloadingReport"
+            @click="downloadSupplierReport"
+          >
+            <template #icon><FilePdfOutlined /></template>
+            {{ $t('DownloadPdf') }}
+          </a-button>
+          <a-button
             v-if="auth.can('pay_supplier_due') && Number(provider.due) > 0"
             type="primary" @click="openPay('due')"
           >
@@ -182,6 +190,7 @@ import { useI18n } from 'vue-i18n';
 import {
   LeftOutlined, ShoppingCartOutlined, DollarOutlined, CheckCircleOutlined,
   ExclamationCircleOutlined, CalculatorOutlined, CreditCardOutlined,
+  FilePdfOutlined,
 } from '@ant-design/icons-vue';
 import PageHeader from '../../components/PageHeader.vue';
 import ReportTab from '../../components/ReportTab.vue';
@@ -202,6 +211,7 @@ const loading = ref(true);
 const provider = ref({ total_purchase: 0, total_amount: 0, total_paid: 0, due: 0, opening_balance: 0, credit_limit: 0, return_Due: 0, name: '' });
 const accounts = ref([]);
 const paymentMethods = ref([]);
+const downloadingReport = ref(false);
 
 // Accent colours + matching soft tints for the KPI icon chips (same set as the
 // customer ledger).
@@ -276,6 +286,21 @@ async function loadSummary() {
     paymentMethods.value = data?.payment_methods || [];
   } catch (e) { /* cards stay at zero, tabs still work */ } finally {
     loading.value = false;
+  }
+}
+
+async function downloadSupplierReport() {
+  downloadingReport.value = true;
+  try {
+    const safeName = String(provider.value.name || id)
+      .trim()
+      .replace(/[^a-z0-9_-]+/gi, '_')
+      .replace(/^_+|_+$/g, '') || id;
+    await http.download(`report/provider_pdf/${id}`, `Supplier_Report_${safeName}.pdf`);
+  } catch (e) {
+    message.error(t('Failed'));
+  } finally {
+    downloadingReport.value = false;
   }
 }
 

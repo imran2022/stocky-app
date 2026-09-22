@@ -92,6 +92,8 @@
                                 <div><strong style="color: #1f2937;">{{ __('pdf.total_amount') }}{{ $isRtl ? '' : ':' }}</strong> {{$symbol}} {{formatPrice((float)$provider['total_amount'], 2, $priceFormat)}}</div>
                                 <div><strong style="color: #1f2937;">{{ __('pdf.total_paid') }}{{ $isRtl ? '' : ':' }}</strong> {{$symbol}} {{formatPrice((float)$provider['total_paid'], 2, $priceFormat)}}</div>
                                 <div><strong style="color: #ef4444;">{{ __('pdf.purchase_due') }}{{ $isRtl ? '' : ':' }}</strong> {{$symbol}} {{formatPrice((float)$provider['due'], 2, $priceFormat)}}</div>
+                                <div><strong style="color: #6b21a8;">{{ __('pdf.opening_balance') }}{{ $isRtl ? '' : ':' }}</strong> {{$symbol}} {{formatPrice((float)$provider['opening_balance'], 2, $priceFormat)}}</div>
+                                <div style="margin-top: 4px; padding-top: 4px; border-top: 1px solid #ddd6fe;"><strong style="color: #be123c;">{{ __('pdf.net_balance') }}{{ $isRtl ? '' : ':' }}</strong> {{$symbol}} {{formatPrice((float)$provider['total_due'], 2, $priceFormat)}}</div>
                                 <div><strong style="color: #f59e0b;">{{ __('pdf.return_due') }}{{ $isRtl ? '' : ':' }}</strong> {{$symbol}} {{formatPrice((float)$provider['return_Due'], 2, $priceFormat)}}</div>
                             </div>
                         </div>
@@ -133,6 +135,7 @@
             <tr style="background: #8b5cf6;">
                 <th style="padding: 8px 8px; text-align: left; font-size: 8pt; font-weight: bold; color: #ffffff; text-transform: uppercase; border-right: 1px solid rgba(255,255,255,0.2);">{{ __('pdf.date') }}</th>
                 <th style="padding: 8px 8px; text-align: left; font-size: 8pt; font-weight: bold; color: #ffffff; text-transform: uppercase; border-right: 1px solid rgba(255,255,255,0.2);">{{ __('pdf.ref') }}</th>
+                <th style="padding: 8px 8px; text-align: right; font-size: 8pt; font-weight: bold; color: #ffffff; text-transform: uppercase; border-right: 1px solid rgba(255,255,255,0.2);">{{ __('pdf.grand_total') }}</th>
                 <th style="padding: 8px 8px; text-align: right; font-size: 8pt; font-weight: bold; color: #ffffff; text-transform: uppercase; border-right: 1px solid rgba(255,255,255,0.2);">{{ __('pdf.paid') }}</th>
                 <th style="padding: 8px 8px; text-align: right; font-size: 8pt; font-weight: bold; color: #ffffff; text-transform: uppercase; border-right: 1px solid rgba(255,255,255,0.2);">{{ __('pdf.due') }}</th>
                 <th style="padding: 8px 8px; text-align: left; font-size: 8pt; font-weight: bold; color: #ffffff; text-transform: uppercase;">{{ __('pdf.payment_status') }}</th>
@@ -162,6 +165,7 @@
                     {{$formattedDate}}
                 </td>
                 <td style="padding: 8px; font-size: 8.5pt; font-weight: 600; color: #8b5cf6;">{{$purchase['Ref']}}</td>
+                <td style="padding: 8px; text-align: right; font-size: 8.5pt; color: #1f2937;">{{$symbol}} {{formatPrice((float)$purchase['GrandTotal'], 2, $priceFormat)}}</td>
                 <td style="padding: 8px; text-align: right; font-size: 8.5pt; color: #10b981;">{{$symbol}} {{formatPrice((float)$purchase['paid_amount'], 2, $priceFormat)}}</td>
                 <td style="padding: 8px; text-align: right; font-size: 8.5pt; font-weight: bold; color: #ef4444;">{{$symbol}} {{formatPrice((float)$purchase['due'], 2, $priceFormat)}}</td>
                 <td style="padding: 8px; font-size: 8pt;">
