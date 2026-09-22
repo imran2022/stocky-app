@@ -74,7 +74,7 @@
       <a-row :gutter="[16, 16]" style="margin-top: 16px">
         <a-col :xs="24" :xl="16">
           <a-card class="chart-card" :title="$t('Sales_And_Purchases')">
-            <apexchart v-if="salesChart.series.length" :key="'sales-mix-' + loadCount" type="line" height="320" :options="salesChart.options" :series="salesChart.series" />
+            <apexchart v-if="salesChart.series.length" :key="'sales-bars-' + loadCount" type="bar" height="320" :options="salesChart.options" :series="salesChart.series" />
             <a-empty v-else :description="$t('No_data_available')" style="padding: 48px 0" />
           </a-card>
         </a-col>
@@ -90,7 +90,7 @@
       <a-row :gutter="[16, 16]" style="margin-top: 16px">
         <a-col :xs="24" :xl="12">
           <a-card class="chart-card" :title="$t('Payment_Sent_Received')">
-            <apexchart v-if="paymentChart.series.length" :key="'payment-mix-' + loadCount" type="line" height="300" :options="paymentChart.options" :series="paymentChart.series" />
+            <apexchart v-if="paymentChart.series.length" :key="'payment-bars-' + loadCount" type="bar" height="300" :options="paymentChart.options" :series="paymentChart.series" />
             <a-empty v-else :description="$t('No_data_available')" style="padding: 48px 0" />
           </a-card>
         </a-col>
@@ -488,19 +488,27 @@ function compactNumber(value) {
 // Cohesive, modern categorical palette shared across every dashboard chart.
 const PALETTE = ['#6366f1', '#22d3ee', '#f59e0b', '#ec4899', '#10b981', '#8b5cf6', '#0ea5e9', '#f43f5e'];
 
-// Compact columns expose the busiest hour immediately. Tooltip retains both
-// the invoice count and the existing sales amount.
+function hourLabel(hour) {
+  const h = Number(hour) || 0;
+  const periodLabel = h < 12 ? 'AM' : 'PM';
+  const twelveHour = h % 12 || 12;
+  return `${twelveHour} ${periodLabel}`;
+}
+
+// Show only hours that actually contain sales. This avoids a compressed
+// 24-column axis while preserving each sale's exact hour and amount.
 const hourlyChart = computed(() => {
-  const totals = hourlySalesToday.value.map(h => Number(h.total) || 0);
-  const counts = hourlySalesToday.value.map(h => Number(h.count) || 0);
-  const peak = Math.max(...counts, 0);
+  const activeHours = hourlySalesToday.value
+    .map(h => ({ hour: Number(h.hour) || 0, count: Number(h.count) || 0, total: Number(h.total) || 0 }))
+    .filter(h => h.count > 0);
+  const peak = Math.max(...activeHours.map(h => h.count), 0);
   return {
     series: [{
       name: t('Invoices'),
-      data: counts.map((count, hour) => ({
-        x: `${String(hour).padStart(2, '0')}h`,
-        y: count,
-        fillColor: peak > 0 && count === peak ? '#f59e0b' : '#6366f1',
+      data: activeHours.map(h => ({
+        x: hourLabel(h.hour),
+        y: h.count,
+        fillColor: peak > 0 && h.count === peak ? '#f59e0b' : '#6366f1',
       })),
     }],
     options: {
@@ -516,8 +524,8 @@ const hourlyChart = computed(() => {
       yaxis: { min: 0, forceNiceScale: true, labels: { formatter: v => Math.round(v) } },
       grid: GRID,
       legend: { show: false },
-      tooltip: { theme: 'light', y: { formatter: (val, { dataPointIndex }) => `${Math.round(val)} ${t('Invoices')} · ${money(totals[dataPointIndex] || 0)}` } },
-      responsive: [{ breakpoint: 575, options: { plotOptions: { bar: { columnWidth: '72%', borderRadius: 3 } }, xaxis: { labels: { show: false } } } }],
+      tooltip: { theme: 'light', y: { formatter: (val, { dataPointIndex }) => `${Math.round(val)} ${t('Invoices')} · ${money(activeHours[dataPointIndex]?.total || 0)}` } },
+      responsive: [{ breakpoint: 575, options: { plotOptions: { bar: { columnWidth: '64%', borderRadius: 3 } }, xaxis: { labels: { rotate: 0 } } } }],
     },
   };
 });
@@ -531,25 +539,21 @@ const warehouseColumns = computed(() => [
 function buildCharts(days, salesData, purchasesData, products, customers, pay) {
   const sales = (salesData || []).map(v => Number(v) || 0);
   const purchases = (purchasesData || []).map(v => Number(v) || 0);
-  const difference = sales.map((value, i) => value - (purchases[i] || 0));
 
   salesChart.value = {
     series: [
-      { name: t('Sales'), type: 'column', data: sales },
-      { name: t('Purchases'), type: 'column', data: purchases },
-      { name: `${t('Sales')} − ${t('Purchases')}`, type: 'line', data: difference },
+      { name: t('Sales'), data: sales },
+      { name: t('Purchases'), data: purchases },
     ],
     options: {
-      chart: { ...CHART_BASE, type: 'line', stacked: false },
-      colors: ['#6366f1', '#22d3ee', '#10b981'],
-      plotOptions: { bar: { columnWidth: '48%', borderRadius: 4, borderRadiusApplication: 'end' } },
-      stroke: { curve: 'straight', width: [0, 0, 3] },
-      markers: { size: [0, 0, 3], hover: { size: 5 }, strokeWidth: 0 },
-      fill: { opacity: [0.95, 0.9, 1] },
+      chart: { ...CHART_BASE, type: 'bar', stacked: false },
+      colors: ['#6366f1', '#22d3ee'],
+      plotOptions: { bar: { columnWidth: '58%', borderRadius: 4, borderRadiusApplication: 'end' } },
+      stroke: { width: 0 },
       dataLabels: { enabled: false },
       legend: { position: 'top', horizontalAlign: 'right', labels: { colors: '#595959' }, markers: { radius: 6 } },
       xaxis: { categories: days, axisBorder: { show: false }, axisTicks: { show: false }, labels: { hideOverlappingLabels: true } },
-      yaxis: { labels: { formatter: compactNumber } },
+      yaxis: { min: 0, forceNiceScale: true, labels: { formatter: compactNumber } },
       grid: GRID,
       tooltip: { theme: 'light', shared: true, y: { formatter: v => money(v) } },
       responsive: [{ breakpoint: 575, options: { legend: { position: 'bottom', horizontalAlign: 'center' }, plotOptions: { bar: { columnWidth: '62%', borderRadius: 3 } } } }],
@@ -570,28 +574,23 @@ function buildCharts(days, salesData, purchasesData, products, customers, pay) {
   };
   const received = (pay.received || []).map(v => Number(v) || 0);
   const sent = (pay.sent || []).map(v => Number(v) || 0);
-  const sentBelowAxis = sent.map(v => -v);
-  const cashFlow = received.map((value, i) => value - (sent[i] || 0));
 
   paymentChart.value = {
     series: [
-      { name: t('Received'), type: 'column', data: received },
-      { name: t('Sent'), type: 'column', data: sentBelowAxis },
-      { name: `${t('Received')} − ${t('Sent')}`, type: 'line', data: cashFlow },
+      { name: t('Received'), data: received },
+      { name: t('Sent'), data: sent },
     ],
     options: {
-      chart: { ...CHART_BASE, type: 'line', stacked: false },
-      colors: ['#10b981', '#f43f5e', '#6366f1'],
-      plotOptions: { bar: { columnWidth: '48%', borderRadius: 4 } },
-      stroke: { curve: 'straight', width: [0, 0, 3] },
-      markers: { size: [0, 0, 3], hover: { size: 5 }, strokeWidth: 0 },
-      fill: { opacity: [0.95, 0.9, 1] },
+      chart: { ...CHART_BASE, type: 'bar', stacked: false },
+      colors: ['#10b981', '#f43f5e'],
+      plotOptions: { bar: { columnWidth: '58%', borderRadius: 4, borderRadiusApplication: 'end' } },
+      stroke: { width: 0 },
       dataLabels: { enabled: false },
       legend: { position: 'top', horizontalAlign: 'right', labels: { colors: '#595959' }, markers: { radius: 6 } },
       xaxis: { categories: pay.days, axisBorder: { show: false }, axisTicks: { show: false }, labels: { hideOverlappingLabels: true } },
-      yaxis: { labels: { formatter: compactNumber } },
+      yaxis: { min: 0, forceNiceScale: true, labels: { formatter: compactNumber } },
       grid: GRID,
-      tooltip: { theme: 'light', shared: true, y: { formatter: (v, ctx) => money(ctx.seriesIndex === 1 ? Math.abs(v) : v) } },
+      tooltip: { theme: 'light', shared: true, y: { formatter: v => money(v) } },
       responsive: [{ breakpoint: 575, options: { legend: { position: 'bottom', horizontalAlign: 'center' }, plotOptions: { bar: { columnWidth: '62%', borderRadius: 3 } } } }],
     },
   };
