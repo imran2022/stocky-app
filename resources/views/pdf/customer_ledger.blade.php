@@ -1,153 +1,47 @@
-@php $pdfLocale = app()->getLocale(); $isRtl = $pdfLocale === 'ar'; @endphp
-<!doctype html>
-<html lang="{{ $pdfLocale }}" dir="{{ $isRtl ? 'rtl' : 'ltr' }}">
-<head>
-  <meta charset="utf-8">
-  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-  <title>{{ __('pdf.customer_ledger') }}</title>
-  @php
-    // Price formatting helper function
+@php
+    $pdfLocale = app()->getLocale();
+    $isRtl = $pdfLocale === 'ar';
     $priceFormat = $settings->price_format ?? null;
-    function formatPrice($number, $decimals = 2, $priceFormat = null) {
-      $number = (float) $number;
-      $decimals = (int) $decimals;
-      
-      if (empty($priceFormat)) {
-        return number_format($number, $decimals, '.', ',');
-      }
-      
-      switch ($priceFormat) {
-        case 'comma_dot':
-          return number_format($number, $decimals, '.', ',');
-        case 'dot_comma':
-          return number_format($number, $decimals, ',', '.');
-        case 'space_comma':
-          return number_format($number, $decimals, ',', ' ');
-        default:
-          return number_format($number, $decimals, '.', ',');
-      }
-    }
-  @endphp
-  <style>
-    /* Page + Base */
-    @page { margin: 22px; }
-    body { margin: 0; font-family: DejaVu Sans, sans-serif; font-size: 12px; color: #111; }
-    .wrap { page-break-inside: avoid; }
 
-    /* Header */
-    .header {
-      padding: 12px 14px;
-      border: 1px solid #e5e7eb;
-      border-radius: 8px;
-      background: #f8fafc;
-      margin-bottom: 14px;
-    }
-    .h-top { display: table; width: 100%; }
-    .h-left, .h-right { display: table-cell; vertical-align: top; }
-    .h-right { text-align: right; }
-    .title { font-size: 20px; font-weight: 700; color: #111827; }
-    .muted { color: #6b7280; }
-
-    .client-box {
-      margin-top: 8px; padding: 10px 12px;
-      border: 1px dashed #d1d5db; border-radius: 8px; background: #ffffff;
-    }
-    .client-col { display: table; width: 100%; }
-    .client-left, .client-right { display: table-cell; vertical-align: top; }
-    .client-right { text-align: right; }
-
-    /* KPI / Quick Stats */
-    .stats {
-      margin: 10px 0 14px;
-      border: 1px solid #e5e7eb;
-      border-radius: 10px;
-      padding: 10px;
-      background: #ffffff;
-    }
-    .kpi-grid { display: table; width: 100%; border-spacing: 8px 6px; }
-    .kpi {
-      display: table-cell; width: 33%;
-      border: 1px solid #eef2f7; border-radius: 10px;
-      background: #f9fafb; padding: 10px;
-    }
-    .kpi .label { font-size: 11px; color: #6b7280; }
-    .kpi .value { font-size: 16px; font-weight: 800; color: #111827; }
-    .danger { color: #dc2626; }
-    .warning { color: #d97706; }
-    .success { color: #16a34a; }
-
-    /* Section heading */
-    h3 {
-      margin: 18px 0 8px; font-size: 14px; color: #0f172a;
-      border-left: 4px solid #3b82f6; padding-left: 8px;
+    if (!function_exists('formatPrice')) {
+        function formatPrice($number, $decimals = 2, $priceFormat = null) {
+            $number = (float) $number;
+            if (empty($priceFormat)) return number_format($number, $decimals, '.', ',');
+            switch ($priceFormat) {
+                case 'comma_dot': return number_format($number, $decimals, '.', ',');
+                case 'dot_comma': return number_format($number, $decimals, ',', '.');
+                case 'space_comma': return number_format($number, $decimals, ',', ' ');
+                default: return number_format($number, $decimals, '.', ',');
+            }
+        }
     }
 
-    /* Tables */
-    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-    th, td { border: 1px solid #e5e7eb; padding: 6px 6px; vertical-align: middle; word-wrap: break-word; }
-    thead th { font-size: 12px; text-align: left; background: #f3f4f6; color: #111827; }
-    tbody tr:nth-child(odd) { background: #fafafa; }
-    .right { text-align: right; }
-    tfoot td { font-weight: 700; background: #f8fafc; }
-
-    /* Badges (statuses) */
-    .pill {
-      display: inline-block; padding: 2px 8px; border-radius: 999px;
-      font-size: 10px; font-weight: 700; border: 1px solid #e5e7eb; color: #374151; background: #f9fafb;
-    }
-    .pill.success { border-color: #bae6fd; color: #065f46; background: #ecfdf5; }
-    .pill.warn    { border-color: #fde68a; color: #92400e; background: #fffbeb; }
-    .pill.info    { border-color: #bfdbfe; color: #1e3a8a; background: #eff6ff; }
-    .pill.danger  { border-color: #fecaca; color: #7f1d1d; background: #fef2f2; }
-
-    /* Break control */
-    .avoid-break { page-break-inside: avoid; }
-  </style>
-</head>
-<body class="{{ $isRtl ? 'rtl' : '' }}" dir="{{ $isRtl ? 'rtl' : 'ltr' }}">
-
-  @php
-    // ---------- Helper: status badges (order/workflow) ----------
-    function pillSale($status) {
-      $s = strtolower(trim((string)$status));
-      if (preg_match('/\b(completed|approved|fulfilled|closed)\b/', $s)) return 'pill success';
-      if (preg_match('/\b(pending|awaiting|on hold)\b/', $s))        return 'pill warn';
-      if (preg_match('/\b(sent|shipped|in transit)\b/', $s))         return 'pill info';
-      if (preg_match('/\b(canceled|cancelled|rejected|void)\b/', $s))return 'pill danger';
-      return 'pill';
-    }
-
-    // ---------- Helper: payment badges (avoid "unpaid" -> "paid") ----------
     function pillPayment($status) {
-      $s = strtolower(trim((string)$status));
-      if (preg_match('/\b(unpaid|not\s*paid|overdue|failed|due)\b/', $s)) return 'pill danger';
-      if (preg_match('/\b(partial|partially\s*paid|part-?paid)\b/', $s))  return 'pill warn';
-      if (preg_match('/\b(paid|settled|paid\s*in\s*full)\b/', $s))        return 'pill success';
-      return 'pill';
+        $s = strtolower(trim((string)$status));
+        if (preg_match('/\b(unpaid|not\s*paid|overdue|failed|due)\b/', $s)) return 'status-pill unpaid-pill';
+        if (preg_match('/\b(partial|partially\s*paid|part-?paid)\b/', $s))  return 'status-pill partial-pill';
+        if (preg_match('/\b(paid|settled|paid\s*in\s*full)\b/', $s))        return 'status-pill paid-pill';
+        return 'status-pill';
     }
 
-    // ---------- Section totals ----------
     $salesGrandSum = $sales->sum('GrandTotal');
     $salesPaidSum  = $sales->sum('paid_amount');
     $salesDueSum   = $sales->sum(function($s){ return (float)($s->GrandTotal ?? 0) - (float)($s->paid_amount ?? 0); });
 
     $paymentsSum   = $payments->sum('montant');
-
     $quotesGrand   = $quotations->sum('GrandTotal');
 
     $retGrandSum   = $returns->sum('GrandTotal');
     $retPaidSum    = $returns->sum('paid_amount');
     $retDueSum     = $returns->sum(function($r){ return (float)($r->GrandTotal ?? 0) - (float)($r->paid_amount ?? 0); });
 
-    // Service jobs: only accepted / in-progress / delivered jobs are collectable.
     $serviceJobs   = $serviceJobs ?? collect();
-    $svcDueStatuses = \App\Models\ServiceJob::DUE_STATUSES;
+    $svcDueStatuses = class_exists('\App\Models\ServiceJob') ? \App\Models\ServiceJob::DUE_STATUSES : [];
     $svcGrandSum   = $serviceJobs->sum('total_amount');
     $svcPaidSum    = $serviceJobs->sum('paid_amount');
     $svcDueSum     = $serviceJobs->filter(function($j) use ($svcDueStatuses){ return in_array($j->status, $svcDueStatuses, true); })
                         ->sum(function($j){ return (float)($j->total_amount ?? 0) - (float)($j->paid_amount ?? 0); });
 
-    // ---------- Safe fallbacks for quick stats ----------
     $qsOpeningBalance = (float)($client->opening_balance ?? 0);
     $qsSalesGrand   = (float)($client->salesGrand ?? $salesGrandSum);
     $qsSalesPaid    = (float)($client->salesPaid  ?? $salesPaidSum);
@@ -161,368 +55,351 @@
     $qsNetBalance   = isset($client->netBalance)
                       ? (float)$client->netBalance
                       : ($qsOpeningBalance + $qsSaleDue + $qsServiceDue - $qsReturnsDue);
-  @endphp
+@endphp
 
-  <!-- HEADER -->
-  <div class="header wrap">
-    <div class="h-top">
-      <div class="h-left">
-        <div class="title">{{ __('pdf.customer_ledger') }}</div>
-        <div class="muted">Generated at: {{ now()->format('Y-m-d H:i') }}</div>
-      </div>
-      <div class="h-right">
-        {{-- (Optional) Logo / Company Name --}}
-      </div>
-    </div>
+<!DOCTYPE html>
+<html lang="{{ $pdfLocale }}" dir="{{ $isRtl ? 'rtl' : 'ltr' }}">
+<head>
+    <meta charset="utf-8">
+    <style>
+        @page { size: A4; margin: 12mm 14mm; }
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'DejaVu Sans', sans-serif; }
 
-    <div class="client-box">
-      <div class="client-col">
-        <div class="client-left">
-          <strong>{{ $client->name }}</strong><br>
-          Code: {{ $client->code ?? '-' }}<br>
-          City: {{ $client->city ?? '-' }}, Country: {{ $client->country ?? '-' }}
-        </div>
-        <div class="client-right">
-          Email: {{ $client->email ?? '-' }}<br>
-          Phone: {{ $client->phone ?? '-' }}<br>
-          Tax #: {{ $client->tax_number ?? '-' }}
-        </div>
-      </div>
-    </div>
-  </div>
+        body { background-color: #ffffff; color: #334155; line-height: 1.45; padding: 15px; }
 
-  <!-- QUICK STATS -->
-  <div class="stats wrap">
-    <div class="kpi-grid">
-      <div class="kpi">
-        <div class="label">{{ __('pdf.opening_balance') }}</div>
-        <div class="value {{ $qsOpeningBalance > 0 ? 'danger' : '' }}">{{ formatPrice($qsOpeningBalance, 2, $priceFormat) }}</div>
-      </div>
-      <div class="kpi">
-        <div class="label">Sales (Grand)</div>
-        <div class="value">{{ formatPrice($qsSalesGrand, 2, $priceFormat) }}</div>
-      </div>
-      <div class="kpi">
-        <div class="label">Sales (Paid)</div>
-        <div class="value">{{ formatPrice($qsSalesPaid, 2, $priceFormat) }}</div>
-      </div>
-      <div class="kpi">
-        <div class="label">Sales (Due)</div>
-        <div class="value danger">{{ formatPrice($qsSaleDue, 2, $priceFormat) }}</div>
-      </div>
+        .header-wrapper { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+        .logo-area { vertical-align: middle; }
+        .title-area { text-align: right; vertical-align: middle; }
+        .brand-name { font-size: 18pt; font-weight: bold; color: #4f46e5; }
+        .report-tag { font-size: 7.5pt; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 2px; }
 
-      <div class="kpi">
-        <div class="label">Service Jobs (Due)</div>
-        <div class="value danger">{{ formatPrice($qsServiceDue, 2, $priceFormat) }}</div>
-      </div>
-      <div class="kpi">
-        <div class="label">Returns (Due)</div>
-        <div class="value warning">{{ formatPrice($qsReturnsDue, 2, $priceFormat) }}</div>
-      </div>
-      <div class="kpi">
-        <div class="label">Payments (Total)</div>
-        <div class="value">{{ formatPrice($qsPaymentsTot, 2, $priceFormat) }}</div>
-      </div>
-      <div class="kpi">
-        <div class="label">Quotations (Grand)</div>
-        <div class="value">{{ formatPrice($qsQuotesGrand, 2, $priceFormat) }}</div>
-      </div>
+        .hr-line { width: 100%; height: 1px; background-color: #e2e8f0; margin-bottom: 18px; }
 
-      <div class="kpi">
-        <div class="label">{{ __('pdf.net_balance') }}</div>
-        <div class="value {{ $qsNetBalance >= 0 ? 'danger' : 'success' }}">
-          {{ formatPrice($qsNetBalance, 2, $priceFormat) }}
-        </div>
-      </div>
-    </div>
-  </div>
+        .info-grid { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        .info-card {
+            width: 48%; background: #fafafa; border: 1px solid #e2e8f0;
+            border-radius: 8px; padding: 12px 14px; vertical-align: top;
+        }
+        .info-label { font-size: 7.5pt; font-weight: 800; color: #64748b; text-transform: uppercase; margin-bottom: 6px; display: block; border-bottom: 1px solid #edf2f7; padding-bottom: 4px; }
+        .info-title { font-size: 10pt; font-weight: 700; color: #0f172a; margin-bottom: 3px; }
+        .info-detail { font-size: 8.5pt; color: #64748b; line-height: 1.5; }
 
-  <!-- OPENING BALANCE -->
-  @if($qsOpeningBalance != 0)
-  <h3>Opening Balance (Previous Dues)</h3>
-  <table class="avoid-break">
-    <thead>
-      <tr>
-        <th style="width:20%;">{{ __('pdf.type') }}</th>
-        <th style="width:20%;">{{ __('pdf.description') }}</th>
-        <th class="right" style="width:20%;">{{ __('pdf.amount') }}</th>
-        <th style="width:40%;">{{ __('pdf.notes') }}</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td>{{ __('pdf.opening_balance') }}</td>
-        <td>Previous Dues (Before System Start)</td>
-        <td class="right {{ $qsOpeningBalance > 0 ? 'danger' : '' }}">{{ formatPrice($qsOpeningBalance, 2, $priceFormat) }}</td>
-        <td>{{ __('pdf.balance_carried_forward') }}</td>
-      </tr>
-    </tbody>
-  </table>
-  @endif
+        .kpi-container { width: 100%; border-collapse: separate; border-spacing: 8px 0; margin-bottom: 12px; margin-left: -8px; }
+        .kpi-card {
+            background: #ffffff; border: 1px solid #e2e8f0;
+            border-radius: 8px; padding: 10px 12px; text-align: left; width: 25%; vertical-align: top;
+        }
+        .kpi-line { width: 20px; height: 3px; border-radius: 10px; margin-bottom: 6px; }
+        .kpi-label { font-size: 6.5pt; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 2px; }
+        .kpi-value { font-size: 11pt; font-weight: 800; color: #0f172a; }
 
-  <!-- SALES -->
-  <h3>{{ __('pdf.sales') }}</h3>
-  <table class="avoid-break">
-    <thead>
-      <tr>
-        <th style="width:12%;">{{ __('pdf.date') }}</th>
-        <th style="width:14%;">{{ __('pdf.ref') }}</th>
-        <th style="width:18%;">{{ __('pdf.warehouse') }}</th>
-        <th style="width:12%;">{{ __('pdf.status') }}</th>
-        <th class="right" style="width:14%;">{{ __('pdf.grand_total') }}</th>
-        <th class="right" style="width:14%;">{{ __('pdf.paid') }}</th>
-        <th class="right" style="width:14%;">{{ __('pdf.due') }}</th>
-        <th style="width:12%;">{{ __('pdf.payment_status') }}</th>
-      </tr>
-    </thead>
-    <tbody>
-      @forelse ($sales as $s)
-      <tr>
-        <td>
+        .bg-total { background: #6366f1; }
+        .bg-paid { background: #10b981; }
+        .bg-due { background: #ef4444; }
+        .bg-return { background: #f59e0b; }
+        .bg-info { background: #0ea5e9; }
+
+        .table-title { font-size: 10pt; font-weight: 800; color: #0f172a; margin: 20px 0 8px; padding-left: 2px; }
+
+        .modern-table { width: 100%; border-collapse: collapse; background: #ffffff; border-radius: 8px; overflow: hidden; border: 1px solid #e2e8f0; margin-bottom: 10px; }
+        .modern-table th {
+            background: #f8fafc; padding: 10px 12px; text-align: left;
+            font-size: 7.5pt; color: #627d98; text-transform: uppercase; font-weight: 700; border-bottom: 1px solid #e2e8f0;
+        }
+        .modern-table td { padding: 10px 12px; border-bottom: 1px solid #f1f5f9; font-size: 8.5pt; color: #334155; }
+        .modern-table tr:nth-child(even) { background-color: #fcfdfe; }
+
+        .modern-table tfoot td {
+            background: #f8fafc; padding: 10px 12px; font-size: 8.5pt; font-weight: bold; color: #1f2937; border-top: 1px solid #e2e8f0;
+        }
+
+        .ref-badge { font-weight: 700; color: #4f46e5; }
+        .status-pill { padding: 2px 8px; border-radius: 4px; font-size: 7pt; font-weight: 700; text-transform: uppercase; display: inline-block; }
+        .paid-pill { background: #e6f4ea; color: #137333; }
+        .partial-pill { background: #fef7e0; color: #b06000; }
+        .unpaid-pill { background: #fce8e6; color: #c5221f; }
+
+        .footer { text-align: center; margin-top: 30px; border-top: 1px solid #f1f5f9; padding-top: 15px; line-height: 1.6; }
+        .footer-notice { font-size: 8.5pt; color: #475569; font-weight: bold; }
+        .footer-date { font-size: 7.5pt; color: #94a3b8; }
+    </style>
+</head>
+<body>
+
+    <!-- HEADER -->
+    <table class="header-wrapper">
+        <tr>
+            <td class="logo-area">
+                @if(!empty($settings->logo))
+                    <img src="data:image/png;base64,{{ base64_encode(@file_get_contents(public_path('images/'.$settings->logo))) }}" style="max-height: 45px;">
+                @else
+                    <div class="brand-name">{{ $settings->CompanyName ?? 'Company' }}</div>
+                @endif
+            </td>
+            <td class="title-area">
+                <div class="report-tag">{{ __('pdf.customer_ledger') }}</div>
+                <div style="font-size: 14pt; font-weight: 800; color: #0f172a;">{{ $client->name }}</div>
+            </td>
+        </tr>
+    </table>
+
+    <div class="hr-line"></div>
+
+    <!-- CLIENT & BUSINESS INFO -->
+    <table class="info-grid">
+        <tr>
+            <td class="info-card">
+                <span class="info-label">From Business</span>
+                <div class="info-title">{{ $settings->CompanyName ?? '-' }}</div>
+                <div class="info-detail">
+                    {{ $settings->CompanyAdress ?? '-' }}<br>
+                    @if(!empty($settings->vat_number)) VAT/BIN: {{ $settings->vat_number }}<br> @endif
+                    Phone: {{ $settings->CompanyPhone ?? '-' }}<br>
+                    Email: {{ $settings->email ?? '-' }}
+                    @if(!empty($settings->website)) <br>Website: {{ $settings->website }} @endif
+                </div>
+            </td>
+            <td style="width: 4%;"></td>
+            <td class="info-card">
+                <span class="info-label">Customer Details</span>
+                <div class="info-title">{{ $client->name }}</div>
+                <div class="info-detail">
+                    Address: {{ $client->address ?? $client->adresse ?? '-' }}<br>
+                    Phone: {{ $client->phone ?? '-' }}
+                    @if(!empty($client->email)) <br>Email: {{ $client->email }} @endif
+                    <br>City: {{ $client->city ?? '-' }}, Country: {{ $client->country ?? '-' }}
+                </div>
+            </td>
+        </tr>
+    </table>
+
+    <!-- QUICK STATS / KPI ROW 1 -->
+    <table class="kpi-container">
+        <tr>
+            <td class="kpi-card">
+                <div class="kpi-line bg-info"></div>
+                <div class="kpi-label">{{ __('pdf.opening_balance') }}</div>
+                <div class="kpi-value">{{ formatPrice($qsOpeningBalance, 2, $priceFormat) }}</div>
+            </td>
+            <td class="kpi-card">
+                <div class="kpi-line bg-total"></div>
+                <div class="kpi-label">Sales Grand</div>
+                <div class="kpi-value">{{ formatPrice($qsSalesGrand, 2, $priceFormat) }}</div>
+            </td>
+            <td class="kpi-card">
+                <div class="kpi-line bg-paid"></div>
+                <div class="kpi-label">Sales Paid</div>
+                <div class="kpi-value">{{ formatPrice($qsSalesPaid, 2, $priceFormat) }}</div>
+            </td>
+            <td class="kpi-card">
+                <div class="kpi-line bg-due"></div>
+                <div class="kpi-label">Sales Due</div>
+                <div class="kpi-value" style="color: #ef4444;">{{ formatPrice($qsSaleDue, 2, $priceFormat) }}</div>
+            </td>
+        </tr>
+    </table>
+
+    <!-- QUICK STATS / KPI ROW 2 -->
+    <table class="kpi-container">
+        <tr>
+            <td class="kpi-card">
+                <div class="kpi-line bg-due"></div>
+                <div class="kpi-label">Service Due</div>
+                <div class="kpi-value" style="color: #ef4444;">{{ formatPrice($qsServiceDue, 2, $priceFormat) }}</div>
+            </td>
+            <td class="kpi-card">
+                <div class="kpi-line bg-return"></div>
+                <div class="kpi-label">Returns Due</div>
+                <div class="kpi-value" style="color: #f59e0b;">{{ formatPrice($qsReturnsDue, 2, $priceFormat) }}</div>
+            </td>
+            <td class="kpi-card">
+                <div class="kpi-line bg-paid"></div>
+                <div class="kpi-label">Payments Total</div>
+                <div class="kpi-value">{{ formatPrice($qsPaymentsTot, 2, $priceFormat) }}</div>
+            </td>
+            <td class="kpi-card">
+                <div class="kpi-line bg-total"></div>
+                <div class="kpi-label">{{ __('pdf.net_balance') }}</div>
+                <div class="kpi-value" style="color: {{ $qsNetBalance >= 0 ? '#ef4444' : '#10b981' }};">
+                    {{ formatPrice($qsNetBalance, 2, $priceFormat) }}
+                </div>
+            </td>
+        </tr>
+    </table>
+
+    <!-- SALES -->
+    <div class="table-title">{{ __('pdf.sales') }}</div>
+    <table class="modern-table">
+        <thead>
+            <tr>
+                <th>{{ __('pdf.date') }}</th>
+                <th>{{ __('pdf.ref') }}</th>
+                <th>{{ __('pdf.warehouse') }}</th>
+                <th style="text-align: right;">{{ __('pdf.grand_total') }}</th>
+                <th style="text-align: right;">{{ __('pdf.paid') }}</th>
+                <th style="text-align: right;">{{ __('pdf.due') }}</th>
+                <th style="text-align: center;">{{ __('pdf.status') }}</th>
+            </tr>
+        </thead>
+        <tbody>
+            @forelse ($sales as $s)
+            <tr>
+                <td style="color: #64748b; font-size: 8pt;">{{ \Carbon\Carbon::parse($s->date)->format('d M, Y') }}</td>
+                <td class="ref-badge">{{ $s->Ref }}</td>
+                <td>{{ optional($s->warehouse)->name }}</td>
+                <td style="text-align: right; font-weight: bold; color: #475569;">{{ formatPrice($s->GrandTotal, 2, $priceFormat) }}</td>
+                <td style="text-align: right; font-weight: bold; color: #10b981;">{{ formatPrice($s->paid_amount, 2, $priceFormat) }}</td>
+                <td style="text-align: right; font-weight: bold; color: #ef4444;">{{ formatPrice(($s->GrandTotal - $s->paid_amount), 2, $priceFormat) }}</td>
+                <td style="text-align: center;"><span class="{{ pillPayment($s->payment_statut) }}">{{ $s->payment_statut }}</span></td>
+            </tr>
+            @empty
+            <tr><td colspan="7" style="text-align: center;">No sales found.</td></tr>
+            @endforelse
+        </tbody>
+        <tfoot>
+            <tr>
+                <td colspan="3" style="text-align: right;">{{ __('pdf.totals') }}</td>
+                <td style="text-align: right;">{{ formatPrice($salesGrandSum, 2, $priceFormat) }}</td>
+                <td style="text-align: right; color: #10b981;">{{ formatPrice($salesPaidSum, 2, $priceFormat) }}</td>
+                <td style="text-align: right; color: #ef4444;">{{ formatPrice($salesDueSum, 2, $priceFormat) }}</td>
+                <td></td>
+            </tr>
+        </tfoot>
+    </table>
+
+    <!-- SERVICE JOBS -->
+    @if($serviceJobs->count())
+    <div class="table-title">{{ __('pdf.service') }}</div>
+    <table class="modern-table">
+        <thead>
+            <tr>
+                <th>{{ __('pdf.date') }}</th>
+                <th>{{ __('pdf.ref') }}</th>
+                <th>{{ __('pdf.service') }}</th>
+                <th style="text-align: right;">{{ __('pdf.grand_total') }}</th>
+                <th style="text-align: right;">{{ __('pdf.paid') }}</th>
+                <th style="text-align: right;">{{ __('pdf.due') }}</th>
+                <th style="text-align: center;">{{ __('pdf.status') }}</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach ($serviceJobs as $j)
             @php
-                $dateFormat = $settings->date_format ?? 'YYYY-MM-DD';
-                $dateTime = \Carbon\Carbon::parse($s->date);
-                $phpDateFormat = str_replace(['YYYY', 'MM', 'DD'], ['Y', 'm', 'd'], $dateFormat);
-                // Check if original date string contains time
-                $hasTime = strpos($s->date, ' ') !== false && preg_match('/\d{1,2}:\d{2}/', $s->date);
-                if ($hasTime) {
-                    $formattedDate = $dateTime->format($phpDateFormat . ' H:i');
-                    // Preserve seconds if they exist
-                    if (preg_match('/:\d{2}:\d{2}/', $s->date)) {
-                        $formattedDate = $dateTime->format($phpDateFormat . ' H:i:s');
-                    }
-                } else {
-                    $formattedDate = $dateTime->format($phpDateFormat);
-                }
+                $jDue = (float)($j->total_amount ?? 0) - (float)($j->paid_amount ?? 0);
+                $jDate = $j->created_at ? \Carbon\Carbon::parse($j->created_at)->format('d M, Y') : '-';
             @endphp
-            {{$formattedDate}}
-        </td>
-        <td>{{ $s->Ref }}</td>
-        <td>{{ optional($s->warehouse)->name }}</td>
-        <td><span class="{{ pillSale($s->statut) }}">{{ $s->statut }}</span></td>
-        <td class="right">{{ formatPrice($s->GrandTotal, 2, $priceFormat) }}</td>
-        <td class="right">{{ formatPrice($s->paid_amount, 2, $priceFormat) }}</td>
-        <td class="right">{{ formatPrice(($s->GrandTotal - $s->paid_amount), 2, $priceFormat) }}</td>
-        <td><span class="{{ pillPayment($s->payment_statut) }}">{{ $s->payment_statut }}</span></td>
-      </tr>
-      @empty
-      <tr><td colspan="8">No sales found.</td></tr>
-      @endforelse
-    </tbody>
-    <tfoot>
-      <tr>
-        <td colspan="4" class="right">{{ __('pdf.totals') }}</td>
-        <td class="right">{{ formatPrice($salesGrandSum, 2, $priceFormat) }}</td>
-        <td class="right">{{ formatPrice($salesPaidSum, 2, $priceFormat) }}</td>
-        <td class="right">{{ formatPrice($salesDueSum, 2, $priceFormat) }}</td>
-        <td></td>
-      </tr>
-    </tfoot>
-  </table>
+            <tr>
+                <td style="color: #64748b; font-size: 8pt;">{{ $jDate }}</td>
+                <td class="ref-badge">{{ $j->Ref }}</td>
+                <td>{{ $j->service_item ?? '-' }}</td>
+                <td style="text-align: right; font-weight: bold; color: #475569;">{{ formatPrice($j->total_amount, 2, $priceFormat) }}</td>
+                <td style="text-align: right; font-weight: bold; color: #10b981;">{{ formatPrice($j->paid_amount, 2, $priceFormat) }}</td>
+                <td style="text-align: right; font-weight: bold; color: #ef4444;">{{ formatPrice($jDue, 2, $priceFormat) }}</td>
+                <td style="text-align: center;"><span class="{{ pillPayment($j->payment_status) }}">{{ $j->payment_status }}</span></td>
+            </tr>
+            @endforeach
+        </tbody>
+        <tfoot>
+            <tr>
+                <td colspan="3" style="text-align: right;">{{ __('pdf.totals') }}</td>
+                <td style="text-align: right;">{{ formatPrice($svcGrandSum, 2, $priceFormat) }}</td>
+                <td style="text-align: right; color: #10b981;">{{ formatPrice($svcPaidSum, 2, $priceFormat) }}</td>
+                <td style="text-align: right; color: #ef4444;">{{ formatPrice($svcDueSum, 2, $priceFormat) }}</td>
+                <td></td>
+            </tr>
+        </tfoot>
+    </table>
+    @endif
 
-  <!-- SERVICE JOBS -->
-  @if($serviceJobs->count())
-  <h3>{{ __('pdf.service') }}</h3>
-  <table class="avoid-break">
-    <thead>
-      <tr>
-        <th style="width:12%;">{{ __('pdf.date') }}</th>
-        <th style="width:14%;">{{ __('pdf.ref') }}</th>
-        <th style="width:20%;">{{ __('pdf.service') }}</th>
-        <th style="width:12%;">{{ __('pdf.status') }}</th>
-        <th class="right" style="width:12%;">{{ __('pdf.grand_total') }}</th>
-        <th class="right" style="width:10%;">{{ __('pdf.paid') }}</th>
-        <th class="right" style="width:10%;">{{ __('pdf.due') }}</th>
-        <th style="width:10%;">{{ __('pdf.payment_status') }}</th>
-      </tr>
-    </thead>
-    <tbody>
-      @foreach ($serviceJobs as $j)
-      @php
-        $jCounts = in_array($j->status, $svcDueStatuses, true);
-        $jDue = (float)($j->total_amount ?? 0) - (float)($j->paid_amount ?? 0);
-        $dateFormat = $settings->date_format ?? 'YYYY-MM-DD';
-        $phpDateFormat = str_replace(['YYYY', 'MM', 'DD'], ['Y', 'm', 'd'], $dateFormat);
-        $jDate = $j->created_at ? \Carbon\Carbon::parse($j->created_at)->format($phpDateFormat) : '-';
-      @endphp
-      <tr>
-        <td>{{ $jDate }}</td>
-        <td>{{ $j->Ref }}</td>
-        <td>{{ $j->service_item ?? '-' }}</td>
-        <td><span class="{{ pillSale($j->status) }}">{{ $j->status }}</span></td>
-        <td class="right">{{ formatPrice($j->total_amount, 2, $priceFormat) }}</td>
-        <td class="right">{{ formatPrice($j->paid_amount, 2, $priceFormat) }}</td>
-        <td class="right {{ $jCounts && $jDue > 0 ? 'danger' : 'muted' }}">{{ formatPrice($jDue, 2, $priceFormat) }}</td>
-        <td><span class="{{ pillPayment($j->payment_status) }}">{{ $j->payment_status }}</span></td>
-      </tr>
-      @endforeach
-    </tbody>
-    <tfoot>
-      <tr>
-        <td colspan="4" class="right">{{ __('pdf.totals') }}</td>
-        <td class="right">{{ formatPrice($svcGrandSum, 2, $priceFormat) }}</td>
-        <td class="right">{{ formatPrice($svcPaidSum, 2, $priceFormat) }}</td>
-        <td class="right">{{ formatPrice($svcDueSum, 2, $priceFormat) }}</td>
-        <td></td>
-      </tr>
-    </tfoot>
-  </table>
-  <div class="muted" style="margin-top:4px;">Due excludes pending, declined and cancelled jobs.</div>
-  @endif
+    <!-- PAYMENTS -->
+    <div class="table-title">{{ __('pdf.payments') }}</div>
+    <table class="modern-table">
+        <thead>
+            <tr>
+                <th>{{ __('pdf.date') }}</th>
+                <th>{{ __('pdf.payment_ref') }}</th>
+                <th>{{ __('pdf.type') }}</th>
+                <th>{{ __('pdf.sale_ref') }}</th>
+                <th>{{ __('pdf.method') }}</th>
+                <th style="text-align: right;">{{ __('pdf.amount') }}</th>
+            </tr>
+        </thead>
+        <tbody>
+            @forelse ($payments as $p)
+            <tr>
+                <td style="color: #64748b; font-size: 8pt;">{{ \Carbon\Carbon::parse($p->date)->format('d M, Y') }}</td>
+                <td class="ref-badge">{{ $p->Ref }}</td>
+                <td>
+                    @if(isset($p->payment_type) && $p->payment_type === 'opening_balance')
+                        <span class="status-pill partial-pill">{{ __('pdf.opening_balance') }}</span>
+                    @elseif(isset($p->payment_type) && $p->payment_type === 'service')
+                        <span class="status-pill partial-pill">{{ __('pdf.service') }}</span>
+                    @else
+                        <span class="status-pill paid-pill">{{ __('pdf.sale') }}</span>
+                    @endif
+                </td>
+                <td>{{ $p->Sale_Ref ?? '-' }}</td>
+                <td>{{ $p->payment_method }}</td>
+                <td style="text-align: right; font-weight: bold; color: #10b981;">{{ formatPrice($p->montant, 2, $priceFormat) }}</td>
+            </tr>
+            @empty
+            <tr><td colspan="6" style="text-align: center;">No payments found.</td></tr>
+            @endforelse
+        </tbody>
+        <tfoot>
+            <tr>
+                <td colspan="5" style="text-align: right;">Total Payments</td>
+                <td style="text-align: right; color: #10b981;">{{ formatPrice($paymentsSum, 2, $priceFormat) }}</td>
+            </tr>
+        </tfoot>
+    </table>
 
-  <!-- PAYMENTS -->
-  <h3>{{ __('pdf.payments') }}</h3>
-  <table class="avoid-break">
-    <thead>
-      <tr>
-        <th style="width:14%;">{{ __('pdf.date') }}</th>
-        <th style="width:16%;">{{ __('pdf.payment_ref') }}</th>
-        <th style="width:12%;">{{ __('pdf.type') }}</th>
-        <th style="width:16%;">{{ __('pdf.sale_ref') }}</th>
-        <th style="width:18%;">{{ __('pdf.method') }}</th>
-        <th class="right" style="width:18%;">{{ __('pdf.amount') }}</th>
-      </tr>
-    </thead>
-    <tbody>
-      @forelse ($payments as $p)
-      <tr>
-        <td>
-            @php
-                $dateFormat = $settings->date_format ?? 'YYYY-MM-DD';
-                $dateTime = \Carbon\Carbon::parse($p->date);
-                $phpDateFormat = str_replace(['YYYY', 'MM', 'DD'], ['Y', 'm', 'd'], $dateFormat);
-                // Check if original date string contains time
-                $hasTime = strpos($p->date, ' ') !== false && preg_match('/\d{1,2}:\d{2}/', $p->date);
-                if ($hasTime) {
-                    $formattedDate = $dateTime->format($phpDateFormat . ' H:i');
-                    // Preserve seconds if they exist
-                    if (preg_match('/:\d{2}:\d{2}/', $p->date)) {
-                        $formattedDate = $dateTime->format($phpDateFormat . ' H:i:s');
-                    }
-                } else {
-                    $formattedDate = $dateTime->format($phpDateFormat);
-                }
-            @endphp
-            {{$formattedDate}}
-        </td>
-        <td>{{ $p->Ref }}</td>
-        <td>
-          @if(isset($p->payment_type) && $p->payment_type === 'opening_balance')
-            <span class="pill info">{{ __('pdf.opening_balance') }}</span>
-          @elseif(isset($p->payment_type) && $p->payment_type === 'service')
-            <span class="pill warn">{{ __('pdf.service') }}</span>
-          @else
-            <span class="pill success">{{ __('pdf.sale') }}</span>
-          @endif
-        </td>
-        <td>{{ $p->Sale_Ref ?? '-' }}</td>
-        <td>{{ $p->payment_method }}</td>
-        <td class="right">{{ formatPrice($p->montant, 2, $priceFormat) }}</td>
-      </tr>
-      @empty
-      <tr><td colspan="6">No payments found.</td></tr>
-      @endforelse
-    </tbody>
-    <tfoot>
-      <tr>
-        <td colspan="5" class="right">Total Payments</td>
-        <td class="right">{{ formatPrice($paymentsSum, 2, $priceFormat) }}</td>
-      </tr>
-    </tfoot>
-  </table>
+    <!-- RETURNS -->
+    @if($returns->count())
+    <div class="table-title">{{ __('pdf.returns') }}</div>
+    <table class="modern-table">
+        <thead>
+            <tr>
+                <th>{{ __('pdf.ref') }}</th>
+                <th>{{ __('pdf.sale_ref') }}</th>
+                <th>{{ __('pdf.warehouse') }}</th>
+                <th style="text-align: right;">{{ __('pdf.grand_total') }}</th>
+                <th style="text-align: right;">{{ __('pdf.paid') }}</th>
+                <th style="text-align: right;">{{ __('pdf.due') }}</th>
+                <th style="text-align: center;">{{ __('pdf.payment_status') }}</th>
+            </tr>
+        </thead>
+        <tbody>
+            @forelse ($returns as $r)
+            <tr>
+                <td class="ref-badge">{{ $r->Ref }}</td>
+                <td>{{ optional($r->sale)->Ref ?? '---' }}</td>
+                <td style="text-align: left;">{{ optional($r->warehouse)->name }}</td>
+                <td style="text-align: right; font-weight: bold; color: #475569;">{{ formatPrice($r->GrandTotal, 2, $priceFormat) }}</td>
+                <td style="text-align: right; font-weight: bold; color: #10b981;">{{ formatPrice($r->paid_amount, 2, $priceFormat) }}</td>
+                <td style="text-align: right; font-weight: bold; color: #ef4444;">{{ formatPrice(($r->GrandTotal - $r->paid_amount), 2, $priceFormat) }}</td>
+                <td style="text-align: center;"><span class="{{ pillPayment($r->payment_statut) }}">{{ $r->payment_statut }}</span></td>
+            </tr>
+            @empty
+            <tr><td colspan="7" style="text-align: center;">No returns found.</td></tr>
+            @endforelse
+        </tbody>
+        <tfoot>
+            <tr>
+                <td colspan="3" style="text-align: right;">{{ __('pdf.totals') }}</td>
+                <td style="text-align: right;">{{ formatPrice($retGrandSum, 2, $priceFormat) }}</td>
+                <td style="text-align: right; color: #10b981;">{{ formatPrice($retPaidSum, 2, $priceFormat) }}</td>
+                <td style="text-align: right; color: #ef4444;">{{ formatPrice($retDueSum, 2, $priceFormat) }}</td>
+                <td></td>
+            </tr>
+        </tfoot>
+    </table>
+    @endif
 
-  <!-- QUOTATIONS -->
-  <h3>{{ __('pdf.quotations') }}</h3>
-  <table class="avoid-break">
-    <thead>
-      <tr>
-        <th style="width:16%;">{{ __('pdf.date') }}</th>
-        <th style="width:20%;">{{ __('pdf.ref') }}</th>
-        <th style="width:18%;">{{ __('pdf.status') }}</th>
-        <th style="width:28%;">{{ __('pdf.warehouse') }}</th>
-        <th class="right" style="width:18%;">{{ __('pdf.grand_total') }}</th>
-      </tr>
-    </thead>
-    <tbody>
-      @forelse ($quotations as $q)
-      <tr>
-        <td>
-            @php
-                $dateFormat = $settings->date_format ?? 'YYYY-MM-DD';
-                $dateTime = \Carbon\Carbon::parse($q->date);
-                $phpDateFormat = str_replace(['YYYY', 'MM', 'DD'], ['Y', 'm', 'd'], $dateFormat);
-                // Check if original date string contains time
-                $hasTime = strpos($q->date, ' ') !== false && preg_match('/\d{1,2}:\d{2}/', $q->date);
-                if ($hasTime) {
-                    $formattedDate = $dateTime->format($phpDateFormat . ' H:i');
-                    // Preserve seconds if they exist
-                    if (preg_match('/:\d{2}:\d{2}/', $q->date)) {
-                        $formattedDate = $dateTime->format($phpDateFormat . ' H:i:s');
-                    }
-                } else {
-                    $formattedDate = $dateTime->format($phpDateFormat);
-                }
-            @endphp
-            {{$formattedDate}}
-        </td>
-        <td>{{ $q->Ref }}</td>
-        <td><span class="{{ pillSale($q->statut) }}">{{ $q->statut }}</span></td>
-        <td>{{ optional($q->warehouse)->name }}</td>
-        <td class="right">{{ formatPrice($q->GrandTotal, 2, $priceFormat) }}</td>
-      </tr>
-      @empty
-      <tr><td colspan="5">No quotations found.</td></tr>
-      @endforelse
-    </tbody>
-    <tfoot>
-      <tr>
-        <td colspan="4" class="right">{{ __('pdf.total_quotations') }}</td>
-        <td class="right">{{ formatPrice($quotesGrand, 2, $priceFormat) }}</td>
-      </tr>
-    </tfoot>
-  </table>
-
-  <!-- RETURNS -->
-  <h3>{{ __('pdf.returns') }}</h3>
-  <table class="avoid-break">
-    <thead>
-      <tr>
-        <th style="width:16%;">{{ __('pdf.ref') }}</th>
-        <th style="width:14%;">{{ __('pdf.status') }}</th>
-        <th style="width:18%;">{{ __('pdf.sale_ref') }}</th>
-        <th style="width:24%;">{{ __('pdf.warehouse') }}</th>
-        <th class="right" style="width:12%;">{{ __('pdf.grand_total') }}</th>
-        <th class="right" style="width:8%;">{{ __('pdf.paid') }}</th>
-        <th class="right" style="width:8%;">{{ __('pdf.due') }}</th>
-        <th style="width:12%;">{{ __('pdf.payment_status') }}</th>
-      </tr>
-    </thead>
-    <tbody>
-      @forelse ($returns as $r)
-      <tr>
-        <td>{{ $r->Ref }}</td>
-        <td><span class="{{ pillSale($r->statut) }}">{{ $r->statut }}</span></td>
-        <td>{{ optional($r->sale)->Ref ?? '---' }}</td>
-        <td>{{ optional($r->warehouse)->name }}</td>
-        <td class="right">{{ number_format($r->GrandTotal, 2) }}</td>
-        <td class="right">{{ number_format($r->paid_amount, 2) }}</td>
-        <td class="right">{{ number_format(($r->GrandTotal - $r->paid_amount), 2) }}</td>
-        <td><span class="{{ pillPayment($r->payment_statut) }}">{{ $r->payment_statut }}</span></td>
-      </tr>
-      @empty
-      <tr><td colspan="8">No returns found.</td></tr>
-      @endforelse
-    </tbody>
-    <tfoot>
-      <tr>
-        <td colspan="4" class="right">{{ __('pdf.totals') }}</td>
-        <td class="right">{{ formatPrice($retGrandSum, 2, $priceFormat) }}</td>
-        <td class="right">{{ formatPrice($retPaidSum, 2, $priceFormat) }}</td>
-        <td class="right">{{ formatPrice($retDueSum, 2, $priceFormat) }}</td>
-        <td></td>
-      </tr>
-    </tfoot>
-  </table>
+    <div class="footer">
+        <div class="footer-notice">This is a system generated document.</div>
+        <div class="footer-date">Generated on {{ date('d M, Y, h:i A') }}</div>
+    </div>
 
 </body>
 </html>
