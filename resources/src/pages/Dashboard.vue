@@ -70,18 +70,18 @@
         </a-col>
       </a-row>
 
-      <!-- ================= Sales/Purchases + Today's hourly sales ======== -->
+      <!-- ================= Sales/Purchases + Top selling ================= -->
       <a-row :gutter="[16, 16]" style="margin-top: 16px">
         <a-col :xs="24" :xl="16">
           <a-card class="chart-card" :title="$t('Sales_And_Purchases')">
-            <apexchart v-if="salesChart.series.length" :key="'sales-' + loadCount" :type="salesChart.type" height="320" :options="salesChart.options" :series="salesChart.series" />
+            <apexchart v-if="salesChart.series.length" :key="'sales-' + loadCount" type="area" height="320" :options="salesChart.options" :series="salesChart.series" />
             <a-empty v-else :description="$t('No_data_available')" style="padding: 48px 0" />
           </a-card>
         </a-col>
         <a-col :xs="24" :xl="8">
-          <a-card class="chart-card" :title="$t('Hourly_Sales_Today')">
-            <apexchart v-if="hourlyChart.series[0]?.data.length" :key="'hourly-bars-' + loadCount" type="bar" height="320" :options="hourlyChart.options" :series="hourlyChart.series" />
-            <a-empty v-else :description="$t('No_sales_today')" style="padding: 48px 0" />
+          <a-card class="chart-card" :title="$t('Top_Selling_Products')">
+            <apexchart v-if="donutChart.series.length" :key="'donut-' + loadCount" type="donut" height="320" :options="donutChart.options" :series="donutChart.series" />
+            <a-empty v-else :description="$t('No_data_available')" style="padding: 48px 0" />
           </a-card>
         </a-col>
       </a-row>
@@ -90,7 +90,7 @@
       <a-row :gutter="[16, 16]" style="margin-top: 16px">
         <a-col :xs="24" :xl="12">
           <a-card class="chart-card" :title="$t('Payment_Sent_Received')">
-            <apexchart v-if="paymentChart.series.length" :key="'payment-' + loadCount" :type="paymentChart.type" height="300" :options="paymentChart.options" :series="paymentChart.series" />
+            <apexchart v-if="paymentChart.series.length" :key="'payment-' + loadCount" type="area" height="300" :options="paymentChart.options" :series="paymentChart.series" />
             <a-empty v-else :description="$t('No_data_available')" style="padding: 48px 0" />
           </a-card>
         </a-col>
@@ -221,15 +221,15 @@
         </a-col>
       </a-row>
 
-      <!-- ================= Top products + Sales by Warehouse ================= -->
+      <!-- ================= Today's sales by hour + Sales by Warehouse ===== -->
       <a-row :gutter="[16, 16]" style="margin-top: 16px">
-        <a-col :xs="24" :xl="12">
-          <a-card class="chart-card" :title="$t('Top_Selling_Products')">
-            <apexchart v-if="donutChart.series.length" :key="'donut-' + loadCount" type="donut" height="300" :options="donutChart.options" :series="donutChart.series" />
-            <a-empty v-else :description="$t('No_data_available')" style="padding: 48px 0" />
+        <a-col :xs="24" :xl="14">
+          <a-card class="chart-card" :title="$t('Hourly_Sales_Today')">
+            <apexchart v-if="hourlyChart.series[0]?.data.length" :key="'hourly-bars-' + loadCount" type="bar" height="300" :options="hourlyChart.options" :series="hourlyChart.series" />
+            <a-empty v-else :description="$t('No_sales_today')" class="hourly-empty" />
           </a-card>
         </a-col>
-        <a-col :xs="24" :xl="12">
+        <a-col :xs="24" :xl="10">
           <a-card :title="$t('Sales_by_Warehouse')" style="height: 100%">
             <a-table
               :columns="warehouseColumns" :data-source="salesByWarehouse"
@@ -547,27 +547,23 @@ function buildCharts(days, salesData, purchasesData, products, customers, pay) {
   const singleSalesDay = (days || []).length <= 1;
 
   salesChart.value = {
-    type: singleSalesDay ? 'bar' : 'area',
     series: [
       { name: t('Sales'), data: sales },
       { name: t('Purchases'), data: purchases },
     ],
     options: {
-      chart: { ...CHART_BASE, type: singleSalesDay ? 'bar' : 'area', stacked: false },
+      chart: { ...CHART_BASE, type: 'area', stacked: false },
       colors: ['#168cf4', '#0aa678'],
-      plotOptions: singleSalesDay ? { bar: { columnWidth: '42%', borderRadius: 6, borderRadiusApplication: 'end' } } : {},
       stroke: { curve: 'smooth', width: singleSalesDay ? 0 : 3 },
-      fill: singleSalesDay
-        ? { opacity: 0.92 }
-        : { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.42, opacityTo: 0.08, stops: [0, 95] } },
-      markers: { size: 0, hover: { size: 6 }, strokeWidth: 2, strokeColors: '#ffffff' },
+      fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.42, opacityTo: 0.08, stops: [0, 95] } },
+      markers: { size: singleSalesDay ? 4 : 0, hover: { size: 6 }, strokeWidth: 1, strokeColors: '#ffffff' },
       dataLabels: { enabled: false },
       legend: { position: 'bottom', horizontalAlign: 'center', labels: { colors: '#595959' }, markers: { radius: 6 } },
       xaxis: { categories: days, axisBorder: { show: false }, axisTicks: { show: false }, labels: { hideOverlappingLabels: true } },
-      yaxis: { min: 0, forceNiceScale: true, labels: { formatter: compactNumber } },
+      yaxis: { ...(singleSalesDay ? {} : { min: 0 }), forceNiceScale: true, labels: { formatter: compactNumber } },
       grid: GRID,
       tooltip: { theme: 'light', shared: true, y: { formatter: v => money(v) } },
-      responsive: [{ breakpoint: 575, options: { stroke: { width: singleSalesDay ? 0 : 2 }, plotOptions: { bar: { columnWidth: '58%', borderRadius: 4 } } } }],
+      responsive: [{ breakpoint: 575, options: { stroke: { width: singleSalesDay ? 0 : 2 }, markers: { size: singleSalesDay ? 4 : 0 } } }],
     },
   };
   donutChart.value = {
@@ -588,27 +584,23 @@ function buildCharts(days, salesData, purchasesData, products, customers, pay) {
   const singlePaymentDay = (pay.days || []).length <= 1;
 
   paymentChart.value = {
-    type: singlePaymentDay ? 'bar' : 'area',
     series: [
-      { name: t('Received'), data: received },
       { name: t('Sent'), data: sent },
+      { name: t('Received'), data: received },
     ],
     options: {
-      chart: { ...CHART_BASE, type: singlePaymentDay ? 'bar' : 'area', stacked: false },
-      colors: ['#10b981', '#f43f5e'],
-      plotOptions: singlePaymentDay ? { bar: { columnWidth: '42%', borderRadius: 6, borderRadiusApplication: 'end' } } : {},
+      chart: { ...CHART_BASE, type: 'area', stacked: false },
+      colors: ['#f43f5e', '#10b981'],
       stroke: { curve: 'smooth', width: singlePaymentDay ? 0 : 3 },
-      fill: singlePaymentDay
-        ? { opacity: 0.92 }
-        : { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.38, opacityTo: 0.06, stops: [0, 95] } },
-      markers: { size: 0, hover: { size: 5 }, strokeWidth: 2, strokeColors: '#ffffff' },
+      fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.38, opacityTo: 0.06, stops: [0, 95] } },
+      markers: { size: singlePaymentDay ? 4 : 0, hover: { size: 5 }, strokeWidth: 1, strokeColors: '#ffffff' },
       dataLabels: { enabled: false },
       legend: { position: 'bottom', horizontalAlign: 'center', labels: { colors: '#595959' }, markers: { radius: 6 } },
       xaxis: { categories: pay.days, axisBorder: { show: false }, axisTicks: { show: false }, labels: { hideOverlappingLabels: true } },
-      yaxis: { min: 0, forceNiceScale: true, labels: { formatter: compactNumber } },
+      yaxis: { ...(singlePaymentDay ? {} : { min: 0 }), forceNiceScale: true, labels: { formatter: compactNumber } },
       grid: GRID,
       tooltip: { theme: 'light', shared: true, y: { formatter: v => money(v) } },
-      responsive: [{ breakpoint: 575, options: { stroke: { width: singlePaymentDay ? 0 : 2 }, plotOptions: { bar: { columnWidth: '58%', borderRadius: 4 } } } }],
+      responsive: [{ breakpoint: 575, options: { stroke: { width: singlePaymentDay ? 0 : 2 }, markers: { size: singlePaymentDay ? 4 : 0 } } }],
     },
   };
 
@@ -826,6 +818,13 @@ onMounted(load);
 }
 .chart-card :deep(.ant-card-body) {
   padding-top: 8px;
+}
+.hourly-empty {
+  min-height: 300px;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 .stockval {
   display: flex;
