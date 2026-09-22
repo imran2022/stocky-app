@@ -493,28 +493,32 @@ function compactNumber(value) {
 // Cohesive, modern categorical palette shared across every dashboard chart.
 const PALETTE = ['#6366f1', '#22d3ee', '#f59e0b', '#ec4899', '#10b981', '#8b5cf6', '#0ea5e9', '#f43f5e'];
 
-function hourLabel(hour) {
-  const h = Number(hour) || 0;
-  const periodLabel = h < 12 ? 'AM' : 'PM';
-  const twelveHour = h % 12 || 12;
-  return `${twelveHour} ${periodLabel}`;
-}
-
-// Show only hours that actually contain sales. This avoids a compressed
-// 24-column axis while preserving each sale's exact hour and amount.
+// Keep the complete 00h-23h timeline whenever the day has sales. Zero-sale
+// hours stay at zero so each bar remains in its true chronological position.
+// If the entire day is empty the series is empty, allowing the template's
+// dedicated "No sales today" state to render instead of a flat zero chart.
 const hourlyChart = computed(() => {
-  const activeHours = hourlySalesToday.value
-    .map(h => ({ hour: Number(h.hour) || 0, count: Number(h.count) || 0, total: Number(h.total) || 0 }))
-    .filter(h => h.count > 0);
-  const peak = Math.max(...activeHours.map(h => h.count), 0);
+  const byHour = new Map(
+    hourlySalesToday.value.map(h => [
+      Number(h.hour) || 0,
+      { count: Number(h.count) || 0, total: Number(h.total) || 0 },
+    ])
+  );
+  const hours = Array.from({ length: 24 }, (_, hour) => ({
+    hour,
+    count: byHour.get(hour)?.count || 0,
+    total: byHour.get(hour)?.total || 0,
+  }));
+  const hasSales = hours.some(h => h.count > 0);
+  const peak = Math.max(...hours.map(h => h.count), 0);
   return {
     series: [{
       name: t('Invoices'),
-      data: activeHours.map(h => ({
-        x: hourLabel(h.hour),
+      data: hasSales ? hours.map(h => ({
+        x: `${String(h.hour).padStart(2, '0')}h`,
         y: h.count,
         fillColor: peak > 0 && h.count === peak ? '#f59e0b' : '#6366f1',
-      })),
+      })) : [],
     }],
     options: {
       chart: { ...CHART_BASE, type: 'bar' },
@@ -524,13 +528,34 @@ const hourlyChart = computed(() => {
       dataLabels: { enabled: false },
       xaxis: {
         axisBorder: { show: false }, axisTicks: { show: false },
-        labels: { rotate: 0, hideOverlappingLabels: true },
+        labels: {
+          rotate: 0,
+          hideOverlappingLabels: false,
+          formatter: value => {
+            const hour = Number.parseInt(value, 10);
+            return hour % 3 === 0 || hour === 23 ? value : '';
+          },
+        },
       },
       yaxis: { min: 0, forceNiceScale: true, labels: { formatter: v => Math.round(v) } },
       grid: GRID,
       legend: { show: false },
-      tooltip: { theme: 'light', y: { formatter: (val, { dataPointIndex }) => `${Math.round(val)} ${t('Invoices')} · ${money(activeHours[dataPointIndex]?.total || 0)}` } },
-      responsive: [{ breakpoint: 575, options: { plotOptions: { bar: { columnWidth: '64%', borderRadius: 3 } }, xaxis: { labels: { rotate: 0 } } } }],
+      tooltip: { theme: 'light', y: { formatter: (val, { dataPointIndex }) => `${Math.round(val)} ${t('Invoices')} · ${money(hours[dataPointIndex]?.total || 0)}` } },
+      responsive: [{
+        breakpoint: 575,
+        options: {
+          plotOptions: { bar: { columnWidth: '72%', borderRadius: 3 } },
+          xaxis: {
+            labels: {
+              rotate: 0,
+              formatter: value => {
+                const hour = Number.parseInt(value, 10);
+                return hour % 6 === 0 || hour === 23 ? value : '';
+              },
+            },
+          },
+        },
+      }],
     },
   };
 });
