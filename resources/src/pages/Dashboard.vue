@@ -74,7 +74,7 @@
       <a-row :gutter="[16, 16]" style="margin-top: 16px">
         <a-col :xs="24" :xl="16">
           <a-card class="chart-card" :title="$t('Sales_And_Purchases')">
-            <apexchart v-if="salesChart.series.length" :key="'sales-area-' + loadCount" type="area" height="320" :options="salesChart.options" :series="salesChart.series" />
+            <apexchart v-if="salesChart.series.length" :key="'sales-' + loadCount" :type="salesChart.type" height="320" :options="salesChart.options" :series="salesChart.series" />
             <a-empty v-else :description="$t('No_data_available')" style="padding: 48px 0" />
           </a-card>
         </a-col>
@@ -90,7 +90,7 @@
       <a-row :gutter="[16, 16]" style="margin-top: 16px">
         <a-col :xs="24" :xl="12">
           <a-card class="chart-card" :title="$t('Payment_Sent_Received')">
-            <apexchart v-if="paymentChart.series.length" :key="'payment-area-' + loadCount" type="area" height="300" :options="paymentChart.options" :series="paymentChart.series" />
+            <apexchart v-if="paymentChart.series.length" :key="'payment-' + loadCount" :type="paymentChart.type" height="300" :options="paymentChart.options" :series="paymentChart.series" />
             <a-empty v-else :description="$t('No_data_available')" style="padding: 48px 0" />
           </a-card>
         </a-col>
@@ -444,7 +444,12 @@ const columns = computed(() => [
 
 /* ------------------------------------------------------------------ dates */
 function fmt(d) {
-  return d.toISOString().slice(0, 10);
+  // Keep the user's local calendar date. toISOString() converts to UTC and
+  // can send yesterday near midnight in positive-offset time zones.
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 function rangeFor(key) {
   if (key === 'custom' && customRange.value?.length === 2) {
@@ -539,25 +544,30 @@ const warehouseColumns = computed(() => [
 function buildCharts(days, salesData, purchasesData, products, customers, pay) {
   const sales = (salesData || []).map(v => Number(v) || 0);
   const purchases = (purchasesData || []).map(v => Number(v) || 0);
+  const singleSalesDay = (days || []).length <= 1;
 
   salesChart.value = {
+    type: singleSalesDay ? 'bar' : 'area',
     series: [
       { name: t('Sales'), data: sales },
       { name: t('Purchases'), data: purchases },
     ],
     options: {
-      chart: { ...CHART_BASE, type: 'area', stacked: false },
-      colors: ['#6366f1', '#22d3ee'],
-      stroke: { curve: 'smooth', width: 2.5 },
-      fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.28, opacityTo: 0.03, stops: [0, 95] } },
-      markers: { size: 0, hover: { size: 5 }, strokeWidth: 2, strokeColors: '#ffffff' },
+      chart: { ...CHART_BASE, type: singleSalesDay ? 'bar' : 'area', stacked: false },
+      colors: ['#168cf4', '#0aa678'],
+      plotOptions: singleSalesDay ? { bar: { columnWidth: '42%', borderRadius: 6, borderRadiusApplication: 'end' } } : {},
+      stroke: { curve: 'smooth', width: singleSalesDay ? 0 : 3 },
+      fill: singleSalesDay
+        ? { opacity: 0.92 }
+        : { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.42, opacityTo: 0.08, stops: [0, 95] } },
+      markers: { size: 0, hover: { size: 6 }, strokeWidth: 2, strokeColors: '#ffffff' },
       dataLabels: { enabled: false },
-      legend: { position: 'top', horizontalAlign: 'right', labels: { colors: '#595959' }, markers: { radius: 6 } },
+      legend: { position: 'bottom', horizontalAlign: 'center', labels: { colors: '#595959' }, markers: { radius: 6 } },
       xaxis: { categories: days, axisBorder: { show: false }, axisTicks: { show: false }, labels: { hideOverlappingLabels: true } },
       yaxis: { min: 0, forceNiceScale: true, labels: { formatter: compactNumber } },
       grid: GRID,
       tooltip: { theme: 'light', shared: true, y: { formatter: v => money(v) } },
-      responsive: [{ breakpoint: 575, options: { legend: { position: 'bottom', horizontalAlign: 'center' }, stroke: { width: 2 } } }],
+      responsive: [{ breakpoint: 575, options: { stroke: { width: singleSalesDay ? 0 : 2 }, plotOptions: { bar: { columnWidth: '58%', borderRadius: 4 } } } }],
     },
   };
   donutChart.value = {
@@ -575,25 +585,30 @@ function buildCharts(days, salesData, purchasesData, products, customers, pay) {
   };
   const received = (pay.received || []).map(v => Number(v) || 0);
   const sent = (pay.sent || []).map(v => Number(v) || 0);
+  const singlePaymentDay = (pay.days || []).length <= 1;
 
   paymentChart.value = {
+    type: singlePaymentDay ? 'bar' : 'area',
     series: [
       { name: t('Received'), data: received },
       { name: t('Sent'), data: sent },
     ],
     options: {
-      chart: { ...CHART_BASE, type: 'area', stacked: false },
+      chart: { ...CHART_BASE, type: singlePaymentDay ? 'bar' : 'area', stacked: false },
       colors: ['#10b981', '#f43f5e'],
-      stroke: { curve: 'smooth', width: 2.5 },
-      fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.26, opacityTo: 0.03, stops: [0, 95] } },
+      plotOptions: singlePaymentDay ? { bar: { columnWidth: '42%', borderRadius: 6, borderRadiusApplication: 'end' } } : {},
+      stroke: { curve: 'smooth', width: singlePaymentDay ? 0 : 3 },
+      fill: singlePaymentDay
+        ? { opacity: 0.92 }
+        : { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.38, opacityTo: 0.06, stops: [0, 95] } },
       markers: { size: 0, hover: { size: 5 }, strokeWidth: 2, strokeColors: '#ffffff' },
       dataLabels: { enabled: false },
-      legend: { position: 'top', horizontalAlign: 'right', labels: { colors: '#595959' }, markers: { radius: 6 } },
+      legend: { position: 'bottom', horizontalAlign: 'center', labels: { colors: '#595959' }, markers: { radius: 6 } },
       xaxis: { categories: pay.days, axisBorder: { show: false }, axisTicks: { show: false }, labels: { hideOverlappingLabels: true } },
       yaxis: { min: 0, forceNiceScale: true, labels: { formatter: compactNumber } },
       grid: GRID,
       tooltip: { theme: 'light', shared: true, y: { formatter: v => money(v) } },
-      responsive: [{ breakpoint: 575, options: { legend: { position: 'bottom', horizontalAlign: 'center' }, stroke: { width: 2 } } }],
+      responsive: [{ breakpoint: 575, options: { stroke: { width: singlePaymentDay ? 0 : 2 }, plotOptions: { bar: { columnWidth: '58%', borderRadius: 4 } } } }],
     },
   };
 
