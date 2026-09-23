@@ -1,1 +1,0 @@
-import{_ as n}from"./EntitySyncTab.CsQYrUnx.js";import{c as s,H as o}from"../app.4y_Qt36d.js";import"./UploadOutlined.Bwkl9Dv1.js";const p={__name:"BrandsTab",emits:["ready","refreshed"],setup(a){return(r,e)=>(s(),o(n,{entity:"brands","list-endpoint":"brands",onReady:e[0]||(e[0]=t=>r.$emit("ready")),onRefreshed:e[1]||(e[1]=t=>r.$emit("refreshed"))}))}};export{p as default};

@@ -25,7 +25,17 @@ $root = dirname(__DIR__, 2);
 $sales = file_get_contents($root.'/app/Http/Controllers/SalesController.php');
 $pos = file_get_contents($root.'/resources/src/pages/pos/PosPage.vue');
 $helpers = file_get_contents($root.'/app/utils/helpers.php');
-$compiledPos = file_get_contents($root.'/public/js/chunks/PosPage.LolIxUV8.js');
+// Resolve the compiled POS chunk through the Vite manifest instead of a
+// pinned content-hash filename (the hash changes on every rebuild).
+$compiledPosPath = null;
+$viteManifest = json_decode((string) @file_get_contents($root.'/public/js/.vite/manifest.json'), true) ?: [];
+foreach ($viteManifest as $entry) {
+    if (isset($entry['file']) && preg_match('#^chunks/PosPage\.[A-Za-z0-9_-]+\.js$#', $entry['file'])) {
+        $compiledPosPath = $root.'/public/js/'.$entry['file'];
+        break;
+    }
+}
+$compiledPos = $compiledPosPath ? file_get_contents($compiledPosPath) : false;
 $serviceWorker = file_get_contents($root.'/public/sw.js');
 
 $assert($sales !== false, 'SalesController.php must be readable.');
