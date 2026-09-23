@@ -93,7 +93,9 @@ $createReq = $req('POST', '/api/products', [
 ]);
 $createResp = json_decode($productsController->store($createReq)->getContent(), true);
 $assert(($createResp['success'] ?? false) === true, 'Setup: creating the test Variable Product must succeed.');
-$productId = $createResp['product_id'] ?? null;
+// ProductsController::store() only returns product_id once Build N4 is applied;
+// fall back to looking the product up by its (unique) main SKU.
+$productId = $createResp['product_id'] ?? DB::table('products')->where('code', $mainSku)->value('id');
 
 // ==================================================================
 // PosController::GetProductsByParametre() must return `product_code`

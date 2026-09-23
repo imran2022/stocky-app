@@ -15,9 +15,13 @@ N5 `8ca9b05`), overlay zip, manifests, CUSTOMIZATIONS.md / CHECKLIST.
   Movement Ledger (all 8 sources; per-warehouse balances reconcile with
   `product_warehouse`; date windows/opening balances correct; pending/unapproved
   documents ignored), Product Insights ordering, supplier PDF/Excel/ledger
-  render. Regression suite: 44/50 pass on the unmodified bundle with fixtures;
-  the 6 failures were 1 test-fixture issue, 1 pinned-hash test, 1 N4-only table
-  in a cleanup step, 2 stale PO/GRN wording tests and 1 broken manifest (below).
+  render. - Regression suite (sandbox DB with fixtures): 44 of 50 pass on the
+  unmodified bundle. Failures traced to: two fixture assumptions (single-digit
+  client code, empty VAT/website settings), one test pinned to a content-hash
+  filename, one test that assumes Build N4 (`store()` returning `product_id`,
+  the `product_variation_sets` table), and two PO/GRN tests still expecting the
+  originally documented wording. After Build P: 50 of 52 pass (52 includes the
+  two new P tests); the 2 remaining are those stale PO/GRN wording tests.
 - Source in the live installation == bundle HEAD for `app/`, `routes/` and
   `resources/src/` (differences are line endings only), and the
   live compiled assets were built from that same source (506 of 510 compiled

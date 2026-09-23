@@ -4974,8 +4974,9 @@ without a bump. Test: `build_p2_pos_search_enter_guard.php`.
 
 - `build_e1_pos_recent.php` now finds the compiled POS chunk through the Vite
   manifest instead of a pinned content-hash filename.
-- `build_n5_pos_main_sku_search.php` no longer crashes on the Build-N4-only
-  table `product_variation_sets` when N4 is not applied.
+- `build_n5_pos_main_sku_search.php` no longer depends on Build N4: it finds the
+  created product by SKU (N3-based `store()` returns no `product_id`) and guards
+  the N4-only `product_variation_sets` cleanup.
 - Known stale (not product failures): `build_po_grn.php` and
   `build_po_phase1_3.php` still expect the originally documented PO/GRN wording
   (owner confirmed the current PO/GRN screens are correct as they are).
