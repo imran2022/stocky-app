@@ -15,7 +15,8 @@ N5 `8ca9b05`), overlay zip, manifests, CUSTOMIZATIONS.md / CHECKLIST.
   Movement Ledger (all 8 sources; per-warehouse balances reconcile with
   `product_warehouse`; date windows/opening balances correct; pending/unapproved
   documents ignored), Product Insights ordering, supplier PDF/Excel/ledger
-  render. - Regression suite (sandbox DB with fixtures): 44 of 50 pass on the
+  render.
+- Regression suite (sandbox DB with fixtures): 44 of 50 pass on the
   unmodified bundle. Failures traced to: two fixture assumptions (single-digit
   client code, empty VAT/website settings), one test pinned to a content-hash
   filename, one test that assumes Build N4 (`store()` returning `product_id`,
