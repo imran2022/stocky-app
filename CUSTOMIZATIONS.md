@@ -4980,3 +4980,67 @@ without a bump. Test: `build_p2_pos_search_enter_guard.php`.
 - Known stale (not product failures): `build_po_grn.php` and
   `build_po_phase1_3.php` still expect the originally documented PO/GRN wording
   (owner confirmed the current PO/GRN screens are correct as they are).
+
+---
+
+## Build Q1 — Create Sale header: Payment Terms, Due Date and Previous Dues (2026-09-24)
+
+**Request:** keep the Create Sale metadata compact by placing Invoice Date,
+Customer, Payment Term, Due Date and Warehouse on one desktop row. The Payment
+Term controls must disappear completely when the existing feature switch is
+off. When the selected customer already owes money, show that amount without
+changing any sale, ledger, payment-term or credit-limit calculation.
+
+### Implementation
+
+- `resources/src/pages/sales/SaleForm.vue`
+  - Moved the existing invoice-level Payment Term selector and Due Date preview
+    from the lower tax/discount metadata card into the top sale metadata card.
+  - Desktop widths are `4 + 6 + 5 + 4 + 5 = 24` for Date, Customer, Payment
+    Term, Due Date and Warehouse. Tablet/mobile uses Ant Design's responsive
+    wrapping; no horizontal page overflow is introduced.
+  - When `enable_payment_terms` is false, both term fields are absent and the
+    original Date/Customer/Warehouse three-column (`8 + 8 + 8`) layout returns.
+  - Custom term days remain supported inline beside the preset selector. The
+    preset list contains one `7 Days` option and otherwise retains Immediate,
+    15 Days, 30 Days and Custom.
+  - Added a compact, positive-only `Previous Dues` badge beside the Customer
+    label. It uses the already-fetched `clients/{id}/brief.netBalance`, the same
+    canonical aggregate used by Customer Ledger and the existing credit-limit
+    check. Zero and negative/credit balances are hidden. The value is formatted
+    in base currency because customer receivables are aggregate base amounts,
+    not amounts in the current invoice's optional display currency.
+  - Due Date preview now uses the configured system default returned by the
+    server when neither invoice nor customer has an override. Previously the
+    preview fell back visually to a hard-coded 7 days even when Settings used a
+    different value; server save logic was already correct.
+- `app/Http/Controllers/SalesController.php`
+  - Added `default_payment_term_days` to the existing create/edit bootstrap
+    payloads, using `PaymentTerms::FALLBACK_SYSTEM_DEFAULT_DAYS` only when the
+    settings value is unavailable. No sale persistence or calculation path was
+    changed.
+
+### Logic and risk notes
+
+- No new financial formula was introduced, so no new Service class is needed:
+  Payment Term resolution continues to live in `App\Support\PaymentTerms`, and
+  Previous Dues continues to come from `ClientController::clientBrief()`.
+- `PosPage.vue` was not touched, therefore `public/sw.js` remains
+  `stocky-pwa-v14`; a service-worker version bump is neither required nor
+  appropriate for this admin Sale Form-only change.
+- Selecting another customer retains the existing behavior: customer context
+  (points, credit limit, net balance and customer payment term) is reloaded.
+- Existing create/edit API keys are additive and backward-compatible.
+
+### Regression and build verification
+
+- Added
+  `tests/Regression/build_q1_sale_form_payment_terms_header.cjs`. It verifies
+  top-card placement/order, single-instance controls, feature-toggle gating,
+  disabled-layout collapse, positive-only base-currency dues, configured
+  system-default preview wiring and both backend bootstrap keys.
+- `node tests/Regression/build_q1_sale_form_payment_terms_header.cjs` — PASS.
+- Existing `build_m2_payment_terms_fixes_and_due_date_display.cjs` — PASS.
+- `npm run build:admin` — PASS.
+- PHP CLI is not installed in the packaging environment, so PHP lint and
+  database-backed tests remain mandatory on staging before deployment.

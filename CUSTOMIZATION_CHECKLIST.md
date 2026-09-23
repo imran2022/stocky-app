@@ -2353,3 +2353,40 @@ This supplements the in-depth Build O1–O9 record appended to
       TIMESTAMP column). If it does, `ALTER TABLE real_time_sales_displays
       MODIFY expires_at DATETIME NOT NULL;`.
 - [ ] GitHub repository visibility is Private.
+
+## 33. Build Q1 — Create Sale header Payment Terms and Previous Dues
+
+- [ ] In Settings → Features, enable Payment Terms & Due Dates, then open
+      Sales → Create Sale on a desktop at 1200px or wider. Confirm Date,
+      Customer, Payment Term, Due Date and Warehouse appear in that order on a
+      single row.
+- [ ] Choose a customer with its own payment term. Confirm the selector says
+      `Customer default (...)` and Due Date equals Invoice Date plus that term.
+- [ ] Choose a customer without an override. Confirm the selector displays the
+      actual configured system default and Due Date uses it (test with a system
+      default other than 7 days).
+- [ ] Select Immediate, 7 Days, 15 Days and 30 Days; confirm Due Date updates.
+      Select Custom, enter a non-preset number, and confirm the inline days
+      input remains visible and Due Date updates.
+- [ ] Choose a customer whose Customer Ledger closing balance is positive.
+      Confirm a red Previous Dues badge appears beside the Customer label and
+      exactly matches the ledger/brief balance in base currency.
+- [ ] Choose a zero-balance or credit-balance customer. Confirm the Previous
+      Dues badge is hidden.
+- [ ] Disable Payment Terms & Due Dates. Reload Create Sale and confirm Payment
+      Term and Due Date are absent while Date, Customer and Warehouse return to
+      three equal desktop columns. Save a sale and confirm existing OFF-state
+      backend behavior remains unchanged.
+- [ ] Test tablet and mobile widths: fields wrap vertically/readably, Customer
+      quick-add remains clickable, custom days stays inside its field, and no
+      horizontal page overflow appears.
+- [ ] Confirm Tracking Ref, Zone, Courier, totals, payments, credit-limit check,
+      loyalty points, product lines and sale submission behave exactly as
+      before.
+- [ ] Run
+      `node tests/Regression/build_q1_sale_form_payment_terms_header.cjs` and
+      `node tests/Regression/build_m2_payment_terms_fixes_and_due_date_display.cjs`.
+- [ ] Run PHP lint and the database-backed Payment Terms regression suite on a
+      staging/test copy, then run `npm run build:admin` before deployment.
+- [ ] `PosPage.vue` was not changed; confirm `public/sw.js` remains v14 rather
+      than bumping it for an unrelated admin form change.

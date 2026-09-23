@@ -11,14 +11,22 @@
 
     <a-form v-else layout="vertical">
       <a-card size="small" style="margin-bottom: 16px">
-        <a-row :gutter="16">
-          <a-col :xs="24" :md="8">
+        <a-row :gutter="[16, 0]">
+          <a-col :xs="24" :sm="12" :lg="8" :xl="enablePaymentTerms ? 4 : 8">
             <a-form-item :label="$t('date')" required>
               <a-date-picker v-model:value="sale.date" value-format="YYYY-MM-DD" style="width: 100%" />
             </a-form-item>
           </a-col>
-          <a-col :xs="24" :md="8">
-            <a-form-item :label="$t('Customer')" required>
+          <a-col :xs="24" :sm="12" :lg="8" :xl="enablePaymentTerms ? 6 : 8">
+            <a-form-item required>
+              <template #label>
+                <span class="customer-field-label">
+                  <span>{{ $t('Customer') }}</span>
+                  <a-tag v-if="previousCustomerDue > 0" color="error" class="previous-due-tag">
+                    {{ $t('Previous_Dues') }}: {{ moneyBase(previousCustomerDue) }}
+                  </a-tag>
+                </span>
+              </template>
               <div style="display: flex; gap: 8px">
                 <a-select
                   v-model:value="sale.client_id"
@@ -36,7 +44,43 @@
               </div>
             </a-form-item>
           </a-col>
-          <a-col :xs="24" :md="8">
+          <!-- Payment Terms hierarchy, Level 3 (invoice override). Keeping the
+               selector and optional custom-days input in one cell lets Date,
+               Customer, Payment Term, Due Date and Warehouse stay on one
+               desktop row. The whole pair is absent when the feature is off. -->
+          <a-col v-if="enablePaymentTerms" :xs="24" :sm="12" :lg="8" :xl="5">
+            <a-form-item label="Payment Term">
+              <div class="payment-term-control">
+                <a-select v-model:value="paymentTermPreset" style="min-width: 0; flex: 1">
+                  <a-select-option value="default">
+                    {{ selectedClientPaymentTermDays !== null
+                      ? `Customer default (${paymentTermLabel(selectedClientPaymentTermDays)})`
+                      : `System default (${paymentTermLabel(systemDefaultPaymentTermDays)})` }}
+                  </a-select-option>
+                  <a-select-option value="0">Immediate</a-select-option>
+                  <a-select-option value="7">7 Days</a-select-option>
+                  <a-select-option value="15">15 Days</a-select-option>
+                  <a-select-option value="30">30 Days</a-select-option>
+                  <a-select-option value="custom">Custom</a-select-option>
+                </a-select>
+                <a-input-number
+                  v-if="paymentTermPreset === 'custom'"
+                  v-model:value="sale.payment_term_days"
+                  :min="0"
+                  :max="3650"
+                  placeholder="Days"
+                  aria-label="Custom payment term in days"
+                  class="custom-term-days"
+                />
+              </div>
+            </a-form-item>
+          </a-col>
+          <a-col v-if="enablePaymentTerms" :xs="24" :sm="12" :lg="8" :xl="4">
+            <a-form-item label="Due Date">
+              <a-input :value="dueDatePreview" disabled style="width: 100%" />
+            </a-form-item>
+          </a-col>
+          <a-col :xs="24" :sm="12" :lg="8" :xl="enablePaymentTerms ? 5 : 8">
             <a-form-item :label="$t('warehouse')" required>
               <a-select
                 v-model:value="sale.warehouse_id"
@@ -50,7 +94,7 @@
           </a-col>
           <!-- Multi-Currency: entered/displayed amounts are in this currency;
                the model (and the payload) stays in the base currency. -->
-          <a-col v-if="mcEnabled" :xs="24" :md="8">
+          <a-col v-if="mcEnabled" :xs="24" :sm="12" :lg="8">
             <a-form-item :label="$t('Currency')">
               <a-select
                 v-model:value="docCurrencyId"
@@ -241,37 +285,6 @@
               <a-col :xs="24" :md="8">
                 <a-form-item label="Tracking Ref">
                   <a-input v-model:value="sale.tracking_ref" placeholder="Tracking Ref" />
-                </a-form-item>
-              </a-col>
-              <!-- Payment Terms hierarchy, Level 3 (invoice override). "default"
-                   means no override: the resolved term falls back to the
-                   customer's own default, and finally the system default.
-                   The whole block hides when the feature is switched off
-                   (Settings > Features > Enable Payment Terms & Due Dates). -->
-              <a-col v-if="enablePaymentTerms" :xs="24" :md="8">
-                <a-form-item label="Payment Term">
-                  <a-select v-model:value="paymentTermPreset" style="width: 100%">
-                    <a-select-option value="default">
-                      {{ selectedClientPaymentTermDays !== null
-                        ? `Use customer default (${paymentTermLabel(selectedClientPaymentTermDays)})`
-                        : 'Use system default' }}
-                    </a-select-option>
-                    <a-select-option value="0">Immediate</a-select-option>
-                    <a-select-option value="7">7 Days</a-select-option>
-                    <a-select-option value="15">15 Days</a-select-option>
-                    <a-select-option value="30">30 Days</a-select-option>
-                    <a-select-option value="custom">Custom</a-select-option>
-                  </a-select>
-                </a-form-item>
-              </a-col>
-              <a-col v-if="enablePaymentTerms && paymentTermPreset === 'custom'" :xs="24" :md="8">
-                <a-form-item label="Custom term (days)">
-                  <a-input-number v-model:value="sale.payment_term_days" style="width: 100%" :min="0" :max="3650" />
-                </a-form-item>
-              </a-col>
-              <a-col v-if="enablePaymentTerms" :xs="24" :md="8">
-                <a-form-item label="Due Date">
-                  <a-input :value="dueDatePreview" disabled style="width: 100%" />
                 </a-form-item>
               </a-col>
               <a-col :xs="24" :md="8">
@@ -669,6 +682,7 @@ const sale = ref({
 // Payment Terms hierarchy, Level 2: the selected customer's own default term
 // (null = customer has no override either). Fetched in onClientChange().
 const selectedClientPaymentTermDays = ref(null);
+const systemDefaultPaymentTermDays = ref(7);
 const PAYMENT_TERM_PRESETS = [0, 7, 15, 30];
 const PAYMENT_TERM_LABELS = { 0: 'Immediate', 7: '7 Days', 15: '15 Days', 30: '30 Days' };
 function paymentTermLabel(days) {
@@ -703,7 +717,9 @@ const paymentTermPreset = computed({
 const dueDatePreview = computed(() => {
   const days = sale.value.payment_term_days !== null && sale.value.payment_term_days !== undefined
     ? Number(sale.value.payment_term_days)
-    : (selectedClientPaymentTermDays.value !== null ? Number(selectedClientPaymentTermDays.value) : 7);
+    : (selectedClientPaymentTermDays.value !== null
+        ? Number(selectedClientPaymentTermDays.value)
+        : Number(systemDefaultPaymentTermDays.value));
   const base = sale.value.date ? dayjs(sale.value.date) : dayjs();
   return base.add(days, 'day').format('YYYY-MM-DD');
 });
@@ -750,6 +766,10 @@ const clientIsEligible = ref(false);
 // owe — checked at submit when the sale is not paid in full.
 const selectedClientCreditLimit = ref(0);
 const selectedClientNetBalance = ref(0);
+// The client brief returns the canonical aggregate balance used by the
+// customer ledger and credit-limit check. Only a positive balance is a due;
+// a zero/negative balance means there is nothing to warn about here.
+const previousCustomerDue = computed(() => Math.max(0, Number(selectedClientNetBalance.value) || 0));
 
 // Split payment: one row per method. Empty while the status is pending.
 const payment_lines = ref([]);
@@ -1546,6 +1566,7 @@ onMounted(async () => {
       point_to_amount_rate.value = Number(create.point_to_amount_rate) || 0;
       enableBoxQty.value = create.enable_box_qty !== undefined ? !!create.enable_box_qty : true;
       enablePaymentTerms.value = create.enable_payment_terms !== undefined ? !!create.enable_payment_terms : true;
+      systemDefaultPaymentTermDays.value = Number(create.default_payment_term_days ?? 7);
       zoneOptions.value = (create.zones || []).map(z => ({ value: z.id, label: z.name }));
       courierOptions.value = (create.couriers || []).map(c => ({ value: c.id, label: c.name }));
 
@@ -1604,6 +1625,7 @@ onMounted(async () => {
       salesSwitchEnabled.value = data.enable_pos_salesperson_switch === true;
       enableBoxQty.value = data.enable_box_qty !== undefined ? !!data.enable_box_qty : true;
       enablePaymentTerms.value = data.enable_payment_terms !== undefined ? !!data.enable_payment_terms : true;
+      systemDefaultPaymentTermDays.value = Number(data.default_payment_term_days ?? 7);
       zoneOptions.value = (data.zones || []).map(z => ({ value: z.id, label: z.name }));
       courierOptions.value = (data.couriers || []).map(c => ({ value: c.id, label: c.name }));
       const s = data.sale || {};
@@ -1671,6 +1693,7 @@ onMounted(async () => {
       point_to_amount_rate.value = Number(data.point_to_amount_rate) || 0;
       enableBoxQty.value = data.enable_box_qty !== undefined ? !!data.enable_box_qty : true;
       enablePaymentTerms.value = data.enable_payment_terms !== undefined ? !!data.enable_payment_terms : true;
+      systemDefaultPaymentTermDays.value = Number(data.default_payment_term_days ?? 7);
       zoneOptions.value = (data.zones || []).map(z => ({ value: z.id, label: z.name }));
       courierOptions.value = (data.couriers || []).map(c => ({ value: c.id, label: c.name }));
       // Status defaults to pending (unpaid): no payment line until the user
@@ -1690,6 +1713,40 @@ onMounted(async () => {
 .muted {
   color: rgba(0, 0, 0, 0.45);
   font-size: 12px;
+}
+.customer-field-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.previous-due-tag {
+  margin-inline-end: 0;
+  font-weight: 600;
+  line-height: 20px;
+}
+.payment-term-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.custom-term-days {
+  width: 92px;
+  flex: 0 0 92px;
+}
+@media (max-width: 575px) {
+  .customer-field-label {
+    flex-wrap: wrap;
+    gap: 4px 8px;
+  }
+  .payment-term-control {
+    align-items: stretch;
+  }
+  .custom-term-days {
+    width: 88px;
+    flex-basis: 88px;
+  }
 }
 /* Holds the modal body's height steady while its data loads, so swapping the
    spinner for the form doesn't resize the dialog. */
