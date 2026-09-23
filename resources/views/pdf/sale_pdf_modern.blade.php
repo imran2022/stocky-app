@@ -3,26 +3,13 @@
     Build L4 (2026-09-19). One of two selectable layouts for the Sales
     Invoice PDF (Settings → Invoice PDF → Sales Invoice → Template).
     Supplied as a ready-made design.
-
-    What IS customizable here, same as Classic (Sections / Text & labels
-    panels in the customizer): Previous Dues / Net Balance, Customer block,
-    Sales Status line, Notes, Thank-you line + its text override, Footer
-    text, Document title override.
-
-    What is NOT customizable here (self-styled by design): the
-    Colors/Typography/Layout & logo/Items table panels — its colors, fonts
-    and spacing are fixed in its own <style> block. The settings page shows
-    a note about this when this layout is selected.
 --}}
 @php
     $pdfLocale = app()->getLocale();
     $isRtl = $pdfLocale === 'ar';
     $rtlLabelSuffix = $isRtl ? '' : ':';
 
-    // Check if it is PDF Download or Browser View
     $isPdfDownload = request()->is('*pdf*') || request()->is('*download*') || request()->has('pdf');
-
-    // Same on/off switches the Classic layout and Sale Detail page use.
     $pdfT = \App\Models\PdfTemplate::settingsFor('sale');
 @endphp
 <!DOCTYPE html>
@@ -50,45 +37,24 @@
         $shippingAmount = (float)($sale['shipping'] ?? 0);
         $discountFromPoints = (float)($sale['discount_from_points'] ?? 0);
 
-        // Order discount: when discount_Method is '1' (percent), $sale['discount']
-        // holds the PERCENT NUMBER itself (e.g. 10, meaning 10%), not a dollar
-        // amount — it must be converted before use in totals/subtotal math, the
-        // same way the Classic layout's $manualDiscountAmount does. Using the raw
-        // value directly here (as an earlier version of this file did) understated
-        // both the discount and the subtotal for every percent-based order
-        // discount. $subtotal is derived from GrandTotal backwards, so it must use
-        // this corrected dollar amount too.
         $discountMethod = $sale['discount_Method'] ?? '2';
         $discountRaw = (float)($sale['discount'] ?? 0);
-        // GrandTotal already reflects the real discount either way, so the
-        // subtotal-derivation below only needs a provisional amount to solve for
-        // subtotal when the discount is a percent of that same subtotal.
         $provisionalSubtotal = $sale['GrandTotal'] - $shippingAmount - $taxAmount + $discountFromPoints;
         $discountAmount = $discountMethod === '1'
-            ? round($provisionalSubtotal * ($discountRaw / (100 - $discountRaw)), 2) // solve: sub - sub*(pct/100) = provisional
+            ? round($provisionalSubtotal * ($discountRaw / (100 - $discountRaw)), 2)
             : min($discountRaw, $provisionalSubtotal);
         $subtotal = $provisionalSubtotal + $discountAmount;
 
-        // Dynamic Column Checkers
         $hasLineDiscount = false;
         $hasLineTax = false;
         $anyLineHasBoxQty = false;
         foreach ($details as $detail) {
-            if ((float)($detail['DiscountNet'] ?? 0) > 0) {
-                $hasLineDiscount = true;
-            }
-            if ((float)($detail['taxe'] ?? 0) > 0) {
-                $hasLineTax = true;
-            }
-            if (($detail['box_qty'] ?? null) !== null) {
-                $anyLineHasBoxQty = true;
-            }
+            if ((float)($detail['DiscountNet'] ?? 0) > 0) $hasLineDiscount = true;
+            if ((float)($detail['taxe'] ?? 0) > 0) $hasLineTax = true;
+            if (($detail['box_qty'] ?? null) !== null) $anyLineHasBoxQty = true;
         }
-        // enable_box_qty is a Settings-level company flag (System Settings →
-        // Features), same one the Classic layout and Sale Detail page read.
         $hasBoxQty = $anyLineHasBoxQty && (bool) ($setting['enable_box_qty'] ?? true);
 
-        // Dynamic Width Adjustment
         $descWidth = 37;
         if (!$hasLineDiscount) $descWidth += 10;
         if (!$hasLineTax) $descWidth += 10;
@@ -97,67 +63,28 @@
     <style>
         @page { 
             size: A4; 
-            @if($isPdfDownload)
-                margin: 0; 
-            @else
-                margin: 0.4in; 
-            @endif
+            @if($isPdfDownload) margin: 0; @else margin: 0.4in; @endif
         }
-        
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        
         body { 
             font-family: 'DejaVu Sans', sans-serif;
             font-size: 9pt; 
             color: #334155; 
             line-height: 1.25;
-            @if($isPdfDownload)
-                padding: 25px 25px 35px 25px; 
-            @else
-                padding: 0;
-            @endif
+            @if($isPdfDownload) padding: 25px 25px 35px 25px; @else padding: 0; @endif
             background-color: #ffffff;
         }
-        
         table { width: 100%; border-collapse: collapse; table-layout: fixed; }
         .label { font-size: 7.5pt; font-weight: bold; color: #94a3b8; text-transform: uppercase; margin-bottom: 1px; display: block; }
-        
         .product-table thead tr { background-color: #f8fafc; }
         .product-table th { padding: 5px 10px; color: #475569; font-size: 8.5pt; font-weight: bold; text-align: left; border-bottom: 1px solid #e2e8f0; }
-        
-        .product-table td { 
-            padding: 6px 10px; 
-            border-bottom: 1px solid #f1f5f9; 
-            vertical-align: middle; 
-            line-height: 1.2;
-        }
-        
-        .product-table tbody tr {
-            page-break-inside: avoid;
-            break-inside: avoid;
-        }
-        
+        .product-table td { padding: 6px 10px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; line-height: 1.2; }
+        .product-table tbody { page-break-inside: avoid; break-inside: avoid; }
         .col-normal { font-weight: normal !important; }
         .col-bold { font-weight: bold !important; }
         .product-name { color: #1e293b; }
-        
-        .status-badge { 
-            background: #2563eb; 
-            color: #ffffff; 
-            padding: 2px 10px; 
-            border-radius: 4px; 
-            font-size: 7.5pt; 
-            font-weight: bold; 
-            text-transform: uppercase; 
-        }
-        
-        .calc-container { 
-            border: 1px solid #e2e8f0; 
-            border-radius: 6px; 
-            overflow: hidden; 
-            page-break-inside: avoid;
-            break-inside: avoid;
-        }
+        .status-badge { background: #2563eb; color: #ffffff; padding: 2px 10px; border-radius: 4px; font-size: 7.5pt; font-weight: bold; text-transform: uppercase; }
+        .calc-container { border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden; page-break-inside: avoid; break-inside: avoid; }
         .calc-container td { padding: 4px 12px; border-bottom: 1px solid #f1f5f9; }
     </style>
 </head>
@@ -202,6 +129,24 @@
                     <span style="color: #10b981; font-weight: bold; font-size: 8.5pt;">Paid: {{$symbol}} {{formatPrice($sale['paid_amount'], 2, $priceFormat)}}</span>
                     <span style="color: #e11d48; font-weight: bold; font-size: 8.5pt; margin-left: 12px;">Due: {{$symbol}} {{formatPrice($sale['due'], 2, $priceFormat)}}</span>
                 </div>
+
+                {{-- Delivery Info (Build M6): Warehouse / Tracking Ref / Zone / Courier, only the ones set --}}
+                @php
+                    $deliveryParts = [];
+                    if (!empty($sale['warehouse'])) { $deliveryParts[] = ['Warehouse', $sale['warehouse']]; }
+                    if (!empty($sale['tracking_ref'])) { $deliveryParts[] = ['Tracking Ref', $sale['tracking_ref']]; }
+                    if (!empty($sale['zone_name'])) { $deliveryParts[] = ['Zone', $sale['zone_name']]; }
+                    if (!empty($sale['courier_name'])) { $deliveryParts[] = ['Courier', $sale['courier_name']]; }
+                @endphp
+                @if(!empty($pdfT['show_delivery_info']) && count($deliveryParts))
+                <div style="margin-top: 5px; font-size: 8pt; color: #64748b;">
+                    <span class="label" style="display: inline; margin-right: 4px;">Delivery Info</span>
+                    @foreach($deliveryParts as $i => $part)
+                        @if($i > 0)<span style="color: #cbd5e1;">&nbsp;&nbsp;|&nbsp;&nbsp;</span>@endif
+                        <strong style="color: #1e293b;">{{ $part[0] }}:</strong> {{ $part[1] }}
+                    @endforeach
+                </div>
+                @endif
             </td>
         </tr>
     </table>
@@ -223,34 +168,17 @@
                     <span style="font-size: 8.5pt; font-weight: bold; color: #64748b; margin-right: 5px;">Sales Status:</span>
                     <span class="status-badge">{{$sale['statut']}}</span>
                 </div>
-                <div style="font-size: 8.5pt; font-weight: bold; color: #475569;">
+                <div style="font-size: 8.5pt; font-weight: bold; color: #475569; margin-bottom: 3px;">
                     Payment Status: <span style="color: #2563eb; text-transform: uppercase;">{{$sale['payment_status']}}</span>
                 </div>
+                @if(!empty($sale['due_date']) && !empty($pdfT['show_due_date']))
+                <div style="font-size: 8.5pt; font-weight: bold; color: {{ !empty($sale['is_overdue']) ? '#dc2626' : '#92400e' }};">
+                    Due Date: <span>{{ $sale['due_date'] }}@if(!empty($sale['is_overdue'])) (Overdue)@endif</span>
+                </div>
+                @endif
             </td>
         </tr>
     </table>
-
-    @php
-        // Delivery / Shipment info (Build M6) — Warehouse / Tracking Ref /
-        // Zone / Courier, the same fields the Sale Detail page's header card
-        // shows. Only the ones actually set on this sale are printed.
-        $deliveryParts = [];
-        if (!empty($sale['warehouse'])) { $deliveryParts[] = ['Warehouse', $sale['warehouse']]; }
-        if (!empty($sale['tracking_ref'])) { $deliveryParts[] = ['Tracking Ref', $sale['tracking_ref']]; }
-        if (!empty($sale['zone_name'])) { $deliveryParts[] = ['Zone', $sale['zone_name']]; }
-        if (!empty($sale['courier_name'])) { $deliveryParts[] = ['Courier', $sale['courier_name']]; }
-    @endphp
-    @if(!empty($pdfT['show_delivery_info']) && count($deliveryParts))
-    <div style="margin-bottom: 15px; border: 1px solid #e2e8f0; border-radius: 6px; padding: 7px 12px; background: #f8fafc; page-break-inside: avoid;">
-        <span class="label" style="margin-bottom: 3px;">Delivery Info</span>
-        <div style="font-size: 8.5pt; color: #64748b;">
-            @foreach($deliveryParts as $i => $part)
-                @if($i > 0)<span style="color: #cbd5e1;">&nbsp;&nbsp;|&nbsp;&nbsp;</span>@endif
-                <strong style="color: #1e293b;">{{ $part[0] }}:</strong> {{ $part[1] }}
-            @endforeach
-        </div>
-    </div>
-    @endif
 
     <table class="product-table" style="margin-bottom: 15px;">
         <thead>
@@ -357,12 +285,6 @@
                         <tr style="background: #fffbeb;">
                             <td style="font-size: 8.5pt; color: #92400e; font-weight: bold;">Net Balance</td>
                             <td style="font-weight: bold; text-align: right; color: #92400e;">{{$symbol}} {{formatPrice((float)$sale['previous_dues'] + (float)$sale['due'], 2, $priceFormat)}}</td>
-                        </tr>
-                        @endif
-                        @if(!empty($sale['due_date']) && !empty($pdfT['show_due_date']))
-                        <tr style="background: #fffbeb;">
-                            <td style="font-size: 8.5pt; color: {{ !empty($sale['is_overdue']) ? '#dc2626' : '#92400e' }};">Due Date</td>
-                            <td style="font-weight: bold; text-align: right; color: {{ !empty($sale['is_overdue']) ? '#dc2626' : '#92400e' }};">{{ $sale['due_date'] }}@if(!empty($sale['is_overdue'])) (Overdue)@endif</td>
                         </tr>
                         @endif
                     </table>
