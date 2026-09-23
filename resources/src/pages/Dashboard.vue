@@ -1,77 +1,105 @@
 <template>
-  <div class="page">
-    <!-- ================= Header ================= -->
-    <div class="page-header">
-      <div>
-        <a-typography-title :level="3" style="margin: 0; font-size: 22px">{{ greeting }}</a-typography-title>
-        <a-typography-text type="secondary">{{ subtitle }}</a-typography-text>
+  <div class="page" :style="dashboardTypographyStyle">
+    <div class="dashboard-sections">
+      <!-- ================= Header ================= -->
+      <section class="dashboard-section" :style="sectionOrderStyle('header')">
+        <div class="page-header">
+          <div>
+            <a-typography-title :level="3" style="margin: 0; font-size: 22px">{{ greeting }}</a-typography-title>
+            <a-typography-text type="secondary">{{ subtitle }}</a-typography-text>
+          </div>
+
+          <a-space v-if="!loading" wrap class="dash-filters">
+            <a-segmented v-model:value="period" :options="periodOptions" @change="onPeriodChange" />
+            <a-range-picker
+              v-if="period === 'custom'"
+              v-model:value="customRange"
+              value-format="YYYY-MM-DD"
+              :allow-clear="false"
+              @change="load()"
+            />
+            <a-select
+              v-model:value="warehouseId"
+              class="wh-select"
+              :options="warehouseOptions"
+              @change="load()"
+            />
+            <!-- Multi-Currency: view the base-currency figures converted -->
+            <ViewCurrencySelect class="wh-select" />
+            <a-button type="primary" :loading="loading" @click="load()">
+              <template #icon><ReloadOutlined /></template>
+              {{ $t('Refresh') }}
+            </a-button>
+          </a-space>
+        </div>
+
+        <!-- Demo-data notice follows the filters when the API is unavailable. -->
+        <a-alert
+          v-if="demoMode && !loading"
+          type="warning"
+          show-icon
+          :message="$t('Demo_Data_Notice')"
+          :description="$t('Demo_Data_Notice_Help')"
+        />
+      </section>
+
+      <!-- Full-page loader; content mounts only when data is ready so charts
+           never render (and self-mutate their DOM) with empty options. -->
+      <div v-if="loading" class="dashboard-loader">
+        <a-spin size="large" />
       </div>
 
-      <a-space v-if="!loading" wrap class="dash-filters">
-        <a-segmented v-model:value="period" :options="periodOptions" @change="onPeriodChange" />
-        <a-range-picker
-          v-if="period === 'custom'"
-          v-model:value="customRange"
-          value-format="YYYY-MM-DD"
-          :allow-clear="false"
-          @change="load()"
-        />
-        <a-select
-          v-model:value="warehouseId"
-          class="wh-select"
-          :options="warehouseOptions"
-          @change="load()"
-        />
-        <!-- Multi-Currency: view the base-currency figures converted -->
-        <ViewCurrencySelect class="wh-select" />
-        <a-button type="primary" :loading="loading" @click="load()">
-          <template #icon><ReloadOutlined /></template>
-          {{ $t('Refresh') }}
-        </a-button>
-      </a-space>
-    </div>
-
-    <!-- Demo-data notice -->
-    <a-alert
-      v-if="demoMode && !loading"
-      type="warning"
-      show-icon
-      style="margin-bottom: 24px"
-      :message="$t('Demo_Data_Notice')"
-      :description="$t('Demo_Data_Notice_Help')"
-    />
-
-    <!-- Full-page loader; content mounts only when data is ready so charts
-         never render (and self-mutate their DOM) with empty options. -->
-    <div v-if="loading" style="display: flex; justify-content: center; padding: 96px 0">
-      <a-spin size="large" />
-    </div>
-
-    <template v-else>
-      <!-- ================= Stat cards (legacy's two rows of four) ========= -->
-      <a-row :gutter="[16, 16]">
-        <a-col v-for="card in statCards" :key="card.label" :xs="12" :sm="12" :md="8" :lg="6">
-          <a-card :hoverable="true" class="stat-card" @click="card.link && $router.push(card.link)">
-            <div class="stat-inner">
-              <span class="stat-icon" :style="{ background: card.tint }">
-                <component :is="card.icon" />
-              </span>
-              <div>
-                <div class="stat-label">
-                  {{ card.label }}
-                  <a-tooltip v-if="card.hint" :title="card.hint" @click.stop>
-                    <InfoCircleOutlined class="stat-hint-icon" />
-                  </a-tooltip>
+      <template v-else>
+        <!-- ================= Stat cards (two independently ordered rows) === -->
+        <section class="dashboard-section" :style="sectionOrderStyle('stat_cards_1')">
+          <a-row :gutter="[16, 16]">
+            <a-col v-for="card in statCards.slice(0, 4)" :key="card.label" :xs="12" :sm="12" :md="8" :lg="6">
+              <a-card :hoverable="true" class="stat-card" @click="card.link && $router.push(card.link)">
+                <div class="stat-inner">
+                  <span class="stat-icon" :style="{ background: card.tint }">
+                    <component :is="card.icon" />
+                  </span>
+                  <div>
+                    <div class="stat-label">
+                      {{ card.label }}
+                      <a-tooltip v-if="card.hint" :title="card.hint" @click.stop>
+                        <InfoCircleOutlined class="stat-hint-icon" />
+                      </a-tooltip>
+                    </div>
+                    <div class="stat-value">{{ card.money ? money(card.value) : card.value }}</div>
+                  </div>
                 </div>
-                <div class="stat-value">{{ card.money ? money(card.value) : card.value }}</div>
-              </div>
-            </div>
-          </a-card>
-        </a-col>
-      </a-row>
+              </a-card>
+            </a-col>
+          </a-row>
+        </section>
 
-      <!-- ================= Sales/Purchases + Top selling ================= -->
-      <a-row :gutter="[16, 16]" style="margin-top: 16px">
+        <section class="dashboard-section" :style="sectionOrderStyle('stat_cards_2')">
+          <a-row :gutter="[16, 16]">
+            <a-col v-for="card in statCards.slice(4, 8)" :key="card.label" :xs="12" :sm="12" :md="8" :lg="6">
+              <a-card :hoverable="true" class="stat-card" @click="card.link && $router.push(card.link)">
+                <div class="stat-inner">
+                  <span class="stat-icon" :style="{ background: card.tint }">
+                    <component :is="card.icon" />
+                  </span>
+                  <div>
+                    <div class="stat-label">
+                      {{ card.label }}
+                      <a-tooltip v-if="card.hint" :title="card.hint" @click.stop>
+                        <InfoCircleOutlined class="stat-hint-icon" />
+                      </a-tooltip>
+                    </div>
+                    <div class="stat-value">{{ card.money ? money(card.value) : card.value }}</div>
+                  </div>
+                </div>
+              </a-card>
+            </a-col>
+          </a-row>
+        </section>
+
+        <!-- ================= Sales/Purchases + Top selling =============== -->
+        <section class="dashboard-section" :style="sectionOrderStyle('chart_sales_purchases')">
+        <a-row :gutter="[16, 16]">
         <a-col :xs="24" :xl="16">
           <a-card class="chart-card" :title="$t('Sales_And_Purchases')">
             <apexchart v-if="salesChart.series.length" :key="'sales-' + loadCount" type="area" height="320" :options="salesChart.options" :series="salesChart.series" />
@@ -84,10 +112,12 @@
             <a-empty v-else :description="$t('No_data_available')" style="padding: 48px 0" />
           </a-card>
         </a-col>
-      </a-row>
+        </a-row>
+        </section>
 
-      <!-- ================= Payment area + Top customers ================= -->
-      <a-row :gutter="[16, 16]" style="margin-top: 16px">
+        <!-- ================= Payment area + Top customers ================ -->
+        <section class="dashboard-section" :style="sectionOrderStyle('chart_payment_sent_received')">
+        <a-row :gutter="[16, 16]">
         <a-col :xs="24" :xl="12">
           <a-card class="chart-card" :title="$t('Payment_Sent_Received')">
             <apexchart v-if="paymentChart.series.length" :key="'payment-' + loadCount" type="area" height="300" :options="paymentChart.options" :series="paymentChart.series" />
@@ -100,12 +130,14 @@
             <a-empty v-else :description="$t('No_data_available')" style="padding: 48px 0" />
           </a-card>
         </a-col>
-      </a-row>
+        </a-row>
+        </section>
 
-      <!-- ================= Sales by payment + Stock value ================= -->
-      <!-- align=stretch so the right column matches the taller left card; the
-           Quick actions card then grows to fill any leftover height. -->
-      <a-row :gutter="[16, 16]" align="stretch" style="margin-top: 16px">
+        <!-- ================= Sales by payment + Stock value =============== -->
+        <!-- align=stretch so the right column matches the taller left card; the
+             Quick actions card then grows to fill any leftover height. -->
+        <section class="dashboard-section" :style="sectionOrderStyle('sales_by_payment_stock_value')">
+        <a-row :gutter="[16, 16]" align="stretch">
         <a-col :xs="24" :lg="12">
           <a-card class="fill-card" :title="$t('Sales_by_Payment')">
             <div class="paylist">
@@ -169,10 +201,12 @@
             </div>
           </a-card>
         </a-col>
-      </a-row>
+        </a-row>
+        </section>
 
-      <!-- ================= Stock alert + Top selling ================= -->
-      <a-row :gutter="[16, 16]" style="margin-top: 16px">
+        <!-- ================= Stock alert + Top selling ==================== -->
+        <section class="dashboard-section" :style="sectionOrderStyle('table_stock_alert')">
+        <a-row :gutter="[16, 16]">
         <a-col :xs="24" :xl="12">
           <a-card :title="$t('StockAlert')">
             <template #extra>
@@ -219,10 +253,12 @@
             <a-empty v-else :description="$t('No_data_available')" />
           </a-card>
         </a-col>
-      </a-row>
+        </a-row>
+        </section>
 
-      <!-- ================= Today's sales by hour + Sales by Warehouse ===== -->
-      <a-row :gutter="[16, 16]" style="margin-top: 16px">
+        <!-- ================= Today's sales + Sales by Warehouse =========== -->
+        <section class="dashboard-section" :style="sectionOrderStyle('realtime_sales_warehouse')">
+        <a-row :gutter="[16, 16]">
         <a-col :xs="24" :xl="14">
           <a-card class="chart-card" :title="$t('Hourly_Sales_Today')">
             <apexchart v-if="hourlyChart.series[0]?.data.length" :key="'hourly-bars-' + loadCount" type="bar" height="300" :options="hourlyChart.options" :series="hourlyChart.series" />
@@ -243,10 +279,12 @@
             </a-table>
           </a-card>
         </a-col>
-      </a-row>
+        </a-row>
+        </section>
 
-      <!-- ================= Recent sales ================= -->
-      <a-card style="margin-top: 16px" :title="$t('Recent_Sales')">
+        <!-- ================= Recent sales ================================ -->
+        <section class="dashboard-section" :style="sectionOrderStyle('table_recent_sales')">
+        <a-card :title="$t('Recent_Sales')">
         <template #extra>
           <a-button type="link" @click="$router.push('/sales')">{{ $t('View_all') }}</a-button>
         </template>
@@ -270,8 +308,10 @@
             </template>
           </template>
         </a-table>
-      </a-card>
-    </template>
+        </a-card>
+        </section>
+      </template>
+    </div>
   </div>
 </template>
 
@@ -297,11 +337,85 @@ const auth = useAuthStore();
 // (ViewCurrencySelect) automatically.
 const { money } = useFormat();
 
+/* ------------------------------------------------ dashboard preferences */
+// These IDs match System Settings. Each item is a complete responsive row, so
+// reordering never separates the two cards that share a desktop row.
+const DEFAULT_SECTION_ORDER = [
+  'header',
+  'stat_cards_1',
+  'stat_cards_2',
+  'chart_sales_purchases',
+  'chart_payment_sent_received',
+  'sales_by_payment_stock_value',
+  'table_stock_alert',
+  'realtime_sales_warehouse',
+  'table_recent_sales',
+];
+
+function normaliseSectionOrder(raw) {
+  let stored = raw;
+  try {
+    if (typeof stored === 'string') stored = JSON.parse(stored);
+  } catch (e) {
+    stored = [];
+  }
+  if (!Array.isArray(stored)) stored = [];
+
+  // Older settings listed the two cards in a row separately. Keep the first
+  // recognised row in its saved position and silently discard its duplicate.
+  const legacyRow = {
+    chart_top_selling: 'chart_sales_purchases',
+    chart_top_customers: 'chart_payment_sent_received',
+    table_top_selling_products: 'table_stock_alert',
+    hourly_sales_today: 'realtime_sales_warehouse',
+    sales_by_warehouse: 'realtime_sales_warehouse',
+  };
+  const allowed = new Set(DEFAULT_SECTION_ORDER);
+  const result = [];
+  stored.forEach(id => {
+    const mapped = legacyRow[id] || id;
+    if (allowed.has(mapped) && !result.includes(mapped)) result.push(mapped);
+  });
+  DEFAULT_SECTION_ORDER.forEach(id => {
+    if (!result.includes(id)) result.push(id);
+  });
+  return result;
+}
+
+const dashboardSectionOrder = computed(() =>
+  normaliseSectionOrder(auth.user?.dashboard_section_order)
+);
+
+function sectionOrderStyle(id) {
+  const index = dashboardSectionOrder.value.indexOf(id);
+  return { order: index === -1 ? DEFAULT_SECTION_ORDER.length : index };
+}
+
+const dashboardTypographyStyle = computed(() => {
+  const rawSize = Number(auth.user?.dashboard_font_size);
+  const allowedSizes = [12, 14, 16, 18];
+  const allowedFonts = new Set([
+    'inherit', 'Arial, sans-serif', 'Georgia, serif',
+    '"Times New Roman", Times, serif', 'Verdana, Geneva, sans-serif',
+    'Tahoma, Geneva, sans-serif', '"Segoe UI", Tahoma, sans-serif',
+    'system-ui, -apple-system, sans-serif',
+  ]);
+  const fontFamily = auth.user?.dashboard_font_family;
+  return {
+    ...(allowedSizes.includes(rawSize) ? { fontSize: `${rawSize}px` } : {}),
+    ...(allowedFonts.has(fontFamily) ? { fontFamily } : {}),
+  };
+});
+
+function configuredPeriod(value) {
+  return { today: 'today', week: '7d', month: '30d' }[value] || '7d';
+}
+
 /* ------------------------------------------------------------------ state */
 const loading = ref(true);
 const loadCount = ref(0); // bumps per fetch; keys charts so they remount cleanly
 const demoMode = ref(false);
-const period = ref('7d');
+const period = ref(configuredPeriod(auth.user?.default_dashboard_date_range));
 const customRange = ref([]); // ['YYYY-MM-DD', 'YYYY-MM-DD'] when period === 'custom'
 const warehouseId = ref('');
 const warehouses = ref([]);
@@ -786,13 +900,39 @@ onMounted(load);
 </script>
 
 <style scoped>
+.dashboard-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.dashboard-section {
+  min-width: 0;
+}
+.dashboard-loader {
+  display: flex;
+  justify-content: center;
+  padding: 96px 0;
+  order: 999;
+}
+.page :deep(.ant-card),
+.page :deep(.ant-table-wrapper),
+.page :deep(.ant-btn),
+.page :deep(.ant-select),
+.page :deep(.ant-segmented),
+.page :deep(.ant-picker) {
+  font-family: inherit;
+  font-size: inherit;
+}
 .page-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
-  margin-bottom: 24px;
+  margin-bottom: 0;
+}
+.dashboard-section > .page-header + .ant-alert {
+  margin-top: 16px;
 }
 .wh-select {
   min-width: 180px;

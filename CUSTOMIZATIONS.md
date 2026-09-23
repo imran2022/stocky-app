@@ -4539,3 +4539,386 @@ unrelated compiled-frontend-asset failures remain
 
 **Migration:** `php artisan migrate` (new `pos_settings.show_vat_bin` /
 `show_website` columns only — additive, safe `down()` provided).
+
+---
+
+## Consolidated September 20–23 handoff (Builds O1–O9)
+
+This section records every customization added after Build N5 during the
+September 20–23 working session. It is intentionally appended; none of the
+earlier history above was rewritten or removed. At final handoff, GitHub
+`origin/master` was still at `8ca9b05db76be225f2c4a10f4b960bde860011c7`
+(Build N5), while local `master` contained 30 additional commits through
+`1aadfe2ff9e20e45dfcfe2651911eb6c60e54dfe`, plus the final dashboard,
+product-insight, and Movement History working-tree changes below. The final
+bundle converts that remaining tree into an isolated review commit; it does
+not push or rewrite the owner's branch.
+
+### Build O1 — Client Portal modernization and document parity
+
+**Goal:** modernize the existing Vue client portal without changing business
+logic, make it responsive on desktop/tablet/mobile, retain optional dark mode,
+and align portal downloads with the modern document family.
+
+**UI:**
+
+- `resources/src/portal/portal.css` now provides compact cards, responsive
+  spacing, readable typography, light/dark surfaces, and mobile table overflow.
+- `PortalLayout.vue` keeps language, theme, full-screen and responsive
+  navigation controls accessible.
+- Shared `DataTable.vue` supports horizontally scrollable invoice/payment
+  tables on mobile rather than space-heavy card stacks.
+- Dashboard hero/KPIs were compacted while retaining Total Paid and a prominent
+  due figure. Invoice Detail received separate desktop/mobile treatment:
+  reference/status grouped on the left, duplicate Paid badges/arrows removed,
+  item totals aligned, and redundant navigation removed.
+- Invoices, Payments, Statement, Quotations, Contracts, Appointments and
+  request/detail flows use the same responsive style without endpoint or
+  calculation changes. English/Arabic/French/Spanish portal labels were
+  updated where required.
+
+**Documents:** `PortalInvoicePdfController` now uses the configured modern
+sale template instead of an old/default template. `PortalStatementController`
+and `routes/portal.php` add authenticated Statement PDF download.
+
+**Files:** portal PDF/statement controllers and routes; portal layout, shared
+table and CSS; Dashboard, Invoice Detail, Invoices, Payments, Statement,
+Appointments, Contracts and Quotations views; four portal language files; and
+generated `public/js/portal` assets.
+
+**Build:** run `npm run build:portal`; never hand-edit generated portal assets.
+
+### Build O2 — Customer Display compact two-segment layout
+
+**Goal:** long carts must not push totals below the viewport. Desktop now uses
+a scrollable item list on the left and sticky subtotal/discount/tax/total/
+payment breakdown on the right, with a responsive mobile collapse. Product
+images were deliberately omitted.
+
+- Unit price stays aligned below its heading.
+- Percentage discount shows its calculated amount, not only the percentage.
+- Background, row rhythm and date/time header were modernized while retaining
+  the existing token/session update flow.
+
+**Files:** `resources/src/customer-display/CustomerDisplay.vue`, compatible
+payload changes in `resources/src/pages/pos/PosPage.vue`, and generated
+`public/js/customer-display` assets. Build with
+`npm run build:customer-display`.
+
+### Build O3 — Secure token-based Real-Time Sales Displays
+
+**Goal:** expose the real-time sales counter as one or more safe shareable TV/
+manager displays without an authenticated admin session on the display device.
+
+**Architecture:**
+
+- New `real_time_sales_displays` table/model with multiple active named
+  displays, warehouse scope, creator, expiry, refresh rate, customer-name
+  visibility, standard/manager profile, last seen, last successful sync,
+  consecutive failure count, recovery time, revoked time and archived time.
+- Each link uses a 64-character random token. Public lookup uses only its
+  SHA-256 hash; an encrypted copy allows authorized admins to recover an active
+  Copy/Open URL. Encryption depends on the existing `APP_KEY`—do not rotate it
+  without a migration plan.
+- Regenerate changes only the selected display. Edit changes selected metadata;
+  Revoke disables; Archive safely disables then hides. Legacy cache-only
+  configuration migrates into the database, so cache clear no longer loses it.
+- Scheduler cleanup removes old expired/revoked/archived rows. Production must
+  run `php artisan schedule:run` every minute.
+
+**Security:** authenticated management honors assigned warehouses and display
+ownership/visibility. Public page/data reject missing, revoked, archived or
+expired tokens and return only token-scoped data. Payloads are cached for 8
+seconds per token to control query load.
+
+**UX:** light is default and dark optional. Recent Sales and Sales by Warehouse
+use readable headers, row hover, aligned totals and warehouse last-sale time.
+Latest Sale ticker uses consistent invoice/warehouse/amount/time typography.
+New-sale notification detects a changed latest record. Manager profile adds
+top warehouse, sales velocity, peak sales hour and warehouse comparison while
+keeping the original tracker design. Sync success/failure/recovery remains
+visible and polling auto-recovers after temporary errors. Mobile management
+actions were compacted.
+
+**Files:**
+
+- migrations `2026_09_20_000006...` and `2026_09_21_000007...`
+- `app/Models/RealTimeSalesDisplay.php`
+- `app/Http/Controllers/Api/RealTimeSalesDisplayController.php`
+- `app/Console/Kernel.php`, `routes/api.php`, `routes/web.php`
+- `resources/src/pages/RealTimeSalesCounter.vue`
+- `resources/src/realtime-sales-display/{main.js,RealTimeSalesDisplay.vue}`
+- `resources/views/real_time_sales_display.blade.php`
+- `vite.realtime-sales-display.config.js`, `package.json`, generated display assets.
+
+**Deploy:** preserve `APP_KEY`, run migrations, build with
+`npm run build:realtime-sales-display`, and verify scheduler cron.
+
+### Build O4 — POS keyboard search and parent-SKU variant picker
+
+**Goal:** make POS suggestions keyboard-accessible and make a variable
+product's main SKU useful instead of forcing cashiers to know every variant
+SKU.
+
+- Arrow Down/Up changes the active suggestion; Enter selects it without
+  conflicting with existing POS shortcuts.
+- A variable product parent-SKU match opens a variant picker instead of adding
+  an arbitrary variant. The modal shows identifying variant name/SKU and adds
+  the selected variant through the existing cart/stock logic.
+- Simple-product, barcode, variant-SKU and mouse selection remain intact.
+- Desktop/mobile close button, spacing, and right-aligned Cancel/Add to Cart
+  footer were corrected.
+
+**Files:** `resources/src/pages/pos/PosPage.vue` and
+`resources/src/pos-compat/posKeyboardShortcuts.js`.
+
+**PWA warning:** every future `PosPage.vue` delivery must compare/bump
+`public/sw.js` cache version against production or installed POS clients can
+keep stale code.
+
+### Build O5 — Supplier Statement and Supplier Ledger parity
+
+**Goal:** give suppliers the same statement/ledger workflow as customers while
+keeping supplier documents in their own templates.
+
+- Supplier Details includes Statement and Download Ledger beside payment
+  actions; Supplier list exposes Statement navigation.
+- Responsive Supplier Statement supports date filtering, KPI cards, opening
+  balance/carry-forward, running debit/credit/balance, PDF and Excel.
+- `ProviderStatementService` merges supplier opening balance, received
+  purchases, purchase payments, completed purchase returns and return refunds
+  with payable-side debit/credit semantics. A From date carries all earlier
+  movement into Opening Balance, preserving the true closing balance.
+- `supplier_statement_modern.blade.php` and `supplier_ledger.blade.php` are
+  deliberately separate from customer templates. Supplier Ledger mirrors
+  Customer Ledger styling/address order with provider-side totals and rows.
+- Customer Ledger company address was aligned and customer code removed from
+  the customer address block. The older provider report remains for backward
+  compatibility, but Details downloads the dedicated Supplier Ledger.
+
+**Files:** Provider Statement controller/service; reusable statement export;
+Supplier Details/List/Statement pages; supplier statement/ledger, customer
+statement/ledger and provider-report Blade templates; router and API routes.
+
+**Authorization:** every statement/ledger endpoint is authenticated and reuses
+`Suppliers_view`, matching Supplier Details.
+
+### Build O6 — Dashboard chart readability and hourly timeline
+
+**Goal:** make chart meaning obvious, remove negative baseline confusion,
+handle Today/empty data consistently, and preserve the established layout.
+
+- Sales & Purchases and Payment Sent & Received use stable smooth area/spline
+  charts with zero-based axes.
+- Single-day series remain renderable when Today returns one date point.
+- Empty comparison series use the normal app empty state.
+- Today's Sales by Hour remains below the comparison charts as a 0–23 hour bar
+  timeline; missing hours are zero so time position is preserved, while an
+  all-empty day uses the no-data state.
+- Existing Top Selling, Top Customers, Stock Alert, Sales by Payment, Stock
+  Value, Sales by Warehouse and Recent Sales panels remain.
+
+**File:** `resources/src/pages/Dashboard.vue`.
+
+### Build O7 — Dashboard section-order persistence repair
+
+**Problem:** Settings Up/Down changed the local list, but saved order was not
+consumed by Dashboard. It also treated two cards sharing one responsive row as
+independent sections, which cannot be separated safely.
+
+**Fix:**
+
+- `UserController` includes default date range, parsed section order, font size
+  and font family in the authenticated payload.
+- Settings orders complete responsive rows, displays both card labels for a
+  paired row, and awaits `auth.reload()` after save.
+- Dashboard flex-orders sections from auth settings. Normalization maps legacy
+  individual IDs to row IDs, removes duplicates and appends missing/future
+  defaults.
+- The hourly-sales + sales-by-warehouse row is now configurable; it was missing
+  from the settings list. Font and default period use the same auth payload.
+
+**Files:** `app/Http/Controllers/UserController.php`,
+`resources/src/pages/settings/SystemSettings.vue`, and Dashboard. No new
+schema was needed because the settings columns/migrations already existed.
+
+### Build O8 — Products table insight visibility and semantics
+
+**Goal:** Sold (30d), Trend, Revenue (30d), Return Rate and Last Sold stay
+visible by default and work meaningfully for variants and zero-baseline trends.
+
+**Performance fact:** hidden DataTable columns did not stop the endpoint from
+calculating these metrics; hiding saved only horizontal space. The set-based
+`ProductInsightService` remains the query boundary and no per-row/N+1 query was
+added.
+
+- Trend compares rolling current 30 days to the preceding rolling 30 days:
+  current > 0 with previous 0 = `New`; equal non-zero = `0%`; both zero = dash;
+  other cases retain up/down percentage.
+- Revenue (30d) is now actual `sale_details.total` from completed, non-deleted
+  sales in the same date/warehouse scope. It no longer estimates units ×
+  today's price and no longer goes blank for variable products.
+- Server-side Revenue sorting uses the same scoped aggregate.
+
+**Files:** `ProductInsightService.php`, `ProductsController.php`, and
+`resources/src/pages/products/Products.vue`.
+
+### Build O9 — Dedicated Product Movement History workspace (final V4)
+
+**Goal:** extend the embedded movement diagnostic into a professional Products
+menu workspace with filters, party/variant identity, reconciliation, summary,
+and export.
+
+**Stock sources/rules:**
+
+- Merges received Purchases, completed Sales, approved Transfers (source Out
+  for sent/completed; destination In for completed), Adjustments, received Sale
+  Returns, completed Purchase Returns, and Damages.
+- Converts detail quantities to base units using line/product unit operators;
+  Sale and Sale Return pack multipliers are included.
+- Transfer creates distinct source-Out and destination-In rows. Running balance
+  is maintained per warehouse.
+- Customer appears for Sale/Sale Return; Supplier for Purchase/Purchase Return.
+- `Opening stock...` adjustment notes are classified separately from ordinary
+  adjustments in the summary.
+- Zero-quantity retained detail lines are filtered, removing duplicate-looking
+  return rows with no stock effect. Multiple non-zero variants under one
+  reference remain separate and Variant name/SKU explains why.
+
+**Filters/security:**
+
+- Products → Movement History route/menu; filters for Product, Warehouse,
+  Variation and Date Range.
+- Typeahead matches product name/main SKU plus variant name/SKU.
+- Soft-delete-aware validation, `date_to >= date_from`, correct
+  `ProductPolicy::view`, assigned-warehouse scope on every source, and explicit
+  403 for an out-of-scope requested warehouse.
+- Literal product routes are registered before `Route::resource('products')`
+  to prevent Laravel dispatching them to `show()`.
+
+**Range/reconciliation:**
+
+- A From date folds earlier movement into per-warehouse Opening Balance.
+- A bounded To date is a historical snapshot and is not compared with today's
+  stock; UI says Calculated Closing.
+- Current/unbounded view compares calculated closing with
+  `product_warehouse.qte`, distinguishing match, numeric difference and missing
+  row. Badges now say Calculated stock, not ambiguous Ledger.
+- This is read-only diagnostic logic; it never auto-corrects stock.
+
+**Summary/export:** responsive In/Out/Totals panels cover Purchase, Opening
+Stock, Sale Return, Transfer, Adjustment, Sale, Purchase Return, Damage,
+Opening Balance, Net Movement, Calculated Closing and Current Stock. The
+dedicated page exports the active filtered rows to Excel or landscape PDF with
+date/time, type, variant, reference, warehouse, In, Out, balance and party.
+Embedded Product/Stock Detail cards do not gain extra export controls.
+
+**Files:** `ProductMovementLedgerService.php`, `ProductsController.php`, new
+`MovementHistory.vue`, shared `MovementHistoryCard.vue`, router/menu/API routes,
+and `tests/Regression/build_h1_stock_movement_ledger.php`.
+
+**Known data limitation:** opening stock older than the virtual opening-stock
+adjustment mechanism may not be reconstructible from transaction detail tables.
+The resulting mismatch is intentionally visible. Never hide it by forcing the
+calculated closing figure to equal current `product_warehouse.qte`.
+
+## Final release file map (O1–O9)
+
+Relative to GitHub's Build N5 baseline, the handoff changes 68 runtime,
+configuration, generated-asset, documentation, or regression files grouped as:
+
+- Portal controllers/routes/languages, shared portal layout/table/CSS, 13
+  portal views and generated portal assets.
+- Customer Display Vue/generated assets plus POS compatibility.
+- Real-Time Display controller/model/migrations/scheduler/routes, management
+  page, public Vue/Blade/Vite entry and generated assets.
+- Supplier controller/service/statement page/actions/export adapter and
+  supplier/customer/provider PDF templates.
+- Dashboard, User auth payload and System Settings.
+- ProductsController, both custom product services, Products table, Movement
+  History page/card, router/menu/API and regression gate.
+- `public/js/.vite/manifest.json` plus standalone compiled bundles.
+
+## Required deployment order
+
+1. Back up database/application files; record deployed commit and `APP_KEY`.
+2. Review/merge the handoff branch onto the intended vendor/custom branch.
+3. Install dependencies using repository lock files.
+4. Run `php artisan migrate --force` for both real-time-display migrations and
+   any earlier unshipped migrations in the 30 commits.
+5. Run `npm run build`. Surgical minimum: `build:admin`, `build:portal`,
+   `build:customer-display`, and `build:realtime-sales-display`.
+6. Run `php artisan optimize:clear`; rebuild production config/route/view
+   caches if that deployment uses them.
+7. Confirm scheduler cron runs `php artisan schedule:run` every minute.
+8. Run regression and manual smoke checks before broad access.
+
+## Consolidated risk register and developer instructions
+
+1. No production push was performed. Review first, then push only after
+   Claude/human review and real-database verification.
+2. Database-backed token URL recovery depends on `APP_KEY`; preserve it.
+3. Display cleanup depends on scheduler. Links expire logically without cron,
+   but old rows will not be purged.
+4. Movement History is reconstruction, not stock authority. Investigate
+   mismatches; never auto-write stock from the report.
+5. Historical opening stock can be incomplete as documented in O9.
+6. Product insight columns do not become cheaper when hidden. Optimize the
+   set-based query if scale requires it.
+7. Generated assets must match sources. Never deploy source-only POS/portal/
+   display changes with stale bundles or PWA cache keys.
+8. Supplier Statement and Supplier Ledger must keep separate Blade files even
+   though their design mirrors customer documents.
+9. Portal UI modernization must not change totals, payment status, permissions
+   or document scope.
+10. Warehouse visibility is a security boundary for every movement/display
+    query and any future source added to them.
+11. Keep literal product routes before the resource route.
+12. Do not collapse real multiple-variant movements; only zero-quantity detail
+    lines are noise.
+13. Keep the 30 local commits intact through review; squash/rebase only if the
+    repository owner explicitly decides after approval.
+14. Applying only the last Movement History overlay is not equivalent to the
+    full September handoff; use the bundle/full source for all work.
+
+## Verification status at packaging
+
+- Live remote HEAD verified as `8ca9b05db76be225f2c4a10f4b960bde860011c7`;
+  local history was 30 commits ahead before the final handoff commit.
+- Admin Vite production build passed after final Movement History changes.
+- Portal/customer-display/real-time-display builds are re-run during final
+  packaging and recorded in the delivery manifest.
+- ZIP integrity, Git bundle verification and SHA-256 checks are final gates.
+- This workspace has no PHP runtime or live app database. PHP lint, migrations,
+  DB-backed PHPUnit/regression, PDF rendering with production-like fixtures and
+  browser E2E are therefore not claimed as passed and remain mandatory.
+
+## Planned/deferred work (not included in O1–O9)
+
+- Inventory valuation, COGS, average cost, GRN cost flow, last purchase cost vs
+  product master cost, and vendor-upgrade-safe costing architecture.
+- Optional warehouse-address-on-receipt/document behavior. Company information
+  remains the default; multi-warehouse is not yet true multi-company/branch.
+- Optional Dashboard 1/Dashboard 2 selector.
+- Further Manager Screen target/margin/return/no-sale/high-value alerts. Only
+  Sales Velocity and Peak Sales Hour from that discussion were approved here.
+
+## Mandatory smoke test after merge
+
+- Portal: desktop/mobile Dashboard, Invoice Detail, scrollable billing tables,
+  modern invoice PDF, Statement PDF, dark/language/full-screen controls.
+- Customer Display: long cart, sticky totals, unit price, discount amount,
+  date/time, desktop/mobile.
+- Real-Time Display: two named links, warehouse scope, Copy/Open/Edit/
+  Regenerate/Revoke/Archive, profiles, expiry/online/sync/recovery/ticker.
+- POS: mouse plus Arrow/Enter search, simple/variant/parent SKU, variant modal,
+  cart totals, desktop/mobile.
+- Supplier: Details actions, Statement carry-forward/KPIs/PDF/Excel, Ledger PDF,
+  Customer Ledger unaffected.
+- Dashboard: Today/7d/30d/custom, empty states, charts, 0–23 hours, order save/
+  reload, real-time row, font/default date.
+- Products: all insights visible, New/0%/dash, variable revenue, server sort,
+  warehouse-restricted user.
+- Movement: every source/status, unit/pack, transfer sides, party/variant,
+  restricted warehouse, opening balance, historical/live reconciliation,
+  zero-return cleanup and filtered PDF/Excel.

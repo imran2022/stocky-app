@@ -28,6 +28,7 @@ class ProductInsightService
      *     last_purchase_cost: ?float,
      *     total_sold_30d: float,
      *     total_sold_prev30d: float,
+     *     revenue_30d: float,
      *     last_sold_date: ?string,
      *     lifetime_sold: float,
      *     lifetime_returned: float,
@@ -89,6 +90,10 @@ class ProductInsightService
                 "COALESCE(SUM(CASE WHEN sd.date >= ? AND sd.date < ? THEN {$saleBaseQty} ELSE 0 END), 0) as total_sold_prev30d",
                 [$salesWindows['previous_start'], $salesWindows['previous_end_exclusive']]
             )
+            ->selectRaw(
+                'COALESCE(SUM(CASE WHEN sd.date >= ? AND sd.date < ? THEN sd.total ELSE 0 END), 0) as revenue_30d',
+                [$salesWindows['current_start'], $salesWindows['current_end_exclusive']]
+            )
             ->selectRaw('MAX(sd.date) as last_sold_date')
             ->selectRaw("COALESCE(SUM({$saleBaseQty}), 0) as lifetime_sold")
             ->get();
@@ -97,6 +102,7 @@ class ProductInsightService
             $productId = (int) $row->product_id;
             $metrics[$productId]['total_sold_30d'] = (float) $row->total_sold_30d;
             $metrics[$productId]['total_sold_prev30d'] = (float) $row->total_sold_prev30d;
+            $metrics[$productId]['revenue_30d'] = (float) $row->revenue_30d;
             $metrics[$productId]['last_sold_date'] = $row->last_sold_date;
             $metrics[$productId]['lifetime_sold'] = (float) $row->lifetime_sold;
         }
@@ -302,6 +308,7 @@ class ProductInsightService
      *     last_purchase_cost: ?float,
      *     total_sold_30d: float,
      *     total_sold_prev30d: float,
+     *     revenue_30d: float,
      *     last_sold_date: ?string,
      *     lifetime_sold: float,
      *     lifetime_returned: float,
@@ -315,6 +322,7 @@ class ProductInsightService
             'last_purchase_cost' => null,
             'total_sold_30d' => 0.0,
             'total_sold_prev30d' => 0.0,
+            'revenue_30d' => 0.0,
             'last_sold_date' => null,
             'lifetime_sold' => 0.0,
             'lifetime_returned' => 0.0,

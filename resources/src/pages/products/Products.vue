@@ -220,6 +220,12 @@
           <a-tooltip v-else-if="salesTrend(record).direction === 'down'" :title="`${record.total_sold_30d} vs ${record.total_sold_prev30d} pcs (previous 30 days)`">
             <span style="color: #cf1322; font-weight: 600"><ArrowDownOutlined /> {{ salesTrend(record).pct }}%</span>
           </a-tooltip>
+          <a-tooltip v-else-if="salesTrend(record).direction === 'new'" :title="`${record.total_sold_30d} pcs sold; no sales in the previous 30 days`">
+            <a-tag color="green" style="margin-inline-end: 0">New</a-tag>
+          </a-tooltip>
+          <a-tooltip v-else-if="salesTrend(record).direction === 'flat'" :title="`${record.total_sold_30d} pcs in both 30-day periods`">
+            <span class="muted" style="font-weight: 600">0%</span>
+          </a-tooltip>
           <span v-else class="muted">—</span>
         </template>
         <template v-else-if="column.key === 'revenue_30d'">
@@ -359,14 +365,15 @@ const columns = computed(() => [
   { title: t('Brand'), dataIndex: 'brand', key: 'brand' },
   { title: t('Categorie'), dataIndex: 'category', key: 'category' },
   { title: t('Quantity'), dataIndex: 'quantity', key: 'quantity', align: 'right', sorter: true },
-  // Business-insight columns — off by default (see the Wholesale/Min Price
-  // pair above), enable from the table's columns dropdown.
+  // Primary business-insight columns stay visible by default. They are already
+  // calculated by the list endpoint regardless of column visibility, so hiding
+  // them saves horizontal space only; it does not reduce database work.
   { title: 'Last Purchase', key: 'last_purchase', align: 'right' },
   { title: 'Sold (30d)', dataIndex: 'total_sold_30d', key: 'total_sold_30d', align: 'right', sorter: true },
-  { title: 'Trend', key: 'sales_trend', align: 'center', defaultHidden: true },
-  { title: 'Revenue (30d)', key: 'revenue_30d', align: 'right', sorter: true, defaultHidden: true },
-  { title: 'Return Rate', dataIndex: 'return_rate', key: 'return_rate', align: 'right', defaultHidden: true },
-  { title: 'Last Sold', dataIndex: 'last_sold_date', key: 'last_sold_date', align: 'right', sorter: true, defaultHidden: true },
+  { title: 'Trend', key: 'sales_trend', align: 'center' },
+  { title: 'Revenue (30d)', key: 'revenue_30d', align: 'right', sorter: true },
+  { title: 'Return Rate', dataIndex: 'return_rate', key: 'return_rate', align: 'right' },
+  { title: 'Last Sold', dataIndex: 'last_sold_date', key: 'last_sold_date', align: 'right', sorter: true },
   { title: 'Warehouses', dataIndex: 'warehouse_count', key: 'warehouse_count', align: 'right', defaultHidden: true },
   { title: t('Action'), key: 'actions', width: 160, align: 'center' },
 ]);
@@ -374,26 +381,25 @@ const columns = computed(() => [
 // Variant rows arrive newline-joined from the API; blank/null means "no value".
 const moneyLines = v => String(v ?? '').split('\n').filter(s => s !== '');
 
-// Sales Trend: compares this 30-day window to the one immediately before it.
-// No trend (dash) when there's nothing to compare — either window is zero —
-// since a percentage against zero is meaningless, not "0% change".
+// Sales Trend compares this rolling 30-day window to the immediately preceding
+// rolling 30 days. A percentage cannot be calculated against zero, so a product
+// with current sales but no prior-period sales is labelled "New". Equal non-zero
+// periods show 0%; only products with no sales in either period show a dash.
 function salesTrend(record) {
   const curr = Number(record.total_sold_30d) || 0;
   const prev = Number(record.total_sold_prev30d) || 0;
-  if (prev <= 0 || curr === prev) return { direction: null, pct: 0 };
+  if (prev <= 0) return { direction: curr > 0 ? 'new' : null, pct: 0 };
+  if (curr === prev) return { direction: 'flat', pct: 0 };
   const pct = Math.round(((curr - prev) / prev) * 100);
   return { direction: pct > 0 ? 'up' : 'down', pct: Math.abs(pct) };
 }
 
-// Revenue Contribution (30d) = units sold in the last 30 days × current retail
-// price. An estimate (uses today's price, not the price at each sale's own
-// time), good enough for "which products matter most right now" ranking.
-// Variant products carry multiple newline-joined prices (one per variant) —
-// there's no single "the" price to multiply by, so this returns null for them
-// rather than silently multiplying by NaN or the wrong variant's price.
+// Actual completed-sale line revenue in the rolling 30-day window. It comes
+// from sale_details.total, so discounts/taxes already reflected by the saved
+// line total stay intact and variable products no longer show a false blank.
 function revenue30d(record) {
-  if (String(record.price ?? '').includes('\n')) return null;
-  return (Number(record.total_sold_30d) || 0) * (Number(record.price) || 0);
+  const value = Number(record.revenue_30d);
+  return Number.isFinite(value) ? value : null;
 }
 
 /* ---------- card / table view (choice persists per device) */

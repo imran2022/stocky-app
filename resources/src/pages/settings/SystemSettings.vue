@@ -545,7 +545,10 @@
                 <a-list size="small" bordered :data-source="sectionOrderList" style="max-width: 520px">
                   <template #renderItem="{ item, index }">
                     <a-list-item>
-                      <span>{{ index + 1 }}. {{ $t(item.labelKey) }}</span>
+                      <span>
+                        {{ index + 1 }}. {{ $t(item.labelKey) }}
+                        <template v-if="item.secondaryLabelKey"> &amp; {{ $t(item.secondaryLabelKey) }}</template>
+                      </span>
                       <a-space>
                         <a-button size="small" :disabled="index === 0" @click="moveSection(index, -1)"><UpOutlined /></a-button>
                         <a-button size="small" :disabled="index === sectionOrderList.length - 1" @click="moveSection(index, 1)"><DownOutlined /></a-button>
@@ -1183,13 +1186,11 @@ const DEFAULT_SECTIONS = [
   { id: 'header', labelKey: 'Dashboard_Header' },
   { id: 'stat_cards_1', labelKey: 'Dashboard_Stat_Cards_1' },
   { id: 'stat_cards_2', labelKey: 'Dashboard_Stat_Cards_2' },
-  { id: 'chart_sales_purchases', labelKey: 'Dashboard_Chart_Sales_Purchases' },
-  { id: 'chart_top_selling', labelKey: 'Dashboard_Chart_Top_Selling' },
+  { id: 'chart_sales_purchases', labelKey: 'Dashboard_Chart_Sales_Purchases', secondaryLabelKey: 'Top_Selling_Products' },
+  { id: 'chart_payment_sent_received', labelKey: 'Dashboard_Chart_Payment_Sent_Received', secondaryLabelKey: 'Top_Customers' },
   { id: 'sales_by_payment_stock_value', labelKey: 'Dashboard_Sales_By_Payment_Stock' },
-  { id: 'chart_payment_sent_received', labelKey: 'Dashboard_Chart_Payment_Sent_Received' },
-  { id: 'chart_top_customers', labelKey: 'Dashboard_Chart_Top_Customers' },
-  { id: 'table_stock_alert', labelKey: 'StockAlert' },
-  { id: 'table_top_selling_products', labelKey: 'Top_Selling_Products' },
+  { id: 'table_stock_alert', labelKey: 'StockAlert', secondaryLabelKey: 'Top_Selling_Products' },
+  { id: 'realtime_sales_warehouse', labelKey: 'Hourly_Sales_Today', secondaryLabelKey: 'Sales_by_Warehouse' },
   { id: 'table_recent_sales', labelKey: 'Recent_Sales' },
 ];
 const sectionOrderList = ref([]);
@@ -1401,7 +1402,7 @@ async function save() {
     message.success(t('Successfully_Updated'));
     // Refresh the auth payload so the sidebar brand (logo size/visibility,
     // company name) reflects the new settings without a full page reload.
-    auth.reload?.().catch?.(() => {});
+    await auth.reload?.();
     // Legacy post-save side effects.
     try {
       if (s.date_format) localStorage.setItem('app_date_format', s.date_format);

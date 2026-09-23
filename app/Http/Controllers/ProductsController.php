@@ -64,7 +64,7 @@ class ProductsController extends BaseController
         // can keep true server-side sorting across pagination without SQL errors.
         $sortableFields = [
             'id', 'name', 'code', 'cost', 'price', 'wholesale_price', 'min_price',
-            'quantity', 'total_sold_30d', 'last_sold_date',
+            'quantity', 'total_sold_30d', 'revenue_30d', 'last_sold_date',
         ];
         $requestedOrder = (string) $request->get('SortField', 'id');
         $order = in_array($requestedOrder, $sortableFields, true) ? $requestedOrder : 'id';
@@ -222,6 +222,29 @@ class ProductsController extends BaseController
             }
 
             $filtered->orderBy($sold30Sub, $dir);
+        } elseif ($order === 'revenue_30d') {
+            // Actual completed-sale line revenue in the same rolling 30-day
+            // window and warehouse scope as the displayed Revenue (30d).
+            $salesWindows = $productInsightService->rolling30DayWindows();
+            $revenue30Sub = SaleDetail::selectRaw('COALESCE(SUM(sale_details.total), 0)')
+                ->join('sales', 'sales.id', '=', 'sale_details.sale_id')
+                ->whereColumn('sale_details.product_id', 'products.id')
+                ->where('sales.statut', 'completed')
+                ->whereNull('sales.deleted_at')
+                ->where('sale_details.date', '>=', $salesWindows['current_start'])
+                ->where('sale_details.date', '<', $salesWindows['current_end_exclusive']);
+
+            if ($warehouseId) {
+                $revenue30Sub->where('sales.warehouse_id', $warehouseId);
+            } elseif (! $user_auth->is_all_warehouses) {
+                if ($allowedWarehouseIds === []) {
+                    $revenue30Sub->whereRaw('1 = 0');
+                } else {
+                    $revenue30Sub->whereIntegerInRaw('sales.warehouse_id', $allowedWarehouseIds);
+                }
+            }
+
+            $filtered->orderBy($revenue30Sub, $dir);
         } elseif ($order === 'last_sold_date') {
             // Same authorized/non-deleted completed-Sale population used by
             // the displayed Last Sold metric.
@@ -402,6 +425,7 @@ class ProductsController extends BaseController
                 'last_purchase_cost' => null,
                 'total_sold_30d' => 0.0,
                 'total_sold_prev30d' => 0.0,
+                'revenue_30d' => 0.0,
                 'last_sold_date' => null,
                 'lifetime_sold' => 0.0,
                 'lifetime_returned' => 0.0,
@@ -414,6 +438,7 @@ class ProductsController extends BaseController
                 : null;
             $item['total_sold_30d'] = (float) $insight['total_sold_30d'];
             $item['total_sold_prev30d'] = (float) $insight['total_sold_prev30d'];
+            $item['revenue_30d'] = (float) $insight['revenue_30d'];
             $item['last_sold_date'] = $insight['last_sold_date'];
 
             $lifetimeSold = (float) $insight['lifetime_sold'];
@@ -4485,44 +4510,99 @@ class ProductsController extends BaseController
      */
     public function search_products_basic(Request $request)
     {
-        $this->authorizeForUser($request->user('api'), 'products_view', Product::class);
+        // ProductPolicy::view() maps to the products_view permission. Passing
+        // the permission name directly is interpreted as a missing policy
+        // method and returns 403 even for users who can view products.
+        $this->authorizeForUser($request->user('api'), 'view', Product::class);
 
         $q = trim((string) $request->input('q', ''));
         $exclude = (int) $request->input('exclude', 0);
 
-        $products = Product::whereNull('deleted_at')
+        $products = Product::with(['variants' => function ($query) {
+            $query->whereNull('deleted_at')
+                ->orderBy('name')
+                ->select(['id', 'product_id', 'name', 'code']);
+        }])
+            ->whereNull('deleted_at')
             ->where('is_active', 1)
             ->when($exclude > 0, fn ($qq) => $qq->where('id', '!=', $exclude))
             ->when($q !== '', fn ($qq) => $qq->where(function ($w) use ($q) {
-                $w->where('name', 'like', "%{$q}%")->orWhere('code', 'like', "%{$q}%");
+                $w->where('name', 'like', "%{$q}%")
+                    ->orWhere('code', 'like', "%{$q}%")
+                    ->orWhereHas('variants', function ($variantQuery) use ($q) {
+                        $variantQuery->whereNull('deleted_at')
+                            ->where(function ($variantSearch) use ($q) {
+                                $variantSearch->where('name', 'like', "%{$q}%")
+                                    ->orWhere('code', 'like', "%{$q}%");
+                            });
+                    });
             }))
             ->orderBy('name')
             ->limit(25)
-            ->get(['id', 'name', 'code']);
+            ->get(['id', 'name', 'code', 'is_variant', 'type']);
 
         return response()->json(['products' => $products]);
+    }
+
+    // -------------- movement_history_meta ------------------\\
+
+    public function movement_history_meta(Request $request)
+    {
+        $this->authorizeForUser($request->user('api'), 'view', Product::class);
+
+        $user = $request->user('api');
+        $warehouses = Warehouse::whereNull('deleted_at')
+            ->when(! $user->is_all_warehouses, function ($query) use ($user) {
+                $query->whereIn('id', UserWarehouse::where('user_id', $user->id)->select('warehouse_id'));
+            })
+            ->orderBy('name')
+            ->get(['id', 'name']);
+
+        return response()->json(['warehouses' => $warehouses]);
     }
 
     // -------------- movement_ledger ------------------\\
 
     public function movement_ledger(Request $request)
     {
-        $this->authorizeForUser($request->user('api'), 'products_view', Product::class);
+        $this->authorizeForUser($request->user('api'), 'view', Product::class);
 
         $request->validate([
-            'product_id' => 'required|integer|exists:products,id',
-            'product_variant_id' => 'nullable|integer',
-            'warehouse_id' => 'nullable|integer',
+            'product_id' => ['required', 'integer', Rule::exists('products', 'id')->whereNull('deleted_at')],
+            'product_variant_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('product_variants', 'id')->where(function ($query) use ($request) {
+                    $query->where('product_id', (int) $request->input('product_id'))
+                        ->whereNull('deleted_at');
+                }),
+            ],
+            'warehouse_id' => ['nullable', 'integer', Rule::exists('warehouses', 'id')->whereNull('deleted_at')],
             'date_from' => 'nullable|date',
-            'date_to' => 'nullable|date',
+            'date_to' => 'nullable|date|after_or_equal:date_from',
         ]);
+
+        $user = $request->user('api');
+        $allowedWarehouseIds = null;
+        if (! $user->is_all_warehouses) {
+            $allowedWarehouseIds = UserWarehouse::where('user_id', $user->id)
+                ->pluck('warehouse_id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
+
+            if ($request->filled('warehouse_id')
+                && ! in_array((int) $request->input('warehouse_id'), $allowedWarehouseIds, true)) {
+                abort(403, 'You are not authorized to view this warehouse.');
+            }
+        }
 
         $result = ProductMovementLedgerService::build(
             (int) $request->input('product_id'),
             $request->filled('product_variant_id') ? (int) $request->input('product_variant_id') : null,
             $request->filled('warehouse_id') ? (int) $request->input('warehouse_id') : null,
             $request->input('date_from'),
-            $request->input('date_to')
+            $request->input('date_to'),
+            $allowedWarehouseIds
         );
 
         return response()->json($result);

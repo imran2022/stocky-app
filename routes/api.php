@@ -1106,6 +1106,12 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     // ------------------------------- PRODUCTS --------------------------\\
     // ------------------------------------------------------------------\\
 
+    // Literal GET routes must be registered before the resource show route.
+    // Otherwise Laravel treats e.g. `products/movement-ledger` as
+    // `products/{product}` and dispatches it to ProductsController@show.
+    Route::get('products/search-basic', 'ProductsController@search_products_basic');
+    Route::get('products/movement-history/meta', 'ProductsController@movement_history_meta');
+    Route::get('products/movement-ledger', 'ProductsController@movement_ledger');
     Route::resource('products', 'ProductsController');
     Route::get('stock_lookup/search', 'ProductsController@stockLookupSearch');
     Route::get('stock_lookup/{id}', 'ProductsController@stockLookupDetail');
@@ -1136,9 +1142,8 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     Route::post('products/delete/by_selection', 'ProductsController@delete_by_selection');
     Route::get('show_product_data/{id}/{variant_id}', 'ProductsController@show_product_data');
     Route::get('show_product_data/{id}/{variant_id}/{warehouse_id}', 'ProductsController@show_product_data');
-    // Typeahead for the Related products picker (any visible product).
-    Route::get('products/search-basic', 'ProductsController@search_products_basic');
-    Route::get('products/movement-ledger', 'ProductsController@movement_ledger');
+    // Typeahead and movement-ledger literal routes are declared above the
+    // resource route so they cannot be swallowed by products/{product}.
     Route::get('get_products_materiels', 'ProductsController@get_products_materiels')->name('get_products_materiels');
 
     Route::get('opening-stock/import/meta', 'ProductsController@opening_stock_meta');

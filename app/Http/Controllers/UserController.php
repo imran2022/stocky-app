@@ -120,6 +120,16 @@ class UserController extends BaseController
             'dark_mode' => (bool) ($settings->dark_mode ?? false),
             'enable_kitchen_display' => (bool) ($settings->enable_kitchen_display ?? false),
             'timezone' => $this->getEnvValue('APP_TIMEZONE', 'UTC'),
+            // Dashboard preferences are global system settings. Serving them
+            // with the auth payload lets the dashboard apply them immediately
+            // after System Settings calls auth.reload(), without a second API
+            // request or a full page refresh.
+            'default_dashboard_date_range' => $settings->default_dashboard_date_range ?? 'week',
+            'dashboard_section_order' => ($settings && $settings->dashboard_section_order)
+                ? json_decode($settings->dashboard_section_order, true)
+                : null,
+            'dashboard_font_size' => $settings->dashboard_font_size ?? null,
+            'dashboard_font_family' => $settings->dashboard_font_family ?? null,
             // Admin-defined sidebar arrangement (null = default menu.js order) —
             // applied by the SPA for every user at boot.
             'sidebar_menu_order' => ($settings && $settings->sidebar_menu_order)

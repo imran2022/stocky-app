@@ -2213,3 +2213,119 @@ should still be run once to correct the 3 translation keys.
 **Migration:** `php artisan migrate` (new `pos_settings.show_vat_bin` /
 `show_website` columns; additive only, safe rollback via
 `migrate:rollback --step=1`).
+
+---
+
+## 31. Consolidated September 20–23 release checklist (Builds O1–O9)
+
+This supplements the in-depth Build O1–O9 record appended to
+`CUSTOMIZATIONS.md`; nothing above was removed.
+
+### 31.1 Git/release integrity
+
+- [ ] Confirm the intended review base is GitHub Build N5 (`8ca9b05...`) or
+      consciously integrate any newer remote work before review.
+- [ ] Review branch contains all 30 post-N5 commits plus the final handoff
+      commit; `git bundle verify` and a test clone both pass.
+- [ ] Verify every SHA-256 in the delivery checksum manifest.
+- [ ] Full-source ZIP contains no `.env`, credentials, database dump, logs,
+      `vendor`, `node_modules`, `.git`, or previous delivery ZIPs.
+- [ ] Changed-files overlay contains every file different from Build N5 and no
+      unrelated runtime secret.
+
+### 31.2 Client Portal
+
+- [ ] Desktop/mobile Dashboard is compact; Total Paid remains visible.
+- [ ] Invoice/Payment mobile lists are readable horizontal-scroll tables.
+- [ ] Invoice Detail has one status treatment, left-side reference/status, no
+      duplicate arrows, aligned amounts, and responsive totals.
+- [ ] Dark theme, language, full-screen and responsive navigation work.
+- [ ] Invoice download uses configured modern template; Statement PDF works.
+- [ ] Appointment/Contract/Quotation flows still work.
+- [ ] `npm run build:portal` passes and assets match source.
+
+### 31.3 Customer Display
+
+- [ ] A long cart scrolls in the item segment while calculations remain visible.
+- [ ] Unit price aligns, percentage discount shows amount, no thumbnails appear.
+- [ ] Date/time and desktop/mobile layouts work.
+- [ ] `npm run build:customer-display` passes.
+
+### 31.4 Real-Time Sales Displays
+
+- [ ] Both migrations run; multiple named links survive cache clear.
+- [ ] Warehouse scope, creator, created/expiry/last-seen/online data are correct.
+- [ ] Copy/Open/Edit/Regenerate/Revoke/Archive affect only the selected display.
+- [ ] Revoked/archived/expired public links are rejected.
+- [ ] Light default/dark option, table headers, row hover, totals, warehouse last
+      sale, ticker and new-sale notification are readable.
+- [ ] Manager profile shows top warehouse, sales velocity, peak sales hour.
+- [ ] Forced API failure increments count; later success auto-recovers and
+      updates last successful sync/recovery.
+- [ ] Scheduler cron is active and existing `APP_KEY` preserved.
+- [ ] `npm run build:realtime-sales-display` passes.
+
+### 31.5 POS keyboard search and variant picker
+
+- [ ] Arrow Down/Up and Enter navigate/select suggestions.
+- [ ] Simple SKU, variant SKU, barcode and mouse behavior are unchanged.
+- [ ] Variable parent SKU opens picker; selected variant adds exactly once with
+      correct stock/unit/price/tax/discount.
+- [ ] Modal close/footer spacing works desktop/mobile.
+- [ ] Verify/bump `public/sw.js` cache version against production.
+
+### 31.6 Supplier Statement/Ledger
+
+- [ ] Supplier Details/List expose Statement; Details exposes Download Ledger.
+- [ ] Opening balance, purchase debit, payment credit, return credit and refund
+      debit produce correct running balance.
+- [ ] From-date carry-forward preserves final closing balance.
+- [ ] Filtered PDF/Excel work; correct dedicated supplier Blade templates serve.
+- [ ] Customer Ledger design/address remains correct without customer code.
+- [ ] User without `Suppliers_view` is denied.
+
+### 31.7 Dashboard
+
+- [ ] Comparison charts use zero-based area/spline rendering; Today one-point
+      series renders and all-zero series shows empty state.
+- [ ] Hourly bar timeline covers 0–23 and shows empty state when appropriate.
+- [ ] Settings order saves and applies immediately and after login.
+- [ ] Paired cards stay together; real-time/warehouse row is configurable.
+- [ ] Default date range and dashboard typography settings apply.
+
+### 31.8 Product Insights
+
+- [ ] Sold, Trend, Revenue, Return Rate and Last Sold are visible by default.
+- [ ] Trend: previous 0/current >0 = New; equal non-zero = 0%; both zero = dash.
+- [ ] Revenue equals completed line totals in the same rolling-30-day/warehouse
+      scope, including variable products; server sort matches display.
+- [ ] Query remains set-based with no per-product/N+1 regression.
+
+### 31.9 Product Movement History
+
+- [ ] Menu/route loads; typeahead matches product/variant names and SKUs.
+- [ ] Product/Warehouse/Variation/Date filters combine correctly.
+- [ ] Restricted out-of-scope warehouse returns 403.
+- [ ] Every stock source/status, alternate unit and pack multiplier is correct.
+- [ ] Customer/Supplier and Variant identify rows.
+- [ ] Zero return lines disappear; real non-zero variants remain separate.
+- [ ] From-date Opening Balance and historical/current reconciliation are valid.
+- [ ] Summary equals filtered rows; filtered Excel/PDF contain visible columns.
+
+### 31.10 Deployment/test gate
+
+- [ ] Back up DB/files and record commit + `APP_KEY`.
+- [ ] Locked PHP/Node dependencies install successfully.
+- [ ] `php artisan migrate --force` passes on staging copy.
+- [ ] `npm run build` passes all targets.
+- [ ] PHP lint, full PHPUnit/regression and real-DB fixtures pass.
+- [ ] Browser smoke test passes desktop/tablet/mobile.
+- [ ] Only then push the reviewed branch and deploy.
+
+### 31.11 Explicitly deferred
+
+- [ ] COGS/average-cost/GRN costing architecture is planned, not shipped.
+- [ ] Warehouse-specific document address is planned, not shipped.
+- [ ] Dashboard 1/Dashboard 2 selector is planned, not shipped.
+- [ ] Extra Manager target/margin/return/no-sale/high-value alerts are not in
+      the approved O1–O9 scope.
