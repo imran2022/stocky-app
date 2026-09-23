@@ -38,14 +38,22 @@ class ProviderStatementService
             ->select('payment_purchases.date', 'payment_purchases.Ref', 'payment_purchases.montant', 'purchases.Ref as purchase_ref')
             ->orderBy('payment_purchases.date')->orderBy('payment_purchases.id')->get();
 
-        // Keep the full opening-payment history, matching ClientStatementService.
-        // The provider's current opening_balance has already been reduced by
-        // these rows, so adding them back reconstructs the original balance.
-        $openingPayments = DB::table('provider_opening_balance_payments')
+        // Every opening-balance payment ever made. The provider's current
+        // opening_balance has already been reduced by these rows, so adding
+        // them all back reconstructs the ORIGINAL opening balance.
+        $allOpeningPayments = DB::table('provider_opening_balance_payments')
             ->whereNull('deleted_at')
             ->where('provider_id', $providerId)
             ->select('date', 'Ref', 'montant')
             ->orderBy('date')->orderBy('id')->get();
+
+        // Only the ones inside the selected period are listed as statement
+        // rows; earlier ones are folded into the carry-forward below and later
+        // ones are simply not part of this period.
+        $openingPayments = $allOpeningPayments->filter(function ($payment) use ($fromDate, $toDate) {
+            return (! $fromDate || $payment->date >= $fromDate)
+                && (! $toDate || $payment->date <= $toDate);
+        })->values();
 
         $returns = DB::table('purchase_returns')
             ->whereNull('deleted_at')
@@ -66,7 +74,7 @@ class ProviderStatementService
             ->orderBy('payment_purchase_returns.date')->orderBy('payment_purchase_returns.id')->get();
 
         $currentOpeningBalance = (float) ($provider->opening_balance ?? 0);
-        $totalOpeningBalancePaid = (float) $openingPayments->sum('montant');
+        $totalOpeningBalancePaid = (float) $allOpeningPayments->sum('montant');
 
         // Fold all activity before the selected period into the opening figure
         // so the filtered statement still closes to the supplier's real balance.
@@ -91,7 +99,12 @@ class ProviderStatementService
                 ->where('payment_purchase_returns.date', '<', $fromDate)
                 ->sum('payment_purchase_returns.montant');
 
-            $carryForward = $beforePurchases - $beforePayments - $beforeReturns + $beforeReturnRefunds;
+            $beforeOpeningPayments = (float) $allOpeningPayments
+                ->filter(fn ($payment) => $payment->date < $fromDate)
+                ->sum('montant');
+
+            $carryForward = $beforePurchases - $beforePayments - $beforeReturns
+                + $beforeReturnRefunds - $beforeOpeningPayments;
         }
 
         $originalOpeningBalance = $currentOpeningBalance + $totalOpeningBalancePaid + $carryForward;
