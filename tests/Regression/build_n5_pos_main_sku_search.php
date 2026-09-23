@@ -130,7 +130,11 @@ $assert(str_contains($posPage, "const productCode = String(product.product_code 
 $assert(str_contains($posPage, 'productCode.includes(term)'), 'PosPage.vue search() fuzzy filter must include productCode in the match.');
 
 // Cleanup.
-DB::table('product_variation_sets')->where('product_id', $productId)->delete();
+// product_variation_sets only exists once Build N4 is applied; guard so this
+// cleanup does not crash on a codebase without N4.
+if (\Illuminate\Support\Facades\Schema::hasTable('product_variation_sets')) {
+    DB::table('product_variation_sets')->where('product_id', $productId)->delete();
+}
 DB::table('product_warehouse')->where('product_id', $productId)->delete();
 ProductVariant::where('product_id', $productId)->forceDelete();
 Product::where('id', $productId)->forceDelete();

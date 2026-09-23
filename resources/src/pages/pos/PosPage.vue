@@ -7875,9 +7875,15 @@ export default {
     },
 
     selectHighlightedProduct() {
-      if (this.product_filter && this.product_filter.length) {
-        const index = this.productSearchActiveIndex >= 0 ? this.productSearchActiveIndex : 0;
-        this.selectProductSearchResult(this.product_filter[index]);
+      // productSearchActiveIndex is reset to -1 on every keystroke and only set
+      // again when a fresh result list arrives (or the cashier arrows through
+      // it). So index >= 0 means the visible list matches the current input.
+      // With -1 the list on screen is STALE (typed/scanned since it was
+      // built): never add its first row — a fast typist or barcode scanner
+      // pressing Enter within the 800ms debounce would otherwise get the wrong
+      // product. Search the current input immediately instead.
+      if (this.product_filter && this.product_filter.length && this.productSearchActiveIndex >= 0) {
+        this.selectProductSearchResult(this.product_filter[this.productSearchActiveIndex]);
         return;
       }
       // Enter should not make the cashier wait for the normal typing debounce.

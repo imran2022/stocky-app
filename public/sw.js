@@ -19,7 +19,7 @@
  */
 
 // Bump this when deploying changes so old caches are purged.
-const VERSION = 'stocky-pwa-v13';
+const VERSION = 'stocky-pwa-v14';
 
 // Configurable storefront base path, passed on the registration URL as
 // ?store_base=/shop (or '/' when the store runs from the root domain).
