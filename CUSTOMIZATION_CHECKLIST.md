@@ -2329,3 +2329,27 @@ This supplements the in-depth Build O1–O9 record appended to
 - [ ] Dashboard 1/Dashboard 2 selector is planned, not shipped.
 - [ ] Extra Manager target/margin/return/no-sale/high-value alerts are not in
       the approved O1–O9 scope.
+
+## 32. Build P — live reconciliation checklist (2026-09-24)
+
+- [ ] Live `public/js` replaced with the P build (whole folder, not a merge),
+      including `public/js/storefront.css` and `public/js/storefront.min.js`
+      (Online Store layout requires both; they were missing on the live copy
+      reviewed).
+- [ ] `public/sw.js` is `stocky-pwa-v14`; POS opened once online on every
+      till/PWA install and hard-refreshed (Ctrl+F5) so the old shell is dropped.
+- [ ] POS: type a partial name, wait for the list, type more and press Enter
+      immediately — no wrong product is added; scanner scan + Enter adds the
+      scanned product; ↑/↓ + Enter still picks the highlighted row.
+- [ ] Suppliers → Statement: From date inside the history — opening line equals
+      the real balance on that date, no earlier opening-payment row, closing
+      balance equals the supplier's balance.
+- [ ] Sale invoice (Modern), payment receipts (sale + purchase), PO PDF render
+      as before; Modern invoice shows Tracking Ref/Courier when set; PO header
+      shows Website when set.
+- [ ] `SHOW CREATE TABLE real_time_sales_displays` — `expires_at` must NOT carry
+      `ON UPDATE CURRENT_TIMESTAMP` (MariaDB/MySQL with
+      `explicit_defaults_for_timestamp=OFF` adds it to the first NOT NULL
+      TIMESTAMP column). If it does, `ALTER TABLE real_time_sales_displays
+      MODIFY expires_at DATETIME NOT NULL;`.
+- [ ] GitHub repository visibility is Private.

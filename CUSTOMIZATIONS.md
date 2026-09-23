@@ -4922,3 +4922,60 @@ configuration, generated-asset, documentation, or regression files grouped as:
 - Movement: every source/status, unit/pack, transfer sides, party/variant,
   restricted warehouse, opening balance, historical/live reconciliation,
   zero-return cleanup and filtered PDF/Excel.
+
+---
+
+## Build P — Live reconciliation & release hardening (2026-09-24)
+
+Independent review of the O1–O9 handoff against the live installation. Full
+findings: `docs/RECONCILIATION_2026-09-24.md`.
+
+### P0 — Repository hygiene (no behaviour change on the live site)
+
+- Reverted 14 vendor-owned files that an earlier audit helper had modified on
+  GitHub (`config/database.php` hard-coded `:memory:` → env switch, sqlite
+  index renames, an `IF()` guard, `TEST-COPY-ONLY` notes). They now equal the
+  CodeCanyon originals, i.e. exactly what runs live. Consequence:
+  `php tests/Regression/*.php` runtime scripts need a real (MySQL) **test
+  copy** of the database — never the live one — because the sqlite connection
+  is `:memory:` again.
+- Adopted the live-only Modern PDF templates that were never committed:
+  `payment_sale`, `payments_purchase`, `po_pdf`, `sale_pdf_modern`. Re-added
+  what those live versions had dropped: Build M6 Tracking Ref + Courier on the
+  Modern invoice, and the Website line on the PO header.
+- Replaced the committed `public/js` (7,150 files, 150 MB, manifest pointing at
+  486 files that did not exist in git) with one consistent production build
+  (526 files, 21 MB, every manifest entry present, every import resolves, no
+  orphans). It is source-identical to what the live site runs, apart from the
+  POS fix in P2. `public/js` is git-ignored but tracked, so add with `git add -f`.
+
+### P1 — Supplier Statement date-range fix
+
+`ProviderStatementService`: with a From date the opening line still counted
+opening-balance payments made before the period (e.g. 1250 instead of 1050) and
+listed them as in-period rows; an opening payment after the To date was also
+deducted. Pre-period opening payments are now folded into the carry-forward and
+only in-period ones are listed. Test: `build_p1_supplier_statement_range.php`
+(fails on the old service, passes on the fix). All-time closing balance was
+always correct.
+
+### P2 — POS: Enter must not add a stale suggestion; service-worker bump
+
+`PosPage.vue selectHighlightedProduct()` picked row 0 of the on-screen list even
+when the input had changed since the list was built (800 ms debounce). Typing
+"Bat", waiting for the list, then "Bat Alp" + Enter immediately added the OLD
+first row (verified in a real browser against the previous build). Only a fresh
+list (`productSearchActiveIndex >= 0`) can be selected now; otherwise the
+current input is searched immediately. `public/sw.js` VERSION bumped
+`stocky-pwa-v13` → `v14` because PosPage.vue changed by ~600 lines in O-series
+without a bump. Test: `build_p2_pos_search_enter_guard.php`.
+
+### Test-suite repairs (no product change)
+
+- `build_e1_pos_recent.php` now finds the compiled POS chunk through the Vite
+  manifest instead of a pinned content-hash filename.
+- `build_n5_pos_main_sku_search.php` no longer crashes on the Build-N4-only
+  table `product_variation_sets` when N4 is not applied.
+- Known stale (not product failures): `build_po_grn.php` and
+  `build_po_phase1_3.php` still expect the originally documented PO/GRN wording
+  (owner confirmed the current PO/GRN screens are correct as they are).
