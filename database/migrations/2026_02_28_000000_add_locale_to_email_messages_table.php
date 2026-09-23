@@ -18,14 +18,9 @@ return new class extends Migration
             \DB::table('email_messages')->whereNull('locale')->update(['locale' => 'en']);
         }
 
-        // TEST-COPY-ONLY NOTE: SHOW INDEX / prefix-length index syntax is
-        // MySQL-only; guarded so a from-scratch SQLite audit run can
-        // proceed. Production runs MySQL, unaffected.
-        if (\DB::connection()->getDriverName() !== 'sqlite') {
-            $indexExists = \DB::select("SHOW INDEX FROM email_messages WHERE Key_name = 'email_messages_name_locale_unique'");
-            if (empty($indexExists)) {
-                \DB::statement('ALTER TABLE email_messages ADD UNIQUE email_messages_name_locale_unique (name(100), locale)');
-            }
+        $indexExists = \DB::select("SHOW INDEX FROM email_messages WHERE Key_name = 'email_messages_name_locale_unique'");
+        if (empty($indexExists)) {
+            \DB::statement('ALTER TABLE email_messages ADD UNIQUE email_messages_name_locale_unique (name(100), locale)');
         }
     }
 

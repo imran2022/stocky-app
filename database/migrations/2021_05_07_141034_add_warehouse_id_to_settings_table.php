@@ -16,7 +16,7 @@ class AddWarehouseIdToSettingsTable extends Migration
         if (! Schema::hasColumn('settings', 'warehouse_id')) {
             Schema::table('settings', function (Blueprint $table) {
                 $table->engine = 'InnoDB';
-                $table->integer('warehouse_id')->after('client_id')->nullable()->index('2021_05_07_141034_add_warehouse_id_to_settings_table_warehouse_id_t1');
+                $table->integer('warehouse_id')->after('client_id')->nullable()->index('warehouse_id');
             });
         }
     }

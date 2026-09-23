@@ -37,14 +37,7 @@ return [
 
         'sqlite' => [
             'driver' => 'sqlite',
-            // TEST-COPY-ONLY NOTE: was hardcoded to ':memory:' (fine for
-            // PHPUnit's own in-memory test runs, but that means it can never
-            // be pointed at a real file, which is why an audit script in a
-            // fresh PHP process saw an empty database each time here) —
-            // switched to respect DB_DATABASE from .env so a persistent
-            // file-based sqlite DB can be used for this audit. Not shipped;
-            // production uses the 'mysql' connection below, unaffected.
-            'database' => env('DB_DATABASE', database_path('database.sqlite')),
+            'database' => ':memory:',
             'prefix' => '',
         ],
 

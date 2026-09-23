@@ -9,9 +9,6 @@ class AddPartyToContractsTable extends Migration
 {
     private function dropForeignIfExists(string $table, string $name): void
     {
-        if (DB::connection()->getDriverName() === 'sqlite') {
-            return;
-        }
         $exists = DB::selectOne(
             "SELECT 1 FROM information_schema.TABLE_CONSTRAINTS
              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND CONSTRAINT_NAME = ? AND CONSTRAINT_TYPE = 'FOREIGN KEY'",
@@ -40,9 +37,7 @@ class AddPartyToContractsTable extends Migration
 
         $this->dropForeignIfExists('contracts', 'contracts_client_fk');
 
-        if (DB::connection()->getDriverName() !== 'sqlite') {
-            DB::statement('ALTER TABLE contracts MODIFY client_id INT NULL');
-        }
+        DB::statement('ALTER TABLE contracts MODIFY client_id INT NULL');
 
         Schema::table('contracts', function (Blueprint $table) {
             $table->foreign('client_id', 'contracts_client_fk')
@@ -69,7 +64,7 @@ class AddPartyToContractsTable extends Migration
             }
         });
 
-        if (DB::connection()->getDriverName() !== 'sqlite') { DB::statement('ALTER TABLE contracts MODIFY client_id INT NOT NULL'); }
+        DB::statement('ALTER TABLE contracts MODIFY client_id INT NOT NULL');
 
         Schema::table('contracts', function (Blueprint $table) {
             $table->foreign('client_id', 'contracts_client_fk')

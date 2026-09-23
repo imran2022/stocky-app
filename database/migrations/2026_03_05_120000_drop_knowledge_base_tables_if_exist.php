@@ -20,19 +20,11 @@ return new class extends Migration
 {
     public function up()
     {
-        // TEST-COPY-ONLY NOTE: SET FOREIGN_KEY_CHECKS is MySQL-only;
-        // guarded so a from-scratch SQLite audit run can proceed.
-        // Production runs MySQL, unaffected.
-        $isSqlite = DB::connection()->getDriverName() === 'sqlite';
-        if (! $isSqlite) {
-            DB::statement('SET FOREIGN_KEY_CHECKS=0;');
-        }
+        DB::statement('SET FOREIGN_KEY_CHECKS=0;');
         Schema::dropIfExists('knowledge_base_article_feedbacks');
         Schema::dropIfExists('knowledge_base_articles');
         Schema::dropIfExists('knowledge_base_article_groups');
-        if (! $isSqlite) {
-            DB::statement('SET FOREIGN_KEY_CHECKS=1;');
-        }
+        DB::statement('SET FOREIGN_KEY_CHECKS=1;');
     }
 
     public function down()

@@ -12,9 +12,6 @@ class AddForeignKeysCommissionTables extends Migration
      */
     private function dropForeignIfExists(string $table, string $name): void
     {
-        if (DB::connection()->getDriverName() === 'sqlite') {
-            return;
-        }
         $exists = DB::selectOne(
             "SELECT 1 FROM information_schema.TABLE_CONSTRAINTS
              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND CONSTRAINT_NAME = ? AND CONSTRAINT_TYPE = 'FOREIGN KEY'",
@@ -43,9 +40,7 @@ class AddForeignKeysCommissionTables extends Migration
         $this->dropForeignIfExists('sales_agents', 'sales_agents_user_id_foreign');
 
         // user_id must match users.id type (signed INT); sales_agents uses unsignedInteger by default
-        if (DB::connection()->getDriverName() !== 'sqlite') {
-            DB::statement('ALTER TABLE sales_agents MODIFY user_id INT NULL');
-        }
+        DB::statement('ALTER TABLE sales_agents MODIFY user_id INT NULL');
         Schema::table('sales_agents', function (Blueprint $table) {
             $table->foreign('user_id')->references('id')->on('users')->nullOnDelete();
         });
@@ -56,18 +51,14 @@ class AddForeignKeysCommissionTables extends Migration
         });
 
         // payment_method_id must match payment_methods.id type (signed INT)
-        if (DB::connection()->getDriverName() !== 'sqlite') {
-            DB::statement('ALTER TABLE commission_receipts MODIFY payment_method_id INT NULL');
-        }
+        DB::statement('ALTER TABLE commission_receipts MODIFY payment_method_id INT NULL');
         Schema::table('commission_receipts', function (Blueprint $table) {
             $table->foreign('sales_agent_id')->references('id')->on('sales_agents')->cascadeOnDelete();
             $table->foreign('payment_method_id')->references('id')->on('payment_methods')->nullOnDelete();
         });
 
         // sale_id must match sales.id type (signed INT)
-        if (DB::connection()->getDriverName() !== 'sqlite') {
-            DB::statement('ALTER TABLE sale_commissions MODIFY sale_id INT NOT NULL');
-        }
+        DB::statement('ALTER TABLE sale_commissions MODIFY sale_id INT NOT NULL');
         Schema::table('sale_commissions', function (Blueprint $table) {
             $table->foreign('sale_id')->references('id')->on('sales')->cascadeOnDelete();
             $table->foreign('sales_agent_id')->references('id')->on('sales_agents')->cascadeOnDelete();
@@ -93,16 +84,12 @@ class AddForeignKeysCommissionTables extends Migration
             $table->dropForeign(['commission_rule_id']);
             $table->dropForeign(['commission_receipt_id']);
         });
-        if (DB::connection()->getDriverName() !== 'sqlite') {
-            DB::statement('ALTER TABLE sale_commissions MODIFY sale_id INT UNSIGNED NOT NULL');
-        }
+        DB::statement('ALTER TABLE sale_commissions MODIFY sale_id INT UNSIGNED NOT NULL');
         Schema::table('commission_receipts', function (Blueprint $table) {
             $table->dropForeign(['sales_agent_id']);
             $table->dropForeign(['payment_method_id']);
         });
-        if (DB::connection()->getDriverName() !== 'sqlite') {
-            DB::statement('ALTER TABLE commission_receipts MODIFY payment_method_id INT UNSIGNED NULL');
-        }
+        DB::statement('ALTER TABLE commission_receipts MODIFY payment_method_id INT UNSIGNED NULL');
         Schema::table('commission_rules', function (Blueprint $table) {
             $table->dropForeign(['commission_program_id']);
             $table->dropForeign(['sales_agent_id']);
@@ -110,8 +97,6 @@ class AddForeignKeysCommissionTables extends Migration
         Schema::table('sales_agents', function (Blueprint $table) {
             $table->dropForeign(['user_id']);
         });
-        if (DB::connection()->getDriverName() !== 'sqlite') {
-            DB::statement('ALTER TABLE sales_agents MODIFY user_id INT UNSIGNED NULL');
-        }
+        DB::statement('ALTER TABLE sales_agents MODIFY user_id INT UNSIGNED NULL');
     }
 }
