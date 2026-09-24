@@ -221,6 +221,8 @@ class PurchasesController extends BaseController
     {
         $this->authorizeForUser($request->user('api'), 'create', Purchase::class);
 
+        \App\Support\StockDocumentRules::assertQuantities((array) $request['details']);
+
         request()->validate([
             'supplier_id' => 'required',
             'warehouse_id' => 'required',
@@ -402,6 +404,8 @@ class PurchasesController extends BaseController
     {
         $this->authorizeForUser($request->user('api'), 'update', Purchase::class);
 
+        \App\Support\StockDocumentRules::assertQuantities((array) $request['details']);
+
         request()->validate([
             'warehouse_id' => 'required',
             'supplier_id' => 'required',
@@ -449,15 +453,15 @@ class PurchasesController extends BaseController
                     ->toArray();
 
                 if (empty($current_Purchase->warehouse_id) || ! in_array($current_Purchase->warehouse_id, $warehouses_id)) {
-                    return response()->json([
+                    throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json([
                         'success' => false,
                         'message' => 'You are not allowed to access this sale (warehouse restriction).',
-                    ], 403);
+                    ], 403));
                 }
             }
 
             if (PurchaseReturn::where('purchase_id', $id)->where('deleted_at', '=', null)->exists()) {
-                return response()->json(['success' => false, 'Return exist for the Transaction' => false], 403);
+                throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json(['success' => false, 'Return exist for the Transaction' => false], 403));
             } else {
 
                 // Check If User Has Permission view All Records
@@ -701,17 +705,17 @@ class PurchasesController extends BaseController
                     ->toArray();
 
                 if (empty($current_Purchase->warehouse_id) || ! in_array($current_Purchase->warehouse_id, $warehouses_id)) {
-                    return response()->json([
+                    throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json([
                         'success' => false,
                         'message' => 'You are not allowed to access this sale (warehouse restriction).',
-                    ], 403);
+                    ], 403));
                 }
             }
 
             $old_purchase_details = PurchaseDetail::where('purchase_id', $id)->get();
 
             if (PurchaseReturn::where('purchase_id', $id)->where('deleted_at', '=', null)->exists()) {
-                return response()->json(['success' => false, 'Return exist for the Transaction' => false], 403);
+                throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json(['success' => false, 'Return exist for the Transaction' => false], 403));
             } else {
 
                 // Check If User Has Permission view All Records
@@ -843,7 +847,7 @@ class PurchasesController extends BaseController
             foreach ($selectedIds as $purchase_id) {
 
                 if (PurchaseReturn::where('purchase_id', $purchase_id)->where('deleted_at', '=', null)->exists()) {
-                    return response()->json(['success' => false, 'Return exist for the Transaction' => false], 403);
+                    throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json(['success' => false, 'Return exist for the Transaction' => false], 403));
                 } else {
 
                     $current_Purchase = Purchase::findOrFail($purchase_id);
@@ -862,10 +866,10 @@ class PurchasesController extends BaseController
                             ->toArray();
 
                         if (empty($current_Purchase->warehouse_id) || ! in_array($current_Purchase->warehouse_id, $warehouses_id)) {
-                            return response()->json([
+                            throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json([
                                 'success' => false,
                                 'message' => 'You are not allowed to access this sale (warehouse restriction).',
-                            ], 403);
+                            ], 403));
                         }
                     }
 
@@ -1474,7 +1478,7 @@ class PurchasesController extends BaseController
     public function edit(Request $request, $id)
     {
         if (PurchaseReturn::where('purchase_id', $id)->where('deleted_at', '=', null)->exists()) {
-            return response()->json(['success' => false, 'Return exist for the Transaction' => false], 403);
+            throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json(['success' => false, 'Return exist for the Transaction' => false], 403));
         } else {
 
             $this->authorizeForUser($request->user('api'), 'update', Purchase::class);
@@ -1500,10 +1504,10 @@ class PurchasesController extends BaseController
                     ->toArray();
 
                 if (empty($Purchase_data->warehouse_id) || ! in_array($Purchase_data->warehouse_id, $warehouses_id)) {
-                    return response()->json([
+                    throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json([
                         'success' => false,
                         'message' => 'You are not allowed to access this sale (warehouse restriction).',
-                    ], 403);
+                    ], 403));
                 }
             }
 

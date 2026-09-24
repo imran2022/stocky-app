@@ -58,6 +58,13 @@ use Illuminate\Support\Facades\DB;
 require dirname(__DIR__, 2).'/vendor/autoload.php';
 $app = require dirname(__DIR__, 2).'/bootstrap/app.php';
 $app->make(Kernel::class)->bootstrap();
+// Audit Batch 2: this gate sells products that have no stock on hand (it tests other behaviour), so
+// allow overselling for its duration and restore the setting afterwards.
+$__prevOversell = \Illuminate\Support\Facades\DB::table('settings')->whereNull('deleted_at')->value('allow_overselling');
+\Illuminate\Support\Facades\DB::table('settings')->whereNull('deleted_at')->update(['allow_overselling' => 1]);
+register_shutdown_function(function () use ($__prevOversell) {
+    \Illuminate\Support\Facades\DB::table('settings')->whereNull('deleted_at')->update(['allow_overselling' => (int) $__prevOversell]);
+});
 
 use App\Http\Controllers\DashboardController;
 use App\Models\Client;

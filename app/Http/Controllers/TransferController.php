@@ -138,6 +138,9 @@ class TransferController extends BaseController
     {
         $this->authorizeForUser($request->user('api'), 'create', Transfer::class);
 
+        \App\Support\StockDocumentRules::assertQuantities((array) $request['details']);
+        \App\Support\StockDocumentRules::assertTransferWarehouses($request->transfer['from_warehouse'] ?? null, $request->transfer['to_warehouse'] ?? null);
+
         request()->validate([
             'transfer.from_warehouse' => 'required',
             'transfer.to_warehouse' => 'required',
@@ -300,6 +303,9 @@ class TransferController extends BaseController
     {
 
         $this->authorizeForUser($request->user('api'), 'update', Transfer::class);
+
+        \App\Support\StockDocumentRules::assertQuantities((array) $request['details']);
+        \App\Support\StockDocumentRules::assertTransferWarehouses($request->transfer['from_warehouse'] ?? null, $request->transfer['to_warehouse'] ?? null);
 
         request()->validate([
             'transfer.to_warehouse' => 'required',
@@ -977,10 +983,10 @@ class TransferController extends BaseController
 
             // Allow if at least one warehouse matches
             if (! $fromAllowed && ! $toAllowed) {
-                return response()->json([
+                throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json([
                     'success' => false,
                     'message' => 'You are not allowed to access this transfer (warehouse restriction).',
-                ], 403);
+                ], 403));
             }
         }
 
@@ -1388,6 +1394,16 @@ class TransferController extends BaseController
 
             if ($transfer->approval_status === 'rejected') {
                 abort(422, 'Rejected transfers cannot be approved without editing.');
+            }
+
+            // Audit Batch 2 (C3): the source warehouse must hold what is being moved.
+            if ($transfer->statut == 'completed') {
+                \App\Support\StockGuard::assertAvailable(
+                    $transfer->from_warehouse_id,
+                    \App\Support\StockGuard::needsFromLines(
+                        $transfer->details->map(fn ($d) => $d->toArray())->all(), 'purchase_unit_id', 'unitPurchase'
+                    )
+                );
             }
 
             // Apply initial stock movement based on the stored header + details.

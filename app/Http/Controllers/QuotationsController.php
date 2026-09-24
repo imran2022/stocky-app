@@ -287,10 +287,10 @@ class QuotationsController extends BaseController
                     ->toArray();
 
                 if (empty($current_Quotation->warehouse_id) || ! in_array($current_Quotation->warehouse_id, $warehouses_id)) {
-                    return response()->json([
+                    throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json([
                         'success' => false,
                         'message' => 'You are not allowed to access this sale (warehouse restriction).',
-                    ], 403);
+                    ], 403));
                 }
             }
 
@@ -423,10 +423,10 @@ class QuotationsController extends BaseController
                     ->toArray();
 
                 if (empty($Quotation->warehouse_id) || ! in_array($Quotation->warehouse_id, $warehouses_id)) {
-                    return response()->json([
+                    throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json([
                         'success' => false,
                         'message' => 'You are not allowed to access this sale (warehouse restriction).',
-                    ], 403);
+                    ], 403));
                 }
             }
 
@@ -489,10 +489,10 @@ class QuotationsController extends BaseController
                         ->toArray();
 
                     if (empty($Quotation->warehouse_id) || ! in_array($Quotation->warehouse_id, $warehouses_id)) {
-                        return response()->json([
+                        throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json([
                             'success' => false,
                             'message' => 'You are not allowed to access this sale (warehouse restriction).',
-                        ], 403);
+                        ], 403));
                     }
                 }
 
@@ -1006,10 +1006,10 @@ class QuotationsController extends BaseController
                 ->toArray();
 
             if (empty($Quotation->warehouse_id) || ! in_array($Quotation->warehouse_id, $warehouses_id)) {
-                return response()->json([
+                throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json([
                     'success' => false,
                     'message' => 'You are not allowed to access this sale (warehouse restriction).',
-                ], 403);
+                ], 403));
             }
         }
 

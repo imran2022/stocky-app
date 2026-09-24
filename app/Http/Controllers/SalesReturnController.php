@@ -367,10 +367,10 @@ class SalesReturnController extends BaseController
                     ->toArray();
 
                 if (empty($current_SaleReturn->warehouse_id) || ! in_array($current_SaleReturn->warehouse_id, $warehouses_id)) {
-                    return response()->json([
+                    throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json([
                         'success' => false,
                         'message' => 'You are not allowed to access this sale (warehouse restriction).',
-                    ], 403);
+                    ], 403));
                 }
             }
 
@@ -620,10 +620,10 @@ class SalesReturnController extends BaseController
                     ->toArray();
 
                 if (empty($current_SaleReturn->warehouse_id) || ! in_array($current_SaleReturn->warehouse_id, $warehouses_id)) {
-                    return response()->json([
+                    throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json([
                         'success' => false,
                         'message' => 'You are not allowed to access this sale (warehouse restriction).',
-                    ], 403);
+                    ], 403));
                 }
             }
 
@@ -768,10 +768,10 @@ class SalesReturnController extends BaseController
                         ->toArray();
 
                     if (empty($current_SaleReturn->warehouse_id) || ! in_array($current_SaleReturn->warehouse_id, $warehouses_id)) {
-                        return response()->json([
+                        throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json([
                             'success' => false,
                             'message' => 'You are not allowed to access this sale (warehouse restriction).',
-                        ], 403);
+                        ], 403));
                     }
                 }
 
@@ -1458,10 +1458,10 @@ class SalesReturnController extends BaseController
                 ->toArray();
 
             if (empty($SaleReturn->warehouse_id) || ! in_array($SaleReturn->warehouse_id, $warehouses_id)) {
-                return response()->json([
+                throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json([
                     'success' => false,
                     'message' => 'You are not allowed to access this sale (warehouse restriction).',
-                ], 403);
+                ], 403));
             }
         }
 

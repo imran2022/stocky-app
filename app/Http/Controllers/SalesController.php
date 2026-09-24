@@ -453,6 +453,13 @@ class SalesController extends BaseController
         }
 
         $sale = \DB::transaction(function () use ($request) {
+            // Audit Batch 2 (S9/S10): honour "Allow overselling = off" server-side, under row locks.
+            if ($request->statut === 'completed') {
+                \App\Support\StockGuard::assertAvailable(
+                    $request->warehouse_id,
+                    \App\Support\StockGuard::needsFromLines((array) $request['details'], 'sale_unit_id', 'unitSale')
+                );
+            }
             $helpers = new helpers;
             $order = new Sale;
 
@@ -914,15 +921,15 @@ class SalesController extends BaseController
                     ->toArray();
 
                 if (empty($current_Sale->warehouse_id) || ! in_array($current_Sale->warehouse_id, $warehouses_id)) {
-                    return response()->json([
+                    throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json([
                         'success' => false,
                         'message' => 'You are not allowed to access this sale (warehouse restriction).',
-                    ], 403);
+                    ], 403));
                 }
             }
 
             if (SaleReturn::where('sale_id', $id)->where('deleted_at', '=', null)->exists()) {
-                return response()->json(['success' => false, 'Return exist for the Transaction' => false], 403);
+                throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json(['success' => false, 'Return exist for the Transaction' => false], 403));
             } else {
                 // Check If User Has Permission view All Records
                 // Warehouse half of the same rule: record_view says whose documents,
@@ -936,6 +943,18 @@ class SalesController extends BaseController
                 $old_sale_details = SaleDetail::where('sale_id', $id)->get();
                 $new_sale_details = $request['details'];
                 $length = count($new_sale_details);
+
+                // Audit Batch 2 (S9/S10): the edit hands its old quantities back, then takes the new ones.
+                if ($request->statut === 'completed') {
+                    $heldByOldLines = ($current_Sale->statut === 'completed' && (int) $current_Sale->warehouse_id === (int) $request->warehouse_id)
+                        ? \App\Support\StockGuard::needsFromLines($old_sale_details->toArray(), 'sale_unit_id', 'unitSale')
+                        : [];
+                    \App\Support\StockGuard::assertAvailable(
+                        $request->warehouse_id,
+                        \App\Support\StockGuard::needsFromLines((array) $new_sale_details, 'sale_unit_id', 'unitSale'),
+                        $heldByOldLines
+                    );
+                }
 
                 // Get Ids for new Details
                 $new_products_id = [];
@@ -1377,10 +1396,10 @@ class SalesController extends BaseController
                     ->toArray();
 
                 if (empty($current->warehouse_id) || ! in_array($current->warehouse_id, $warehouses_id)) {
-                    return response()->json([
+                    throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json([
                         'success' => false,
                         'message' => 'You are not allowed to access this sale (warehouse restriction).',
-                    ], 403);
+                    ], 403));
                 }
             }
 
@@ -1563,7 +1582,7 @@ class SalesController extends BaseController
             foreach ($selectedIds as $sale_id) {
 
                 if (SaleReturn::where('sale_id', $sale_id)->where('deleted_at', '=', null)->exists()) {
-                    return response()->json(['success' => false, 'Return exist for the Transaction' => false], 403);
+                    throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json(['success' => false, 'Return exist for the Transaction' => false], 403));
                 } else {
                     $current_Sale = Sale::findOrFail($sale_id);
                     \App\Support\LiveDocument::assert($current_Sale, 'sale');
@@ -1582,10 +1601,10 @@ class SalesController extends BaseController
                             ->toArray();
 
                         if (empty($current_Sale->warehouse_id) || ! in_array($current_Sale->warehouse_id, $warehouses_id)) {
-                            return response()->json([
+                            throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json([
                                 'success' => false,
                                 'message' => 'You are not allowed to access this sale (warehouse restriction).',
-                            ], 403);
+                            ], 403));
                         }
                     }
 
@@ -3712,7 +3731,7 @@ class SalesController extends BaseController
     public function edit(Request $request, $id)
     {
         if (SaleReturn::where('sale_id', $id)->where('deleted_at', '=', null)->exists()) {
-            return response()->json(['success' => false, 'Return exist for the Transaction' => false], 403);
+            throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json(['success' => false, 'Return exist for the Transaction' => false], 403));
         } else {
             $this->authorizeForUser($request->user('api'), 'update', Sale::class);
             $user = Auth::user();
@@ -3737,10 +3756,10 @@ class SalesController extends BaseController
                     ->toArray();
 
                 if (empty($Sale_data->warehouse_id) || ! in_array($Sale_data->warehouse_id, $warehouses_id)) {
-                    return response()->json([
+                    throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json([
                         'success' => false,
                         'message' => 'You are not allowed to access this sale (warehouse restriction).',
-                    ], 403);
+                    ], 403));
                 }
             }
 
@@ -4014,10 +4033,10 @@ class SalesController extends BaseController
                 ->toArray();
 
             if (empty($Quotation->warehouse_id) || ! in_array($Quotation->warehouse_id, $warehouses_id)) {
-                return response()->json([
+                throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json([
                     'success' => false,
                     'message' => 'You are not allowed to access this sale (warehouse restriction).',
-                ], 403);
+                ], 403));
             }
         }
 

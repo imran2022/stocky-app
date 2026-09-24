@@ -20,12 +20,14 @@ function call($ctrlClass, $method, array $payload, $verb='POST', $args=[]) {
         $body = $r instanceof Illuminate\Http\JsonResponse || $r instanceof Illuminate\Http\Response ? $r->getContent() : json_encode($r);
         $code = method_exists($r,'getStatusCode') ? $r->getStatusCode() : '-';
         return [$code, substr($body,0,4000)];
+    } catch (Illuminate\Http\Exceptions\HttpResponseException $e) {
+        return [$e->getResponse()->getStatusCode(), substr($e->getResponse()->getContent(), 0, 300)];
     } catch (Illuminate\Database\Eloquent\ModelNotFoundException $e) {
         return [404, 'model not found'];
     } catch (Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $e) {
         return [$e->getStatusCode(), $e->getMessage()];
     } catch (Illuminate\Validation\ValidationException $e) {
-        return ['422v', json_encode($e->errors())];
+        return [422, json_encode($e->errors())];
     } catch (Throwable $e) {
         return ['EXC', get_class($e).': '.substr($e->getMessage(),0,250)];
     }

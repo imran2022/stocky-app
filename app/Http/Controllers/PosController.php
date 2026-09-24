@@ -409,6 +409,11 @@ class PosController extends BaseController
 
         try {
             $sale = \DB::transaction(function () use ($request, $totalPaid, $saleUuid, $saleAt, $promotionDiscount, $promotionCodeApplied, $appliedPromotions, $walletMethodId) {
+                // Audit Batch 2 (S9/S10): honour "Allow overselling = off" server-side, under row locks.
+                \App\Support\StockGuard::assertAvailable(
+                    $request->warehouse_id,
+                    \App\Support\StockGuard::needsFromLines((array) $request['details'], 'sale_unit_id', 'unitSale')
+                );
                 $helpers = new helpers;
                 $order = new Sale;
 
@@ -811,7 +816,9 @@ class PosController extends BaseController
 
             return response()->json([
                 'success' => false,
-                'message' => $e->getMessage(),
+                'message' => $e instanceof \Illuminate\Validation\ValidationException
+                    ? (collect($e->errors())->flatten()->first() ?: $e->getMessage())
+                    : $e->getMessage(),
             ], 422);
         }
 

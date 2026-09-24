@@ -182,7 +182,20 @@ class PurchasesReturnController extends BaseController
     {
         $this->authorizeForUser($request->user('api'), 'create', PurchaseReturn::class);
 
+        try {
         \DB::transaction(function () use ($request) {
+            // Audit Batch 2 (C3): return must fit the original purchase, and stock must cover it.
+            \App\Support\PurchaseReturnLimits::assertValid(
+                $request->purchase_id, $request->supplier_id, (array) $request['details'],
+                $request->shipping ?? 0, $request->discount ?? 0, $request->GrandTotal ?? 0,
+                $request->TaxNet ?? 0, $request->tax_rate ?? 0
+            );
+            if ($request->statut === 'completed') {
+                \App\Support\StockGuard::assertAvailable(
+                    $request->warehouse_id,
+                    \App\Support\StockGuard::needsFromLines((array) $request['details'], 'purchase_unit_id', 'unitPurchase')
+                );
+            }
             $order = new PurchaseReturn;
 
             $order->date = $request->date;
@@ -288,6 +301,9 @@ class PurchasesReturnController extends BaseController
                 }
             }
         }, 10);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
+        }
 
         return response()->json(['success' => true]);
     }
@@ -298,6 +314,7 @@ class PurchasesReturnController extends BaseController
     {
         $this->authorizeForUser($request->user('api'), 'update', PurchaseReturn::class);
 
+        try {
         \DB::transaction(function () use ($request, $id) {
             $user = Auth::user();
             // New way: Check user's record_view field (user-level boolean)
@@ -320,11 +337,31 @@ class PurchasesReturnController extends BaseController
                     ->toArray();
 
                 if (empty($current_PurchaseReturn->warehouse_id) || ! in_array($current_PurchaseReturn->warehouse_id, $warehouses_id)) {
-                    return response()->json([
+                    throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json([
                         'success' => false,
                         'message' => 'You are not allowed to access this sale (warehouse restriction).',
-                    ], 403);
+                    ], 403));
                 }
+            }
+
+            // Audit Batch 2 (C3): an edited return must still fit the purchase; the edit hands its old quantities back first.
+            \App\Support\PurchaseReturnLimits::assertValid(
+                $current_PurchaseReturn->purchase_id, $request->supplier_id ?? $current_PurchaseReturn->provider_id, (array) $request['details'],
+                $request->shipping ?? 0, $request->discount ?? 0, $request->GrandTotal ?? 0,
+                $request->TaxNet ?? 0, $request->tax_rate ?? 0, (int) $current_PurchaseReturn->id
+            );
+            if ($request->statut === 'completed') {
+                $heldByOldLines = ($current_PurchaseReturn->statut === 'completed' && (int) $current_PurchaseReturn->warehouse_id === (int) $request->warehouse_id)
+                    ? \App\Support\StockGuard::needsFromLines(
+                        PurchaseReturnDetails::where('purchase_return_id', $id)->get()->map(fn ($d) => $d->toArray())->all(),
+                        'purchase_unit_id', 'unitPurchase'
+                    )
+                    : [];
+                \App\Support\StockGuard::assertAvailable(
+                    $request->warehouse_id,
+                    \App\Support\StockGuard::needsFromLines((array) $request['details'], 'purchase_unit_id', 'unitPurchase'),
+                    $heldByOldLines
+                );
             }
 
             // Check If User Has Permission view All Records
@@ -522,6 +559,9 @@ class PurchasesReturnController extends BaseController
             ]);
 
         }, 10);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
+        }
 
         return response()->json(['success' => true]);
     }
@@ -554,10 +594,10 @@ class PurchasesReturnController extends BaseController
                     ->toArray();
 
                 if (empty($current_PurchaseReturn->warehouse_id) || ! in_array($current_PurchaseReturn->warehouse_id, $warehouses_id)) {
-                    return response()->json([
+                    throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json([
                         'success' => false,
                         'message' => 'You are not allowed to access this sale (warehouse restriction).',
-                    ], 403);
+                    ], 403));
                 }
             }
 
@@ -697,10 +737,10 @@ class PurchasesReturnController extends BaseController
                         ->toArray();
 
                     if (empty($current_PurchaseReturn->warehouse_id) || ! in_array($current_PurchaseReturn->warehouse_id, $warehouses_id)) {
-                        return response()->json([
+                        throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json([
                             'success' => false,
                             'message' => 'You are not allowed to access this sale (warehouse restriction).',
-                        ], 403);
+                        ], 403));
                     }
                 }
 
@@ -984,10 +1024,10 @@ class PurchasesReturnController extends BaseController
                 ->toArray();
 
             if (empty($Purchase_Return->warehouse_id) || ! in_array($Purchase_Return->warehouse_id, $warehouses_id)) {
-                return response()->json([
+                throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json([
                     'success' => false,
                     'message' => 'You are not allowed to access this sale (warehouse restriction).',
-                ], 403);
+                ], 403));
             }
         }
 

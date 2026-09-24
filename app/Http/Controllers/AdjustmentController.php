@@ -138,6 +138,9 @@ class AdjustmentController extends BaseController
 
         $this->authorizeForUser($request->user('api'), 'create', Adjustment::class);
 
+        \App\Support\StockDocumentRules::assertQuantities((array) $request['details']);
+        \App\Support\StockDocumentRules::assertAdjustmentTypes((array) $request['details']);
+
         // define validation rules
         $productionRules = [
             'warehouse_id' => 'required',
@@ -190,6 +193,11 @@ class AdjustmentController extends BaseController
         ]);
 
         \DB::transaction(function () use ($request) {
+            // Audit Batch 2 (C3): a subtract cannot take more than is on hand (unless overselling is allowed).
+            \App\Support\StockGuard::assertAvailable(
+                $request->warehouse_id,
+                \App\Support\StockGuard::adjustmentNeeds((array) $request['details'])
+            );
             $order = new Adjustment;
             $order->date = $request->date;
             $order->time = now()->toTimeString();
@@ -287,6 +295,9 @@ class AdjustmentController extends BaseController
     {
 
         $this->authorizeForUser($request->user('api'), 'update', Adjustment::class);
+
+        \App\Support\StockDocumentRules::assertQuantities((array) $request['details']);
+        \App\Support\StockDocumentRules::assertAdjustmentTypes((array) $request['details']);
         $user = Auth::user();
         // New way: Check user's record_view field (user-level boolean)
         // Backward compatibility: If record_view is null, fall back to role permission check
@@ -308,10 +319,10 @@ class AdjustmentController extends BaseController
                 ->toArray();
 
             if (empty($current_adjustment->warehouse_id) || ! in_array($current_adjustment->warehouse_id, $warehouses_id)) {
-                return response()->json([
+                throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json([
                     'success' => false,
                     'message' => 'You are not allowed to access this sale (warehouse restriction).',
-                ], 403);
+                ], 403));
             }
         }
 
@@ -334,6 +345,15 @@ class AdjustmentController extends BaseController
             $old_adjustment_details = AdjustmentDetail::where('adjustment_id', $id)->get();
             $new_adjustment_details = $request['details'];
             $length = count($new_adjustment_details);
+
+            // Audit Batch 2 (C3): the edit first hands the old lines back, then applies the new ones.
+            \App\Support\StockGuard::assertAvailable(
+                $request->warehouse_id,
+                \App\Support\StockGuard::adjustmentNeeds((array) $new_adjustment_details),
+                (int) $current_adjustment->warehouse_id === (int) $request->warehouse_id
+                    ? \App\Support\StockGuard::adjustmentHeld($old_adjustment_details->toArray())
+                    : []
+            );
 
             // Get Ids for new Details
             $new_products_id = [];
@@ -531,10 +551,10 @@ class AdjustmentController extends BaseController
                     ->toArray();
 
                 if (empty($current_adjustment->warehouse_id) || ! in_array($current_adjustment->warehouse_id, $warehouses_id)) {
-                    return response()->json([
+                    throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json([
                         'success' => false,
                         'message' => 'You are not allowed to access this sale (warehouse restriction).',
-                    ], 403);
+                    ], 403));
                 }
             }
 
@@ -715,10 +735,10 @@ class AdjustmentController extends BaseController
                 ->toArray();
 
             if (empty($Adjustment_data->warehouse_id) || ! in_array($Adjustment_data->warehouse_id, $warehouses_id)) {
-                return response()->json([
+                throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json([
                     'success' => false,
                     'message' => 'You are not allowed to access this sale (warehouse restriction).',
-                ], 403);
+                ], 403));
             }
         }
 
