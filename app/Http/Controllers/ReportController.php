@@ -1380,7 +1380,7 @@ class ReportController extends BaseController
         $pageStart = (int) \Request::get('page', 1);
         $offSet = ($pageStart * $perPage) - $perPage;
         $order = $request->SortField ?? 'sale_date';
-        $dir = in_array(strtolower($request->SortType ?? 'desc'), ['asc', 'desc'], true) ? $request->SortType : 'desc';
+        $dir = strtolower((string) $request->SortType) === 'asc' ? 'asc' : 'desc';   // Audit B4 (H5): an absent SortType used to leave $dir null -> 500
         $allowedSort = ['sale_date', 'Ref', 'product_name', 'quantity', 'client_name', 'warehouse_name', 'warranty_date', 'guarantee_date', 'days_remaining', 'status'];
         if (! in_array($order, $allowedSort, true)) {
             $order = 'sale_date';
