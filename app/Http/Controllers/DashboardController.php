@@ -125,6 +125,7 @@ class DashboardController extends Controller
         $base = Sale::query()
             ->whereBetween('sales.date', [$today, $today])
             ->where('sales.deleted_at', null)
+            ->where('sales.statut', 'completed')   // Audit Batch 4: completed sales only
             ->where(function ($q) use ($view_records) {
                 if (! $view_records) {
                     $q->where('sales.user_id', Auth::id());
@@ -188,6 +189,7 @@ class DashboardController extends Controller
         return Sale::query()
             ->whereBetween('sales.date', [$start->toDateString(), $end->toDateString()])
             ->where('sales.deleted_at', null)
+            ->where('sales.statut', 'completed')   // Audit Batch 4: completed sales only
             ->where(function ($q) use ($view_records) {
                 if (! $view_records) {
                     $q->where('sales.user_id', Auth::id());
@@ -257,6 +259,7 @@ class DashboardController extends Controller
         // Get the sales counts within the same window used for the dashboard filter
         $sales = Sale::whereBetween('date', [$start->toDateString(), $end->toDateString()])
             ->where('deleted_at', '=', null)
+            ->where('statut', 'completed')   // Audit Batch 4: completed sales only
             ->where(function ($query) use ($view_records) {
                 if (! $view_records) {
                     return $query->where('user_id', '=', Auth::user()->id);
@@ -329,6 +332,7 @@ class DashboardController extends Controller
         // Get the purchases counts within the same window used for the dashboard filter
         $purchases = Purchase::whereBetween('date', [$start->toDateString(), $end->toDateString()])
             ->where('deleted_at', '=', null)
+            ->where('statut', 'received')   // Audit Batch 4: received purchases only
             ->where(function ($query) use ($view_records) {
                 if (! $view_records) {
                     return $query->where('user_id', '=', Auth::user()->id);
@@ -383,6 +387,7 @@ class DashboardController extends Controller
             Carbon::now()->startOfMonth(),
             Carbon::now()->endOfMonth(),
         ])->where('sales.deleted_at', '=', null)
+            ->where('sales.statut', 'completed')   // Audit Batch 4: completed sales only
             ->where(function ($query) use ($view_records) {
                 if (! $view_records) {
                     return $query->where('sales.user_id', '=', Auth::user()->id);
@@ -426,6 +431,8 @@ class DashboardController extends Controller
 
         $products = SaleDetail::join('sales', 'sale_details.sale_id', '=', 'sales.id')
             ->join('products', 'sale_details.product_id', '=', 'products.id')
+            ->where('sales.deleted_at', null)
+            ->where('sales.statut', 'completed')   // Audit Batch 4: completed, non-deleted sales only
             ->whereBetween('sale_details.date', [
                 Carbon::now()->startOfYear(),
                 Carbon::now()->endOfYear(),
@@ -469,6 +476,8 @@ class DashboardController extends Controller
         // top selling product this month
         $products = SaleDetail::join('sales', 'sale_details.sale_id', '=', 'sales.id')
             ->join('products', 'sale_details.product_id', '=', 'products.id')
+            ->where('sales.deleted_at', null)
+            ->where('sales.statut', 'completed')   // Audit Batch 4: completed, non-deleted sales only
             ->whereBetween('sale_details.date', [
                 Carbon::now()->startOfMonth(),
                 Carbon::now()->endOfMonth(),
@@ -532,7 +541,9 @@ class DashboardController extends Controller
 
         // ---------------- sales + payments (for due) -------------
 
+        // Audit Batch 4: like every report, the dashboard counts COMPLETED sales / RECEIVED returns and purchases only.
         $salesBase = Sale::where('deleted_at', '=', null)
+            ->where('statut', 'completed')
             ->whereBetween('date', [$request->from, $request->to])
             ->where(function ($query) use ($view_records) {
                 if (! $view_records) {
@@ -572,6 +583,7 @@ class DashboardController extends Controller
         // --------------- return_sales
 
         $return_sales_total = SaleReturn::where('deleted_at', '=', null)
+            ->where('statut', 'received')
             ->whereBetween('date', [$request->from, $request->to])
             ->where(function ($query) use ($view_records) {
                 if (! $view_records) {
@@ -593,6 +605,7 @@ class DashboardController extends Controller
         // ------------------- purchases + payments (for due) ------
 
         $purchasesBase = Purchase::where('deleted_at', '=', null)
+            ->where('statut', 'received')
             ->whereBetween('date', [$request->from, $request->to])
             ->where(function ($query) use ($view_records) {
                 if (! $view_records) {
@@ -625,6 +638,7 @@ class DashboardController extends Controller
         // ------------------------- return_purchases --------------
 
         $return_purchases_total = PurchaseReturn::where('deleted_at', '=', null)
+            ->where('statut', 'completed')
             ->whereBetween('date', [$request->from, $request->to])
             ->where(function ($query) use ($view_records) {
                 if (! $view_records) {
@@ -645,6 +659,7 @@ class DashboardController extends Controller
         // ------------------------- today invoices (count) --------
 
         $data['today_invoices'] = Sale::where('deleted_at', '=', null)
+            ->where('statut', 'completed')
             ->whereBetween('date', [$request->from, $request->to])
             ->where(function ($query) use ($view_records) {
                 if (! $view_records) {
@@ -688,7 +703,22 @@ class DashboardController extends Controller
         // Profit & Loss report so both screens agree.
         $service = $this->serviceJobTotals($request->from, $request->to, (int) $warehouse_id, $array_warehouses_id);
 
-        $today_profit_numeric = $completedSalesTotal - $cogsFIFO - $expenses_total + $service['profit'];
+        // Same definition as the Profit & Loss report: net sales (no tax, no delivery charge) minus net returns.
+        $figureScope = function ($q) use ($request, $view_records, $warehouse_id, $array_warehouses_id) {
+            $q->whereBetween('date', [$request->from, $request->to]);
+            if (! $view_records) {
+                $q->where('user_id', Auth::user()->id);
+            }
+            if ($warehouse_id !== 0) {
+                $q->where('warehouse_id', $warehouse_id);
+            } else {
+                $q->whereIn('warehouse_id', $array_warehouses_id);
+            }
+        };
+        $netSales = \App\Support\Reporting\SalesFigures::sales($figureScope)['net'];
+        $netReturns = \App\Support\Reporting\SalesFigures::saleReturns($figureScope)['net'];
+
+        $today_profit_numeric = ($netSales - $netReturns) - $cogsFIFO - $expenses_total + $service['profit'];
         // Return raw numeric value for frontend price formatting
         $data['today_profit'] = $today_profit_numeric;
         $data['today_service_revenue'] = (float) $service['revenue'];
