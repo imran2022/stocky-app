@@ -2034,7 +2034,7 @@ class ReportController extends BaseController
         }
 
         // Validate requested warehouse_id
-        $warehouse_id = $request->filled('warehouse_id') ? (int) $request->warehouse_id : null;
+        $warehouse_id = $request->filled('warehouse_id') ? $this->filterWarehouseId($request->warehouse_id) : null;
 
         if (! $is_all_warehouses && $warehouse_id && ! in_array($warehouse_id, $allowedWarehouseIds, true)) {
             $warehouse_id = null;
@@ -2105,7 +2105,7 @@ class ReportController extends BaseController
             $warehouses = Warehouse::whereNull('deleted_at')->whereIn('id', $allowedWarehouseIds)->get(['id', 'name']);
         }
 
-        $warehouse_id = $request->filled('warehouse_id') ? (int) $request->warehouse_id : null;
+        $warehouse_id = $request->filled('warehouse_id') ? $this->filterWarehouseId($request->warehouse_id) : null;
         if (! $is_all_warehouses && $warehouse_id && ! in_array($warehouse_id, $allowedWarehouseIds, true)) {
             $warehouse_id = null;
         }
@@ -2206,7 +2206,7 @@ class ReportController extends BaseController
         }
 
         // Keep request filter but ensure it's allowed
-        $warehouse_id = $request->filled('warehouse_id') ? (int) $request->warehouse_id : null;
+        $warehouse_id = $request->filled('warehouse_id') ? $this->filterWarehouseId($request->warehouse_id) : null;
         if (! $is_all_warehouses && $warehouse_id && ! in_array($warehouse_id, $allowedWarehouseIds, true)) {
             $warehouse_id = null; // ignore invalid warehouse filter (prevents data leak)
         }
@@ -2295,7 +2295,7 @@ class ReportController extends BaseController
                 ->toArray();
         }
 
-        $warehouse_id = $request->filled('warehouse_id') ? (int) $request->warehouse_id : null;
+        $warehouse_id = $request->filled('warehouse_id') ? $this->filterWarehouseId($request->warehouse_id) : null;
         if (! $is_all_warehouses && $warehouse_id && ! in_array($warehouse_id, $allowedWarehouseIds, true)) {
             $warehouse_id = null;
         }
@@ -2387,7 +2387,7 @@ class ReportController extends BaseController
         }
 
         // Keep request filter but ensure it's allowed
-        $warehouse_id = $request->filled('warehouse_id') ? (int) $request->warehouse_id : null;
+        $warehouse_id = $request->filled('warehouse_id') ? $this->filterWarehouseId($request->warehouse_id) : null;
         if (! $is_all_warehouses && $warehouse_id && ! in_array($warehouse_id, $allowedWarehouseIds, true)) {
             $warehouse_id = null; // ignore invalid warehouse filter
         }
@@ -2479,7 +2479,7 @@ class ReportController extends BaseController
         }
 
         // Keep request filter but ensure it's allowed
-        $warehouse_id = $request->filled('warehouse_id') ? (int) $request->warehouse_id : null;
+        $warehouse_id = $request->filled('warehouse_id') ? $this->filterWarehouseId($request->warehouse_id) : null;
         if (! $is_all_warehouses && $warehouse_id && ! in_array($warehouse_id, $allowedWarehouseIds, true)) {
             $warehouse_id = null; // ignore invalid warehouse filter (prevents data leak)
         }
@@ -2583,7 +2583,7 @@ class ReportController extends BaseController
         }
 
         // Keep request filter but ensure it's allowed
-        $warehouse_id = $request->filled('warehouse_id') ? (int) $request->warehouse_id : null;
+        $warehouse_id = $request->filled('warehouse_id') ? $this->filterWarehouseId($request->warehouse_id) : null;
         if (! $is_all_warehouses && $warehouse_id && ! in_array($warehouse_id, $allowedWarehouseIds, true)) {
             $warehouse_id = null; // ignore invalid warehouse filter (prevents data leak)
         }
@@ -2690,7 +2690,7 @@ class ReportController extends BaseController
         }
 
         // Keep request filter but ensure it's allowed
-        $warehouse_id = $request->filled('warehouse_id') ? (int) $request->warehouse_id : null;
+        $warehouse_id = $request->filled('warehouse_id') ? $this->filterWarehouseId($request->warehouse_id) : null;
         if (! $is_all_warehouses && $warehouse_id && ! in_array($warehouse_id, $allowedWarehouseIds, true)) {
             $warehouse_id = null; // ignore invalid warehouse filter (prevents data leak)
         }
@@ -2877,7 +2877,7 @@ class ReportController extends BaseController
             $warehouseIds = UserWarehouse::where('user_id', $user->id)->pluck('warehouse_id')->all();
             $warehouses = Warehouse::whereNull('deleted_at')->whereIn('id', $warehouseIds)->get(['id', 'name']);
         }
-        $warehouseId = (int) ($request->warehouse_id ?: 0);
+        $warehouseId = (int) $this->filterWarehouseId($request->warehouse_id);
 
         // Helper closures
         $applyWarehouse = fn ($q) => $warehouseId
@@ -3134,7 +3134,7 @@ class ReportController extends BaseController
             $warehouseIds = UserWarehouse::where('user_id', $user->id)->pluck('warehouse_id')->all();
             $warehouses = Warehouse::whereNull('deleted_at')->whereIn('id', $warehouseIds)->get(['id', 'name']);
         }
-        $warehouseId = (int) ($request->warehouse_id ?: 0);
+        $warehouseId = (int) $this->filterWarehouseId($request->warehouse_id);
 
         // Helper closures
         $applyWarehouse = fn ($q) => $warehouseId
@@ -3549,7 +3549,7 @@ class ReportController extends BaseController
             $warehouseIds = UserWarehouse::where('user_id', $user->id)->pluck('warehouse_id')->all();
             $warehouses = Warehouse::whereNull('deleted_at')->whereIn('id', $warehouseIds)->get(['id', 'name']);
         }
-        $warehouseId = (int) ($request->warehouse_id ?: 0);
+        $warehouseId = (int) $this->filterWarehouseId($request->warehouse_id);
 
         $applyWarehouse = fn ($q) => $warehouseId
             ? $q->where('warehouse_id', $warehouseId)
@@ -4716,7 +4716,7 @@ class ReportController extends BaseController
         }
 
         // Keep request filter but ensure it's allowed (optional, if your UI sends warehouse_id)
-        $warehouse_id = $request->filled('warehouse_id') ? (int) $request->warehouse_id : null;
+        $warehouse_id = $request->filled('warehouse_id') ? $this->filterWarehouseId($request->warehouse_id) : null;
         if (! $is_all_warehouses && $warehouse_id && ! in_array($warehouse_id, $allowedWarehouseIds, true)) {
             $warehouse_id = null; // ignore invalid warehouse filter (prevents data leak)
         }
@@ -4856,7 +4856,7 @@ class ReportController extends BaseController
         }
 
         // Optional filter (if UI sends it) + validate it
-        $warehouse_id = $request->filled('warehouse_id') ? (int) $request->warehouse_id : null;
+        $warehouse_id = $request->filled('warehouse_id') ? $this->filterWarehouseId($request->warehouse_id) : null;
         if (! $is_all_warehouses && $warehouse_id && ! in_array($warehouse_id, $allowedWarehouseIds, true)) {
             $warehouse_id = null;
         }
@@ -4993,7 +4993,7 @@ class ReportController extends BaseController
         }
 
         // Optional filter (if UI sends it) + validate it
-        $warehouse_id = $request->filled('warehouse_id') ? (int) $request->warehouse_id : null;
+        $warehouse_id = $request->filled('warehouse_id') ? $this->filterWarehouseId($request->warehouse_id) : null;
         if (! $is_all_warehouses && $warehouse_id && ! in_array($warehouse_id, $allowedWarehouseIds, true)) {
             $warehouse_id = null;
         }
@@ -5127,7 +5127,7 @@ class ReportController extends BaseController
         }
 
         // Optional filter (if UI sends it) + validate it
-        $warehouse_id = $request->filled('warehouse_id') ? (int) $request->warehouse_id : null;
+        $warehouse_id = $request->filled('warehouse_id') ? $this->filterWarehouseId($request->warehouse_id) : null;
         if (! $is_all_warehouses && $warehouse_id && ! in_array($warehouse_id, $allowedWarehouseIds, true)) {
             $warehouse_id = null;
         }
@@ -5397,7 +5397,7 @@ class ReportController extends BaseController
         }
 
         // Optional filter (if UI sends it) + validate it
-        $warehouse_id = $request->filled('warehouse_id') ? (int) $request->warehouse_id : null;
+        $warehouse_id = $request->filled('warehouse_id') ? $this->filterWarehouseId($request->warehouse_id) : null;
         if (! $is_all_warehouses && $warehouse_id && ! in_array($warehouse_id, $allowedWarehouseIds, true)) {
             $warehouse_id = null;
         }
@@ -5543,7 +5543,7 @@ class ReportController extends BaseController
         }
 
         // Optional filter (if UI sends it) + validate it
-        $warehouse_id = $request->filled('warehouse_id') ? (int) $request->warehouse_id : null;
+        $warehouse_id = $request->filled('warehouse_id') ? $this->filterWarehouseId($request->warehouse_id) : null;
         if (! $is_all_warehouses && $warehouse_id && ! in_array($warehouse_id, $allowedWarehouseIds, true)) {
             $warehouse_id = null;
         }
@@ -5671,7 +5671,7 @@ class ReportController extends BaseController
         }
 
         // Optional filter (if UI sends it) + validate it
-        $warehouse_id = $request->filled('warehouse_id') ? (int) $request->warehouse_id : null;
+        $warehouse_id = $request->filled('warehouse_id') ? $this->filterWarehouseId($request->warehouse_id) : null;
         if (! $is_all_warehouses && $warehouse_id && ! in_array($warehouse_id, $allowedWarehouseIds, true)) {
             $warehouse_id = null;
         }
@@ -5997,9 +5997,9 @@ class ReportController extends BaseController
                         }
                     })
                     ->where(function ($query) use ($request, $array_warehouses_id) {
-                        if ($request->warehouse_id) {
+                        if ($this->filterWarehouseId($request->warehouse_id)) {
                             return $query->whereHas('sale', function ($q) use ($request) {
-                                $q->where('warehouse_id', $request->warehouse_id)->where('statut', 'completed')->whereNull('deleted_at');   // Audit Batch 4
+                                $q->where('warehouse_id', $this->filterWarehouseId($request->warehouse_id))->where('statut', 'completed')->whereNull('deleted_at');   // Audit Batch 4
                             });
                         } else {
                             return $query->whereHas('sale', function ($q) use ($array_warehouses_id) {
@@ -6021,9 +6021,9 @@ class ReportController extends BaseController
                         }
                     })
                     ->where(function ($query) use ($request, $array_warehouses_id) {
-                        if ($request->warehouse_id) {
+                        if ($this->filterWarehouseId($request->warehouse_id)) {
                             return $query->whereHas('sale', function ($q) use ($request) {
-                                $q->where('warehouse_id', $request->warehouse_id)->where('statut', 'completed')->whereNull('deleted_at');   // Audit Batch 4
+                                $q->where('warehouse_id', $this->filterWarehouseId($request->warehouse_id))->where('statut', 'completed')->whereNull('deleted_at');   // Audit Batch 4
                             });
                         } else {
                             return $query->whereHas('sale', function ($q) use ($array_warehouses_id) {
@@ -6075,9 +6075,9 @@ class ReportController extends BaseController
                         }
                     })
                     ->where(function ($query) use ($request, $array_warehouses_id) {
-                        if ($request->warehouse_id) {
+                        if ($this->filterWarehouseId($request->warehouse_id)) {
                             return $query->whereHas('sale', function ($q) use ($request) {
-                                $q->where('warehouse_id', $request->warehouse_id)->where('statut', 'completed')->whereNull('deleted_at');   // Audit Batch 4
+                                $q->where('warehouse_id', $this->filterWarehouseId($request->warehouse_id))->where('statut', 'completed')->whereNull('deleted_at');   // Audit Batch 4
                             });
                         } else {
                             return $query->whereHas('sale', function ($q) use ($array_warehouses_id) {
@@ -6099,9 +6099,9 @@ class ReportController extends BaseController
                         }
                     })
                     ->where(function ($query) use ($request, $array_warehouses_id) {
-                        if ($request->warehouse_id) {
+                        if ($this->filterWarehouseId($request->warehouse_id)) {
                             return $query->whereHas('sale', function ($q) use ($request) {
-                                $q->where('warehouse_id', $request->warehouse_id)->where('statut', 'completed')->whereNull('deleted_at');   // Audit Batch 4
+                                $q->where('warehouse_id', $this->filterWarehouseId($request->warehouse_id))->where('statut', 'completed')->whereNull('deleted_at');   // Audit Batch 4
                             });
                         } else {
                             return $query->whereHas('sale', function ($q) use ($array_warehouses_id) {
@@ -6124,8 +6124,8 @@ class ReportController extends BaseController
             ->join('sales as s', 's.id', '=', 'sd.sale_id')
             ->whereNull('s.deleted_at')
             ->whereBetween('sd.date', [$from, $to])
-            ->when($request->warehouse_id, fn ($q) => $q->where('s.warehouse_id', $request->warehouse_id))
-            ->when(! $request->warehouse_id, fn ($q) => $q->whereIn('s.warehouse_id', $array_warehouses_id))
+            ->when($this->filterWarehouseId($request->warehouse_id), fn ($q) => $q->where('s.warehouse_id', $this->filterWarehouseId($request->warehouse_id)))
+            ->when(! $this->filterWarehouseId($request->warehouse_id), fn ($q) => $q->whereIn('s.warehouse_id', $array_warehouses_id))
             ->when(! $view_records, fn ($q) => $q->where('s.user_id', Auth::id()));
 
         $tot = (clone $agg)
@@ -6186,7 +6186,7 @@ class ReportController extends BaseController
         }
 
         // Optional UI filter + validate it
-        $warehouse_id = $request->filled('warehouse_id') ? (int) $request->warehouse_id : null;
+        $warehouse_id = $request->filled('warehouse_id') ? $this->filterWarehouseId($request->warehouse_id) : null;
         if (! $is_all_warehouses && $warehouse_id && ! in_array($warehouse_id, $allowedWarehouseIds, true)) {
             $warehouse_id = null;
         }
@@ -6387,7 +6387,7 @@ class ReportController extends BaseController
         }
 
         // Optional filter (if UI sends it) + validate it
-        $warehouse_id = $request->filled('warehouse_id') ? (int) $request->warehouse_id : null;
+        $warehouse_id = $request->filled('warehouse_id') ? $this->filterWarehouseId($request->warehouse_id) : null;
         if (! $is_all_warehouses && $warehouse_id && ! in_array($warehouse_id, $allowedWarehouseIds, true)) {
             $warehouse_id = null;
         }
@@ -6586,7 +6586,7 @@ class ReportController extends BaseController
         }
 
         // Optional filters (warehouse = "till", user = "sales person")
-        $warehouse_id = $request->filled('warehouse_id') ? (int) $request->warehouse_id : null;
+        $warehouse_id = $request->filled('warehouse_id') ? $this->filterWarehouseId($request->warehouse_id) : null;
         if (! $is_all_warehouses && $warehouse_id && ! in_array($warehouse_id, $allowedWarehouseIds, true)) {
             $warehouse_id = null;
         }
@@ -6855,7 +6855,7 @@ class ReportController extends BaseController
         }
 
         // Optional filter (if UI sends it) + validate it
-        $warehouse_id = $request->filled('warehouse_id') ? (int) $request->warehouse_id : null;
+        $warehouse_id = $request->filled('warehouse_id') ? $this->filterWarehouseId($request->warehouse_id) : null;
         if (! $is_all_warehouses && $warehouse_id && ! in_array($warehouse_id, $allowedWarehouseIds, true)) {
             $warehouse_id = null;
         }
@@ -7736,7 +7736,7 @@ class ReportController extends BaseController
         if (empty($request->warehouse_id) || $request->warehouse_id === 0) {
             $warehouse_id = 0;
         } else {
-            $warehouse_id = $request->warehouse_id;
+            $warehouse_id = (int) $this->filterWarehouseId($request->warehouse_id);
         }
 
         $expenses_data = Expense::join('expense_categories', 'expenses.expense_category_id', '=', 'expense_categories.id')
@@ -8328,7 +8328,7 @@ class ReportController extends BaseController
         $groupBy = $request->group_by === 'method' ? 'method' : 'account';
 
         // Requested filters
-        $warehouseId     = $request->warehouse_id ? (int) $request->warehouse_id : null;
+        $warehouseId     = $this->filterWarehouseId($request->warehouse_id);
         $accountId       = $request->account_id ? (int) $request->account_id : null;
         $paymentMethodId = $request->payment_method_id ? (int) $request->payment_method_id : null;
 
