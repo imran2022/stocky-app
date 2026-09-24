@@ -128,6 +128,8 @@
           <div class="st-row"><span>{{ $t('Gross_Sales') }} <a-tag class="count-tag">{{ num(infos.sales_count) }}</a-tag></span><span>{{ money(stmt.grossSales) }}</span></div>
           <div class="st-row"><span>{{ $t('Service_Revenue') }} <a-tag class="count-tag">{{ num(infos.service_jobs_count) }}</a-tag></span><span>{{ money(stmt.serviceRev) }}</span></div>
           <div class="st-row"><span>{{ $t('SalesReturn') }} <a-tag class="count-tag">{{ num(infos.returns_sales_count) }}</a-tag></span><span class="neg">− {{ money(stmt.saleRet) }}</span></div>
+          <div class="st-row"><span>{{ $t('Taxes_Collected') }}</span><span class="neg">− {{ money(stmt.taxNet) }}</span></div>
+          <div class="st-row"><span>{{ $t('Shipping_Charged') }}</span><span class="neg">− {{ money(stmt.shipNet) }}</span></div>
           <div class="st-row st-total"><span>{{ $t('Net_Revenue') }}</span><span>{{ money(stmt.netRevenue) }}</span></div>
 
           <!-- COGS -->
@@ -311,8 +313,9 @@ async function load() {
 }
 
 /* --------------------------- profit customizer ---------------------------- */
-const STORAGE_KEY = 'pl_profit_builder_v1';
-const DEFAULT_ENABLED = ['sales', 'service', 'cogs', 'expenses'];
+// v2: profit is now net of tax, delivery charges and returns, so the default set changed (old saved sets are dropped).
+const STORAGE_KEY = 'pl_profit_builder_v2';
+const DEFAULT_ENABLED = ['sales', 'service', 'cogs', 'expenses', 'sale_returns', 'sales_tax', 'sales_shipping'];
 
 const enabled = ref([...DEFAULT_ENABLED]);
 const cogsMethod = ref('fifo');
@@ -338,7 +341,7 @@ function resetBuilder() {
   cogsMethod.value = 'fifo';
 }
 
-// Default set (sales + service − COGS FIFO − expenses) reproduces the standard ProfitNet (FIFO).
+// Default set (sales + service − returns − taxes − delivery charges − COGS − expenses) reproduces the standard ProfitNet.
 const components = computed(() => [
   { id: 'sales', sign: 1, label: t('Gross_Sales'), value: n(infos.value.sales_sum) },
   { id: 'service', sign: 1, label: t('Service_Profit'), value: n(infos.value.service_profit) },
@@ -346,7 +349,8 @@ const components = computed(() => [
   { id: 'expenses', sign: -1, label: t('Expenses'), value: n(infos.value.expenses_sum) },
   { id: 'sale_returns', sign: -1, label: t('SalesReturn'), value: n(infos.value.returns_sales_sum) },
   { id: 'purchase_returns', sign: 1, label: t('PurchasesReturn'), value: n(infos.value.returns_purchases_sum) },
-  { id: 'sales_tax', sign: -1, label: t('Taxes_Collected'), value: n(infos.value.sales_tax_sum) },
+  { id: 'sales_tax', sign: -1, label: t('Taxes_Collected'), value: n(infos.value.tax_net_of_returns) },
+  { id: 'sales_shipping', sign: -1, label: t('Shipping_Charged'), value: n(infos.value.shipping_net_of_returns) },
 ]);
 
 const enabledComponents = computed(() => components.value.filter(c => isEnabled(c.id)));
@@ -363,14 +367,18 @@ const stmt = computed(() => {
   const grossSales = n(s.sales_sum);
   const serviceRev = n(s.service_revenue_sum);
   const saleRet = n(s.returns_sales_sum);
-  const netRevenue = grossSales + serviceRev - saleRet;
+  // Taxes and delivery charges are collected for the state / courier, not earned: they come off revenue
+  // (net of what returns gave back), matching the server's total_revenue exactly.
+  const taxNet = n(s.tax_net_of_returns);
+  const shipNet = n(s.shipping_net_of_returns);
+  const netRevenue = grossSales + serviceRev - saleRet - taxNet - shipNet;
   const cogs = cogsMethod.value === 'fifo' ? n(s.product_cost_fifo) : n(s.averagecost);
   const parts = n(s.service_parts_cost);
   const grossProfit = netRevenue - cogs - parts;
   const expenses = n(s.expenses_sum);
   const netProfit = grossProfit - expenses;
   return {
-    grossSales, serviceRev, saleRet, netRevenue, cogs, parts, grossProfit, expenses, netProfit,
+    grossSales, serviceRev, saleRet, taxNet, shipNet, netRevenue, cogs, parts, grossProfit, expenses, netProfit,
     grossMargin: netRevenue > 0 ? (grossProfit / netRevenue) * 100 : 0,
     netMargin: netRevenue > 0 ? (netProfit / netRevenue) * 100 : 0,
   };
@@ -545,6 +553,8 @@ function buildExportRows() {
     { label: t('Gross_Sales'), value: money(s.grossSales) },
     { label: t('Service_Revenue'), value: money(s.serviceRev) },
     { label: t('SalesReturn'), value: `- ${money(s.saleRet)}` },
+    { label: t('Taxes_Collected'), value: `- ${money(s.taxNet)}` },
+    { label: t('Shipping_Charged'), value: `- ${money(s.shipNet)}` },
     { label: t('Net_Revenue'), value: money(s.netRevenue) },
     { label: `${t('COGS')} (${cogsMethod.value === 'fifo' ? 'FIFO' : t('AverageCost')})`, value: `- ${money(s.cogs)}` },
     { label: t('Service_Parts_Cost'), value: `- ${money(s.parts)}` },

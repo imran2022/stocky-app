@@ -2866,14 +2866,20 @@ class ReportController extends BaseController
 
         // -------------------- Aggregates --------------------
 
-        // Sales
-        $salesAgg = Sale::whereNull('deleted_at')
-            ->where('statut', 'completed')
-            ->whereBetween('date', [$start, $end])
-            ->where($applyWarehouse)
-            ->selectRaw('COALESCE(SUM(GrandTotal),0) AS sum, COUNT(*) AS nmbr,
-                COALESCE(SUM(TaxNet),0) AS tax, COALESCE(SUM(discount),0) AS discount, COALESCE(SUM(shipping),0) AS shipping')
-            ->first();
+        // Sales and sale returns: ONE shared definition of net sales / tax / shipping / discount
+        // (Audit Batch 4, C4/H2 - see App\Support\Reporting\SalesFigures). The same user scope the COGS uses is
+        // applied, so revenue and cost always describe the same set of sales.
+        $viewAll = $user->hasRecordView();
+        $salesScope = function ($q) use ($start, $end, $applyWarehouse, $viewAll, $user) {
+            $q->whereBetween('date', [$start, $end])->where($applyWarehouse);
+            if (! $viewAll) {
+                $q->where('user_id', $user->id);
+            }
+        };
+        $salesFig = \App\Support\Reporting\SalesFigures::sales($salesScope);
+        $saleRetFig = \App\Support\Reporting\SalesFigures::saleReturns($salesScope);
+        $salesAgg = (object) ['sum' => $salesFig['gross'], 'nmbr' => $salesFig['count'], 'tax' => $salesFig['tax'],
+            'discount' => $salesFig['discount'], 'shipping' => $salesFig['shipping']];
 
         // Purchases (received)
         $purchAgg = Purchase::whereNull('deleted_at')
@@ -2884,13 +2890,7 @@ class ReportController extends BaseController
                 COALESCE(SUM(TaxNet),0) AS tax, COALESCE(SUM(discount),0) AS discount, COALESCE(SUM(shipping),0) AS shipping')
             ->first();
 
-        // Sales returns (received)
-        $saleRetAgg = SaleReturn::whereNull('deleted_at')
-            ->where('statut', 'received')
-            ->whereBetween('date', [$start, $end])
-            ->where($applyWarehouse)
-            ->selectRaw('COALESCE(SUM(GrandTotal),0) AS sum, COUNT(*) AS nmbr')
-            ->first();
+        $saleRetAgg = (object) ['sum' => $saleRetFig['gross'], 'nmbr' => $saleRetFig['count']];
 
         // Purchase returns (completed)
         $purchRetAgg = PurchaseReturn::whereNull('deleted_at')
@@ -3020,6 +3020,7 @@ class ReportController extends BaseController
 
         // -------------------- Compose response (numeric; format in UI) --------------------
         $salesSum = (float) $salesAgg->sum;
+        $netRevenueGoods = $salesFig['net'] - $saleRetFig['net'];
         $purchSum = (float) $purchAgg->sum;
         $saleRetSum = (float) $saleRetAgg->sum;
         $purchRetSum = (float) $purchRetAgg->sum;
@@ -3030,6 +3031,17 @@ class ReportController extends BaseController
             'sales_tax_sum' => (float) $salesAgg->tax,
             'sales_discount_sum' => (float) $salesAgg->discount,
             'sales_shipping_sum' => (float) $salesAgg->shipping,
+            'sales_order_tax_sum' => $salesFig['order_tax'],
+            'sales_line_tax_sum' => $salesFig['line_tax'],
+            'sales_net_sum' => $salesFig['net'],
+            'sales_points_discount_sum' => $salesFig['points_discount'],
+            'sales_promotion_discount_sum' => $salesFig['promotion_discount'],
+            'returns_sales_tax_sum' => $saleRetFig['tax'],
+            'returns_sales_shipping_sum' => $saleRetFig['shipping'],
+            'returns_sales_net_sum' => $saleRetFig['net'],
+            // taxes / delivery charges kept by the business's customers' invoices, net of what returns gave back
+            'tax_net_of_returns' => $salesFig['tax'] - $saleRetFig['tax'],
+            'shipping_net_of_returns' => $salesFig['shipping'] - $saleRetFig['shipping'],
             'purchases_sum' => (float) $purchSum,
             'purchases_count' => (int) $purchAgg->nmbr,
             'purchases_tax_sum' => (float) $purchAgg->tax,
@@ -3057,14 +3069,15 @@ class ReportController extends BaseController
             'service_jobs_count' => (int) $service['count'],
             'paiement_service_jobs' => (float) $payService,
 
-            'profit_fifo' => $salesSum - $cogsFIFO - $expenses + $service['profit'],
-            'profit_average_cost' => $salesSum - $avgCostTotal - $expenses + $service['profit'],
+            // Profit = net sales (no tax, no delivery charge) - net returns - COGS - expenses + service profit.
+            'profit_fifo' => $netRevenueGoods - $cogsFIFO - $expenses + $service['profit'],
+            'profit_average_cost' => $netRevenueGoods - $avgCostTotal - $expenses + $service['profit'],
 
             'payment_received' => (float) ($paySales + $payPurchRet + $payService + $payClientOpening),
             'payment_sent' => (float) ($payPurch + $paySaleRet + $expenses + $payProviderOpening),
             'paiement_net' => (float) (($paySales + $payPurchRet + $payService + $payClientOpening) - ($payPurch + $paySaleRet + $expenses + $payProviderOpening)),
 
-            'total_revenue' => (float) ($salesSum - $saleRetSum + $service['revenue']),
+            'total_revenue' => (float) ($netRevenueGoods + $service['revenue']),
 
             'expenses_by_category' => $expensesByCategory,
         ];
