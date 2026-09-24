@@ -10262,17 +10262,21 @@ public function draftInvoices(Request $request)
         // => Dm = (P/100) * (S0 + Dp) / (1 - P/100)
         //
         // We compute that in SQL when discount method is percentage, else fall back to fixed amount.
+        // Audit Batch 4 (M15): the promotion discount is a header discount too, and it is applied BEFORE the
+        // percentage is worked back to money (order: % discount, points, promotion), so it is part of the base.
         $headerManualExpr = "
         CASE
-            WHEN s.discount IS NULL THEN 0
+            WHEN s.discount IS NULL THEN COALESCE(s.promotion_discount,0)
             WHEN (s.discount_Method IN ('1','percent','percentage','%') OR s.discount_Method = 1)
             THEN
                 (COALESCE(s.discount,0) / 100.0)
                 * (
-                    (COALESCE(s.GrandTotal,0) - COALESCE(s.TaxNet,0) - COALESCE(s.shipping,0) + COALESCE(s.discount_from_points,0))
+                    (COALESCE(s.GrandTotal,0) - COALESCE(s.TaxNet,0) - COALESCE(s.shipping,0)
+                        + COALESCE(s.discount_from_points,0) + COALESCE(s.promotion_discount,0))
                 )
                 / NULLIF(1 - (COALESCE(s.discount,0) / 100.0), 0)
-            ELSE COALESCE(s.discount,0)
+                + COALESCE(s.promotion_discount,0)
+            ELSE COALESCE(s.discount,0) + COALESCE(s.promotion_discount,0)
         END
         ";
 
@@ -10407,78 +10411,72 @@ public function draftInvoices(Request $request)
             $order = 'date_time';
         }
 
+        // Audit Batch 4 (M16): tax is what the invoices really carry - line tax PLUS the order (header) tax - and the
+        // taxable base is the sale's net amount (GrandTotal - tax - delivery charge). Before, only line tax was
+        // reported, so the total never tied to the P&L or to SUM(sales.TaxNet). Date filter is sargable.
         $dateExpr = "COALESCE(CONCAT(s.date,' ',IFNULL(s.time,'00:00:00')), s.created_at)";
         $dExpr = 'DATE(COALESCE(s.date, DATE(s.created_at)))';
-        $between = [$start->toDateTimeString(), $end->toDateTimeString()];
+        $dateFrom = $start->toDateString();
+        $dateTo = $end->toDateString();
 
-        // === expressions (paste from block above) ===
-        $unitSubtotalExpr = 'COALESCE(sd.price,0)';
-        $discountPerUnitExpr = "
-        CASE
-            WHEN sd.discount IS NULL THEN 0
-            WHEN (sd.discount_method IN ('fixed','amount','value') OR sd.discount_method = 2) 
-            THEN COALESCE(sd.discount,0)
-            ELSE COALESCE(sd.price,0) * COALESCE(sd.discount,0) / 100
-        END
-        ";
-        $unitAfterDiscExpr = "GREATEST( COALESCE(sd.price,0) - ($discountPerUnitExpr), 0 )";
-        $rateExpr = 'COALESCE(sd.TaxNet,0) / 100';
-        $taxPerUnitExpr = "($unitAfterDiscExpr) * ($rateExpr)";
-        $basePerUnitExpr = "
-        CASE
-            WHEN (sd.tax_method IN ('2','Inclusive')) 
-            THEN GREATEST(($unitAfterDiscExpr) - ($taxPerUnitExpr), 0)
-            ELSE ($unitAfterDiscExpr)
-        END
-        ";
-        $qtyExpr = 'COALESCE(sd.quantity,0)';
-        $taxableBaseExpr = "($basePerUnitExpr) * $qtyExpr";
-        $taxAmountExpr = "($taxPerUnitExpr) * $qtyExpr";
+        $applyFilters = function ($q) use ($dateFrom, $dateTo, $search) {
+            $q->whereNull('s.deleted_at')
+                ->where('s.statut', \App\Support\Reporting\SalesFigures::SALE_STATUS)
+                ->whereBetween('s.date', [$dateFrom, $dateTo]);
+            if ($search !== '') {
+                $q->where(function ($qq) use ($search) {
+                    $qq->whereIn('s.user_id', DB::table('users')->where('username', 'LIKE', "%{$search}%")->select('id'))
+                        ->orWhere('s.id', 'LIKE', "%{$search}%");
+                });
+            }
 
-        $base = DB::table('sale_details as sd')
-            ->join('sales as s', 's.id', '=', 'sd.sale_id')
-            ->leftJoin('users as u', 'u.id', '=', 's.user_id')
-            ->whereNull('s.deleted_at')
-            ->where('s.statut', 'completed')
-            ->whereBetween(DB::raw($dateExpr), $between);
+            return $q;
+        };
 
-        if ($search !== '') {
-            $base->where(function ($q) use ($search) {
-                $q->where('u.username', 'LIKE', "%{$search}%")
-                    ->orWhere('s.id', 'LIKE', "%{$search}%");
-            });
-        }
+        $lineTaxPerSale = DB::table('sale_details as d')
+            ->selectRaw('d.sale_id, SUM('.\App\Support\Reporting\SalesFigures::lineTaxSql('d').') AS lt')
+            ->whereIn('d.sale_id', $applyFilters(DB::table('sales as s'))->select('s.id'))
+            ->groupBy('d.sale_id');
 
-        // Totals for filtered range
+        $base = $applyFilters(
+            DB::table('sales as s')
+                ->leftJoinSub($lineTaxPerSale, 'l', 'l.sale_id', '=', 's.id')
+                ->leftJoin('users as u', 'u.id', '=', 's.user_id')
+        );
+
+        $taxExpr = '(COALESCE(l.lt,0) + COALESCE(s.TaxNet,0))';
+        $baseExpr = "(COALESCE(s.GrandTotal,0) - COALESCE(s.shipping,0) - $taxExpr)";
+
         $totalsRow = (clone $base)
-            ->selectRaw("COALESCE(SUM($taxableBaseExpr),0) as base_total")
-            ->selectRaw("COALESCE(SUM($taxAmountExpr),0)   as tax_total")
+            ->selectRaw("COALESCE(SUM($baseExpr),0) as base_total")
+            ->selectRaw("COALESCE(SUM($taxExpr),0) as tax_total")
             ->first();
+
+        // Tax handed back through received sale returns in the same period (same shared definition).
+        $returnFig = \App\Support\Reporting\SalesFigures::saleReturns(fn ($q) => $q->whereBetween('date', [$dateFrom, $dateTo]));
 
         $totals = [
             'base' => (float) ($totalsRow->base_total ?? 0),
             'tax' => (float) ($totalsRow->tax_total ?? 0),
+            'returns_tax' => $returnFig['tax'],
+            'net_tax' => (float) ($totalsRow->tax_total ?? 0) - $returnFig['tax'],
         ];
 
         // Timeseries per day
         $timeseries = (clone $base)
             ->selectRaw("$dExpr as d")
-            ->selectRaw("COALESCE(SUM($taxableBaseExpr),0) as taxable_base")
-            ->selectRaw("COALESCE(SUM($taxAmountExpr),0)   as tax_collected")
+            ->selectRaw("COALESCE(SUM($baseExpr),0) as taxable_base")
+            ->selectRaw("COALESCE(SUM($taxExpr),0) as tax_collected")
             ->groupBy('d')->orderBy('d', 'asc')->get();
 
         // Table: one row per sale
         $tableBase = (clone $base)
-            ->groupBy('s.id', 'u.username', 's.date', 's.time', 's.created_at')
             ->selectRaw('s.id as sale_id')
             ->selectRaw("$dateExpr as dt")
             ->selectRaw('COALESCE(u.username,"—") as user_name')
-            ->selectRaw("COALESCE(SUM($taxableBaseExpr),0) as taxable_base")
-            ->selectRaw("COALESCE(SUM($taxAmountExpr),0)   as tax_collected")
-            ->selectRaw("CASE WHEN SUM($taxableBaseExpr)=0 
-                    THEN NULL 
-                    ELSE (SUM($taxAmountExpr)/SUM($taxableBaseExpr))*100 
-                END as effective_rate");
+            ->selectRaw("$baseExpr as taxable_base")
+            ->selectRaw("$taxExpr as tax_collected")
+            ->selectRaw("CASE WHEN $baseExpr = 0 THEN NULL ELSE ($taxExpr / $baseExpr) * 100 END as effective_rate");
 
         $totalRows = DB::query()->fromSub($tableBase, 'x')->count();
         $sortCol = $order === 'date_time' ? 'dt' : $order;
