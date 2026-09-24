@@ -20,6 +20,7 @@ class Kernel extends ConsoleKernel
         'App\\Console\\Commands\\WooCommercePushProducts',
         'App\Console\Commands\SendMeetingReminders',
         'App\Console\Commands\ProcessScheduledCampaigns',
+        'App\Console\Commands\CostingRebuild',
     ];
 
     /**
@@ -42,6 +43,11 @@ class Kernel extends ConsoleKernel
         // after 1 month idle, Xero's after 60 days. A daily authenticated ping
         // refreshes them long before either cliff.
         $schedule->command('integrations:keep-alive')->daily()->withoutOverlapping();
+
+        // If Moving Average costing is on, catch anything the readers' own 30s TTL hasn't gotten to yet (a quiet
+        // store with no report views overnight): a nightly full fingerprint verification. No-op while costing is
+        // off (see InventoryCostingService::isActive / CostingRebuild --verify).
+        $schedule->command('costing:rebuild --verify')->daily()->withoutOverlapping();
 
         // Nightly Google Sheets snapshot when auto-export is enabled (kept off
         // peak hours; full-tab rewrites can take a while on big datasets).
