@@ -53,6 +53,18 @@ class SalesFigures
         return self::figures('sales', 'sale_details', 'sale_id', self::SALE_STATUS, $scope, true);
     }
 
+    /** Received purchases: same shape (tax / shipping / net) so purchase-side reports use the same arithmetic. */
+    public static function purchases(?callable $scope = null): array
+    {
+        return self::figures('purchases', 'purchase_details', 'purchase_id', 'received', $scope, false);
+    }
+
+    /** Completed purchase returns. */
+    public static function purchaseReturns(?callable $scope = null): array
+    {
+        return self::figures('purchase_returns', 'purchase_return_details', 'purchase_return_id', 'completed', $scope, false);
+    }
+
     /**
      * @return array{count:int,gross:float,order_tax:float,line_tax:float,tax:float,shipping:float,net:float,discount:float,points_discount:float,promotion_discount:float}
      */

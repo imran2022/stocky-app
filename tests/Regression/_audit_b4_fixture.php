@@ -2,6 +2,8 @@
 // Shared Batch 4 fixture: four sales + two returns on 2030-01-15 with hand-computed totals (see audit_b4_sales_figures.php).
 use Illuminate\Support\Facades\DB;
 
+require_once __DIR__.'/_audit_purch.php';
+
 function b4_fixture(): void
 {
     try { DB::table('settings')->update(['allow_overselling' => 1]); } catch (Throwable $e) {}
@@ -30,4 +32,15 @@ function b4_fixture(): void
     };
     $ins('received', 100); $ins('pending', 77);
 
+
+    // P: received purchase - 10 x 10 with 10% exclusive line tax (110, line tax 10), fixed discount 10, shipping 5 -> 105
+    [$c, $b] = call(CT_P, 'store', pHdr(3, ['date' => $D, 'discount' => 10, 'shipping' => 5, 'GrandTotal' => 105,
+        'details' => [array_merge(pl(4, 10, 10), ['tax_percent' => 10, 'subtotal' => 110])]]));
+    check('purchase P created', $c == 200, "$c $b");
+    // purchase returns: 30 completed counts, 20 pending does not
+    foreach ([['completed', 30], ['pending', 20]] as [$st, $gt]) {
+        $id = DB::table('purchase_returns')->insertGetId(['Ref' => 'PR-B4-'.$st, 'date' => $D, 'provider_id' => 1, 'warehouse_id' => 3, 'user_id' => 2, 'statut' => $st,
+            'GrandTotal' => $gt, 'TaxNet' => 0, 'shipping' => 0, 'discount' => 0, 'tax_rate' => 0, 'paid_amount' => 0, 'payment_statut' => 'unpaid', 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('purchase_return_details')->insert(['purchase_return_id' => $id, 'product_id' => 4, 'quantity' => 1, 'cost' => $gt, 'TaxNet' => 0, 'tax_method' => '1', 'discount' => 0, 'discount_method' => '2', 'total' => $gt, 'created_at' => now(), 'updated_at' => now()]);
+    }
 }

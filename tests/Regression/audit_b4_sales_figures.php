@@ -20,4 +20,10 @@ check('header discount in money = 30 (10% of 300) + 50 = 80, never "10 + 50"', $
 
 $r = SalesFigures::saleReturns($scope);
 check('only the received return counts (1 return, 100)', $r['count'] === 1 && $near($r['gross'], 100) && $near($r['net'], 100), json_encode($r));
+
+$p = SalesFigures::purchases($scope);
+check('purchases: 1 received, gross 105, line tax 10, shipping 5, net 90, discount 10',
+    $p['count'] === 1 && $near($p['gross'], 105) && $near($p['line_tax'], 10) && $near($p['shipping'], 5) && $near($p['net'], 90) && $near($p['discount'], 10), json_encode($p));
+$pr = SalesFigures::purchaseReturns($scope);
+check('purchase returns: only the completed 30 counts', $pr['count'] === 1 && $near($pr['gross'], 30) && $near($pr['net'], 30), json_encode($pr));
 finish('Audit B4 sales figures');

@@ -3435,52 +3435,22 @@ class ReportController extends BaseController
         $openingStockPurchase = $closingStockPurchase - $periodDelta['cost'];
         $openingStockSale = $closingStockSale - $periodDelta['price'];
 
-        // -------------------- Purchases --------------------
-        // Total Purchase (Excl. tax, Discount) - Using TaxNet and discount
-        $purchaseBase = Purchase::whereNull('deleted_at')
-            ->where('statut', 'received')
-            ->whereBetween('date', [$start, $end])
-            ->where($applyWarehouse);
+        // -------------------- Purchases / Sales --------------------
+        // Audit Batch 4 (H1/H2): both sides come from the shared figures, so "excl. tax" really means
+        // net of order tax AND line tax AND delivery charge, GrandTotal is never discounted twice, and a
+        // percent discount is reported in money (never added to taka amounts as a bare "10").
+        $periodScope = fn ($q) => $q->whereBetween('date', [$start, $end])->where($applyWarehouse);
+        $purchaseFig = \App\Support\Reporting\SalesFigures::purchases($periodScope);
+        $saleFig = \App\Support\Reporting\SalesFigures::sales($periodScope);
 
-        $totalPurchaseExclTax = (float) (clone $purchaseBase)
-            ->selectRaw('COALESCE(SUM(GrandTotal - COALESCE(TaxNet, 0) - COALESCE(discount, 0)), 0) as total')
-            ->value('total');
+        $totalPurchaseExclTax = $purchaseFig['net'];
+        $totalPurchaseShippingCharge = $purchaseFig['shipping'];
+        $totalPurchaseDiscount = $purchaseFig['discount'];
 
-        // Total purchase shipping charge
-        $totalPurchaseShippingCharge = (float) (clone $purchaseBase)
-            ->selectRaw('COALESCE(SUM(COALESCE(shipping, 0)), 0) as total')
-            ->value('total');
-
-        // Total Purchase discount
-        $totalPurchaseDiscount = (float) (clone $purchaseBase)
-            ->selectRaw('COALESCE(SUM(COALESCE(discount, 0)), 0) as total')
-            ->value('total');
-
-        // -------------------- Sales --------------------
-        // Total Sales (Excl. tax, Discount) - Using TaxNet and discount
-        $saleBase = Sale::whereNull('deleted_at')
-            ->where('statut', 'completed')
-            ->whereBetween('date', [$start, $end])
-            ->where($applyWarehouse);
-
-        $totalSalesExclTax = (float) (clone $saleBase)
-            ->selectRaw('COALESCE(SUM(GrandTotal - COALESCE(TaxNet, 0) - COALESCE(discount, 0) - COALESCE(discount_from_points, 0)), 0) as total')
-            ->value('total');
-
-        // Total sell shipping charge
-        $totalSellShippingCharge = (float) (clone $saleBase)
-            ->selectRaw('COALESCE(SUM(COALESCE(shipping, 0)), 0) as total')
-            ->value('total');
-
-        // Total Sell discount (includes discount_from_points for customer rewards)
-        $totalSellDiscount = (float) (clone $saleBase)
-            ->selectRaw('COALESCE(SUM(COALESCE(discount, 0)), 0) as total')
-            ->value('total');
-
-        // Total customer reward (discount_from_points)
-        $totalCustomerReward = (float) (clone $saleBase)
-            ->selectRaw('COALESCE(SUM(COALESCE(discount_from_points, 0)), 0) as total')
-            ->value('total');
+        $totalSalesExclTax = $saleFig['net'];
+        $totalSellShippingCharge = $saleFig['shipping'];
+        $totalSellDiscount = $saleFig['discount'];
+        $totalCustomerReward = $saleFig['points_discount'];
 
         // -------------------- Returns --------------------
         // Total Sell Return
