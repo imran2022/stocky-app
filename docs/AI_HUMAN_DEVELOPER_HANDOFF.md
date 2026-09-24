@@ -39,6 +39,13 @@ custom behavior.
 
 ## Non-negotiable business/technical contracts
 
+- Audit Batches 1-5 (2026-09-24) are part of the baseline. Sales/tax/shipping/discount/net figures come ONLY from
+  `App\Support\Reporting\SalesFigures`; payments are recomputed only through `App\Support\PaymentReconciler`; stock
+  changes are guarded by `StockGuard` / `StockDocumentRules`. Only completed sales / received purchases / received sale
+  returns / completed purchase returns count in reports and balances. Do not re-implement these figures inside a
+  controller. Hook list and vendor-merge procedure: `docs/AUDIT_MERGE_GUIDE.md`; details in `CUSTOMIZATIONS.md`
+  "Audit Batches 1-5".
+
 - Use small SAFE overlays. Never delete the existing application tree for a
   routine patch.
 - Preserve the current customized 5.8 baseline. Full vendor replacement can

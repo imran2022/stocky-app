@@ -2396,3 +2396,25 @@ This supplements the in-depth Build O1–O9 record appended to
       `php artisan test --filter=SaleTotalsGuardTest` before deployment.
 - [ ] Run `npm run build:admin` on the deployment source; no prebuilt assets are
       included in this task.
+
+## 36. Audit Batches 1-5 — calculation, payment and security hardening
+
+- [ ] Sale/POS: tamper a line subtotal or Grand Total in the request; it is refused and nothing is stored.
+- [ ] Sale return / purchase return larger than the original quantity or price is refused; refund never exceeds paid.
+- [ ] A sale cannot go below zero stock; adjustment, transfer and purchase return cannot make stock negative.
+- [ ] A deleted document cannot be edited, deleted again, approved or paid.
+- [ ] Payment add/edit/delete on sale, purchase and returns: paid amount, status and due always equal the payment rows;
+      overpayment is refused.
+- [ ] Edit a sale/purchase/return so the total is below what is already paid: refused with a message, stock unchanged.
+- [ ] Pending sale/purchase return does not change customer/supplier balance, client brief, public invoice or today's
+      summary; received/completed returns do.
+- [ ] Dashboard, Profit & Loss, Analytics, Tax summary, Discount summary and the top-bar Today's summary agree for the same
+      period (completed only; net = total - tax - shipping - returns).
+- [ ] Sell a product in a carton/unit: profit cost (COGS) uses base-unit quantity and nets received returns.
+- [ ] Cash Flow table and chart show the same entries; return refunds appear.
+- [ ] A warehouse-limited user cannot see another warehouse by changing warehouse_id.
+- [ ] User without System Settings cannot upload/enable a module, clear cache, edit QuickBooks/custom fields/storefront
+      pages, or receive integration API keys.
+- [ ] `php artisan migrate` ran (14 `idx_b5_*` indexes exist); `php artisan optimize:clear` ran; Ctrl+F5 done.
+- [ ] Run `tests/run_regression.sh`; only the 12 documented harness-only `build_*` scripts may fail.
+- [ ] After a vendor upgrade, follow `docs/AUDIT_MERGE_GUIDE.md` and re-run the regression suite.

@@ -32,6 +32,7 @@ Size = lines added / removed against the pre-audit version.
 | `Http/Controllers/Payment{Sales,Purchases,SaleReturns,PurchaseReturns}Controller.php` | 20-40 lines each | `PaymentReconciler::sync*` / `assertWithinDue` calls |
 | `Http/Controllers/PosController.php`, `AdjustmentController.php`, `TransferController.php`, `CashRegisterController.php`, `QuotationsController.php` | 2-45 lines | stock and cash guards |
 | `Http/Controllers/ModuleSettingsController.php`, `SettingsController.php`, `QuickBooksController.php`, `CustomFieldController.php`, `Api/Store/PagesApiController.php`, `WooCommerceSyncController.php` | 1-13 lines | permission checks that were missing (module upload, cache clear, integration secrets) |
+| `Http/Controllers/ClientController.php`, `ProvidersController.php`, `PublicInvoiceController.php`, `TodaySummaryController.php`, `SalesController.php` (customer figures) | 1-60 lines | balances count only received sale returns / completed purchase returns; Today's summary rebuilt on `SalesFigures` + shared COGS |
 | `Traits/CalculatesCogsAndAverageCost.php` | +118 / -57 | COGS in base units, sale returns netted |
 | `Services/Custom/PurchaseOrderReceiptService.php`, `Support/UniqueRefGenerator.php` | small | GRN line checks, reference collision retry |
 | `routes/api.php` | -5 | dead routes and the public `products_clean_names` route removed |

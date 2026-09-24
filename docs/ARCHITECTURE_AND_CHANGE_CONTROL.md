@@ -37,6 +37,12 @@ Browser/PWA
 
 ## Data and authorization conventions
 
+- Reporting money (sales, tax, shipping, discount, net, COGS) has one source: `Support/Reporting/SalesFigures`,
+  `Support/Reporting/CashFlowFigures` and `Traits/CalculatesCogsAndAverageCost`. A new report must call them, not
+  re-aggregate `sales`. Payment totals/status: `Support/PaymentReconciler`. Only completed/received documents count.
+- Anything that changes settings, modules, integrations or their secrets must check the `setting_system` permission
+  (`authorizeForUser($user, 'update', Setting::class)`).
+
 - Many legacy models use a `deleted_at` column without Laravel's `SoftDeletes`
   trait. Do not assume a global scope; add `whereNull('deleted_at')` explicitly
   when business rules require active rows.

@@ -5040,3 +5040,55 @@ without a bump. Test: `build_p2_pos_search_enter_guard.php`.
   `tests/Regression/build_q3_sale_totals_guard.cjs`.
 - Source-only change: no migration, no `PosPage.vue` change, no compiled assets,
   and `public/sw.js` remains v14.
+
+## Audit Batches 1-5 — correctness and security hardening (2026-09-24)
+
+Goal (owner's rule): stock, sales, payments, dues, purchases, reports and inventory calculations must always agree, in
+every module. New logic lives in separate `app/Support` / `app/Support/Reporting` classes; vendor controllers only carry
+small hooks marked `Audit Batch` / `Audit B<n>` so a vendor 5.9 merge stays easy. File-by-file hook list and merge
+procedure: `docs/AUDIT_MERGE_GUIDE.md`. Business decisions confirmed by the owner: only COMPLETED sales / RECEIVED
+purchases / RECEIVED sale returns / COMPLETED purchase returns count anywhere; net sales = GrandTotal - tax - shipping -
+returns; percent discounts are shown in money.
+
+**Batch 1 - sale totals and sale returns.** `SaleTotalsVerifier` recomputes Sales/POS totals on the server (tight
+tolerance). `SaleReturnLimits`: a return can never exceed sold quantity / price / totals, refund is capped.
+
+**Batch 2 - document state and stock.** Deleted documents cannot be edited, re-deleted, approved or paid
+(`LiveDocument`). `StockGuard` / `StockDocumentRules`: no overselling, adjustments/transfers/purchase returns cannot drive
+stock negative, no false "success" on failure.
+
+**Batch 3 - payments, loyalty, cash register.** `PaymentReconciler`: paid amount and payment status are always recomputed
+from payment rows; overpayment refused; a card-payment edit no longer drains the account. Loyalty redemption validated
+(`LoyaltyRedemption`). Cash register close expects only cash actually received/refunded (`CashRegisterCash`). Loyalty
+report enforces its permission. Ref collision retry (`UniqueRefGenerator`). GRN against a PO rejects non-positive and
+unlinked lines.
+
+**Batch 4 - reports.** `Reporting/SalesFigures` is the ONE definition of sales / line+order tax / shipping / discount /
+net used by Dashboard, Profit & Loss, Analytics, Tax and Discount summaries. COGS converts units and pack sizes to the base
+unit and nets received sale returns. `Reporting/CashFlowFigures`: cash flow includes return refunds, table and chart share
+data. Sales/Purchases/product/customer/supplier/seller/zone/category reports default to completed/received documents.
+A warehouse-limited user can no longer read another warehouse via `warehouse_id`. Inventory valuation paging fixed.
+Fixed 500s: warranty report, orphan sale lines, 4 dead report routes. Vue: Profit & Loss page rebuilt
+(`npm run build:admin`, `public/js` is tracked).
+
+**Batch 5 - payments below paid, security, balances, speed.**
+- `PaymentReconciler::assertTotalCoversPayments` (hook in Sales/Purchases/SalesReturn/PurchasesReturn update): an edit that
+  would make the total smaller than what is already paid is refused. BEHAVIOUR CHANGE: before, a negative due was stored.
+- Security: module upload / enable / disable and Clear Cache need `setting_system`; module zip entries cannot escape the
+  module folder and module names are restricted; QuickBooks (8 methods), custom fields and storefront pages editing need
+  `setting_system`; Woo settings need `view`; integration secrets are returned only to users allowed to update settings;
+  public route `products_clean_names` removed.
+- Pending sale/purchase returns no longer count in customer/supplier balances (`ClientController`, `ProvidersController`,
+  `PublicInvoiceController`, `SalesController` customer figures): only `received` / `completed` returns.
+- `TodaySummaryController` (top-bar drawer) now uses `SalesFigures`, the shared COGS trait and net-of-returns profit, so
+  it matches Dashboard and P&L; sargable date filters.
+- Migration `2026_09_24_000001_add_report_and_stock_indexes.php`: 14 `idx_b5_*` indexes (additive, idempotent).
+  `ReportController` caches unit lookups per request (product report 14s -> 2s at 100k sales).
+- Tests: `tests/Regression/audit_*.php` (seeded stock, money and variant stress with the movement-ledger oracle,
+  unit conversion, edit-below-paid, security endpoints, secrets, query count, pending returns, today summary);
+  run everything with `tests/run_regression.sh`. Twelve older `build_*` scripts fail only in the MySQL test harness
+  (FK cleanup) and pass with `foreign_key_checks=0`; they are not code failures.
+- Known remaining items: P&L / dashboard COGS query is 2.5-3s at 100k sales; `dashboard_data` has no permission gate
+  (product decision); some send-SMS/WhatsApp endpoints lack a permission check; draft->POS conversion and account balance
+  vs payments have no dedicated stress test yet.
+- Deploy: `php artisan migrate` (indexes) then `php artisan optimize:clear`.
