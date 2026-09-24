@@ -428,7 +428,9 @@ class SalesController extends BaseController
                 $request->shipping ?? 0,
                 $request->discount ?? 0,
                 $request->has('discount_Method') ? (string) $request->discount_Method : '2',
-                $request->GrandTotal ?? 0
+                $request->GrandTotal ?? 0,
+                $request->TaxNet ?? 0,
+                $request->discount_from_points ?? 0
             );
             SaleTotalsGuard::checkTaxNet($request->GrandTotal ?? 0, $request->TaxNet ?? 0);
         } catch (\InvalidArgumentException $e) {
@@ -854,7 +856,9 @@ class SalesController extends BaseController
                 $request->shipping ?? 0,
                 $request->discount ?? 0,
                 $request->has('discount_Method') ? (string) $request->discount_Method : '2',
-                $request->GrandTotal ?? 0
+                $request->GrandTotal ?? 0,
+                $request->TaxNet ?? 0,
+                $request->discount_from_points ?? 0
             );
             SaleTotalsGuard::checkTaxNet($request->GrandTotal ?? 0, $request->TaxNet ?? 0);
         } catch (\InvalidArgumentException $e) {
@@ -3649,7 +3653,7 @@ class SalesController extends BaseController
             $warehouses = Warehouse::where('deleted_at', '=', null)->whereIn('id', $warehouses_id)->get(['id', 'name']);
         }
 
-        $clients = Client::where('deleted_at', '=', null)->get(['id', 'name']);
+        $clients = Client::where('deleted_at', '=', null)->get(['id', 'name', 'phone', 'email', 'code']);
         $accounts = Account::where('deleted_at', '=', null)->get(['id', 'account_name']);
         $payment_methods = PaymentMethod::active()->whereNull('deleted_at')->get(['id', 'name']);
         $sales_agents = SalesAgent::where('deleted_at', '=', null)->get(['id', 'name']);
@@ -3667,7 +3671,9 @@ class SalesController extends BaseController
             'point_to_amount_rate' => $settings->point_to_amount_rate,
             'enable_box_qty' => (bool) ($settings->enable_box_qty ?? true),
             'enable_payment_terms' => (bool) ($settings->enable_payment_terms ?? true),
-            'default_payment_term_days' => (int) ($settings->default_payment_term_days ?? PaymentTerms::FALLBACK_SYSTEM_DEFAULT_DAYS),
+            'default_payment_term_days' => max(0, (int) (
+                $settings->default_payment_term_days ?? PaymentTerms::FALLBACK_SYSTEM_DEFAULT_DAYS
+            )),
             'zones' => SaleZone::whereNull('deleted_at')->orderBy('name')->get(['id', 'name']),
             'couriers' => SaleCourier::whereNull('deleted_at')->orderBy('name')->get(['id', 'name']),
             'enable_pos_salesperson_switch' => $salesperson_switch_enabled,
@@ -3927,7 +3933,7 @@ class SalesController extends BaseController
                 $warehouses = Warehouse::where('deleted_at', '=', null)->whereIn('id', $warehouses_id)->get(['id', 'name']);
             }
 
-            $clients = Client::where('deleted_at', '=', null)->get(['id', 'name']);
+            $clients = Client::where('deleted_at', '=', null)->get(['id', 'name', 'phone', 'email', 'code']);
             $sales_agents = SalesAgent::where('deleted_at', '=', null)->get(['id', 'name']);
             $settings = Setting::where('deleted_at', '=', null)->first();
 
@@ -3943,7 +3949,9 @@ class SalesController extends BaseController
                 'point_to_amount_rate' => $settings->point_to_amount_rate,
                 'enable_box_qty' => (bool) ($settings->enable_box_qty ?? true),
                 'enable_payment_terms' => (bool) ($settings->enable_payment_terms ?? true),
-                'default_payment_term_days' => (int) ($settings->default_payment_term_days ?? PaymentTerms::FALLBACK_SYSTEM_DEFAULT_DAYS),
+                'default_payment_term_days' => max(0, (int) (
+                    $settings->default_payment_term_days ?? PaymentTerms::FALLBACK_SYSTEM_DEFAULT_DAYS
+                )),
                 'zones' => SaleZone::whereNull('deleted_at')->orderBy('name')->get(['id', 'name']),
                 'couriers' => SaleCourier::whereNull('deleted_at')->orderBy('name')->get(['id', 'name']),
                 'enable_pos_salesperson_switch' => $salesperson_switch_enabled,
@@ -4136,7 +4144,7 @@ class SalesController extends BaseController
             $warehouses = Warehouse::where('deleted_at', '=', null)->whereIn('id', $warehouses_id)->get(['id', 'name']);
         }
 
-        $clients = Client::where('deleted_at', '=', null)->get(['id', 'name']);
+        $clients = Client::where('deleted_at', '=', null)->get(['id', 'name', 'phone', 'email', 'code']);
         $sales_agents = SalesAgent::where('deleted_at', '=', null)->get(['id', 'name']);
 
         return response()->json([

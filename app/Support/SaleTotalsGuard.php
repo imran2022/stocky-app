@@ -31,9 +31,8 @@ namespace App\Support;
  *   wildly disconnected from the quantity/price/discount/tax the SAME
  *   request also submitted.
  * - The header GrandTotal must equal the sum of the (now validated) line
- *   totals, minus the header discount, plus shipping — this part is exact
- *   arithmetic, not a tolerance band, since that relationship is a
- *   definition, not a pricing policy choice.
+ *   totals, minus the header and loyalty-point discounts, plus order tax and
+ *   shipping. This deliberately mirrors resources/src/lib/lineCalc.js.
  * - TaxNet must be a plausible amount for that GrandTotal (0 ≤ TaxNet ≤
  *   GrandTotal), which is what actually catches a nonsense value like
  *   777.777 once GrandTotal itself has been brought back to a sane number.
@@ -114,7 +113,7 @@ class SaleTotalsGuard
 
     /**
      * Validate the header GrandTotal against the (already-validated) sum
-     * of line totals, the header discount, and shipping. This relationship
+     * of line totals, discounts, order tax, and shipping. This relationship
      * is exact — not a tolerance band beyond ordinary float rounding.
      *
      * @throws \InvalidArgumentException
@@ -124,7 +123,9 @@ class SaleTotalsGuard
         $shipping,
         $discount,
         $discountMethod,
-        $submittedGrandTotal
+        $submittedGrandTotal,
+        $orderTax = 0,
+        $pointsDiscount = 0
     ): void {
         $sum = (float) $lineTotalsSum;
         $shipping = max(0.0, (float) $shipping);
@@ -132,15 +133,20 @@ class SaleTotalsGuard
         $discountMethod = (string) $discountMethod;
 
         $discountAmount = $discountMethod === '1'
-            ? $sum * (min($discount, 100) / 100)
-            : min($discount, $sum);
+            ? round($sum * (min($discount, 100) / 100), 2)
+            : round(min($discount, $sum), 2);
 
-        $expected = max(0.0, $sum - $discountAmount) + $shipping;
+        $remaining = max(0.0, $sum - $discountAmount);
+        $pointsDiscount = round(min(max(0.0, (float) $pointsDiscount), $remaining), 2);
+        $afterDiscount = round($remaining - $pointsDiscount, 2);
+        $orderTax = max(0.0, (float) $orderTax);
+
+        $expected = round($afterDiscount + $orderTax + $shipping, 2);
         $submitted = (float) $submittedGrandTotal;
 
         if (abs($submitted - $expected) > self::tolerance($expected) + 0.01) {
             throw new \InvalidArgumentException(sprintf(
-                'Grand total %.4f does not match the sum of line totals minus discount plus shipping '.
+                'Grand total %.4f does not match the sum of line totals minus discounts plus order tax and shipping '.
                 '(expected %.4f).',
                 $submitted,
                 $expected

@@ -4983,64 +4983,60 @@ without a bump. Test: `build_p2_pos_search_enter_guard.php`.
 
 ---
 
-## Build Q1 — Create Sale header: Payment Terms, Due Date and Previous Dues (2026-09-24)
+## Build Q1 — Create Sale compact payment-term header (2026-09-24)
 
-**Request:** keep the Create Sale metadata compact by placing Invoice Date,
-Customer, Payment Term, Due Date and Warehouse on one desktop row. The Payment
-Term controls must disappear completely when the existing feature switch is
-off. When the selected customer already owes money, show that amount without
-changing any sale, ledger, payment-term or credit-limit calculation.
+- Create/Edit Sale top card is responsive and keeps Date, Customer, Payment
+  Term, Due Date and Warehouse in one desktop row while stacking safely on
+  mobile.
+- Payment Term/Custom Days/Due Date were removed from the lower calculation
+  section to prevent duplication.
+- When Payment Terms is disabled, those controls disappear and the remaining
+  Date/Customer/Warehouse fields return to an even three-column layout.
+- The selected customer's positive previous due appears beside Customer in
+  base currency; zero/credit balances remain hidden.
+- Due-date preview now uses the actual backend system default rather than a
+  hardcoded seven-day fallback.
+- No `PosPage.vue` change; `public/sw.js` remains `stocky-pwa-v14`.
 
-### Implementation
+## Build Q2 — Zone/Area & Courier management + customer contact search (2026-09-24)
 
-- `resources/src/pages/sales/SaleForm.vue`
-  - Moved the existing invoice-level Payment Term selector and Due Date preview
-    from the lower tax/discount metadata card into the top sale metadata card.
-  - Desktop widths are `4 + 6 + 5 + 4 + 5 = 24` for Date, Customer, Payment
-    Term, Due Date and Warehouse. Tablet/mobile uses Ant Design's responsive
-    wrapping; no horizontal page overflow is introduced.
-  - When `enable_payment_terms` is false, both term fields are absent and the
-    original Date/Customer/Warehouse three-column (`8 + 8 + 8`) layout returns.
-  - Custom term days remain supported inline beside the preset selector. The
-    preset list contains one `7 Days` option and otherwise retains Immediate,
-    15 Days, 30 Days and Custom.
-  - Added a compact, positive-only `Previous Dues` badge beside the Customer
-    label. It uses the already-fetched `clients/{id}/brief.netBalance`, the same
-    canonical aggregate used by Customer Ledger and the existing credit-limit
-    check. Zero and negative/credit balances are hidden. The value is formatted
-    in base currency because customer receivables are aggregate base amounts,
-    not amounts in the current invoice's optional display currency.
-  - Due Date preview now uses the configured system default returned by the
-    server when neither invoice nor customer has an override. Previously the
-    preview fell back visually to a hard-coded 7 days even when Settings used a
-    different value; server save logic was already correct.
-- `app/Http/Controllers/SalesController.php`
-  - Added `default_payment_term_days` to the existing create/edit bootstrap
-    payloads, using `PaymentTerms::FALLBACK_SYSTEM_DEFAULT_DAYS` only when the
-    settings value is unavailable. No sale persistence or calculation path was
-    changed.
+- Added Sales-menu pages for Zones / Areas and Couriers using the existing app
+  shell, PageHeader, DataTable preferences, responsive modal and permissions.
+- Both pages provide server-side name search, pagination, safe allowlisted
+  sorting, active-sale usage count, created/edit workflow and last-updated data.
+- Existing inline creation on Create/Edit Sale, POS Sales and Shipments remains
+  unchanged. Page-created values automatically appear in those selectors and
+  inline-created values appear on the management pages.
+- Extracted canonical normalization, case-insensitive duplicate resolution,
+  soft-delete restoration, unique-race handling and collision-safe rename into
+  `App\Services\SaleLookupService`; controllers do not duplicate this logic.
+- Rename requires `Sales_edit`. Read/create access continues to match the
+  existing Sale/POS/Shipment workflows. Delete/archive was deliberately not
+  exposed because the requested scope is create/edit/update and historical
+  references need a separate retention decision.
+- Create/Edit Sale customer options now include phone, email and customer code;
+  search matches all four identifiers (including name) and shows contact detail
+  in the dropdown without changing the selected label or `onClientChange()`.
+- The contact search remains in-memory over the already-loaded customer list:
+  no request per keystroke and no N+1 query. The bootstrap query selects four
+  additional scalar columns only.
+- Detailed developer contract, risk notes and smoke test:
+  `docs/BUILD_Q2_SALE_ZONE_COURIER_MANAGEMENT.md`.
+- No migration and no `PosPage.vue` change; service worker remains v14.
 
-### Logic and risk notes
+## Build Q3 — Sale create/edit totals-guard correction (2026-09-24)
 
-- No new financial formula was introduced, so no new Service class is needed:
-  Payment Term resolution continues to live in `App\Support\PaymentTerms`, and
-  Previous Dues continues to come from `ClientController::clientBrief()`.
-- `PosPage.vue` was not touched, therefore `public/sw.js` remains
-  `stocky-pwa-v14`; a service-worker version bump is neither required nor
-  appropriate for this admin Sale Form-only change.
-- Selecting another customer retains the existing behavior: customer context
-  (points, credit limit, net balance and customer payment term) is reloaded.
-- Existing create/edit API keys are additive and backward-compatible.
-
-### Regression and build verification
-
-- Added
-  `tests/Regression/build_q1_sale_form_payment_terms_header.cjs`. It verifies
-  top-card placement/order, single-instance controls, feature-toggle gating,
-  disabled-layout collapse, positive-only base-currency dues, configured
-  system-default preview wiring and both backend bootstrap keys.
-- `node tests/Regression/build_q1_sale_form_payment_terms_header.cjs` — PASS.
-- Existing `build_m2_payment_terms_fixes_and_due_date_display.cjs` — PASS.
-- `npm run build:admin` — PASS.
-- PHP CLI is not installed in the packaging environment, so PHP lint and
-  database-backed tests remain mandatory on staging before deployment.
+- Corrected `SaleTotalsGuard` so header validation mirrors the Sale form:
+  line totals minus manual discount and loyalty-points discount, plus order tax
+  and shipping.
+- Fixes valid Create/Edit Sale submissions with non-zero Order Tax; previously
+  `TaxNet` appeared in the UI Grand Total but the backend guard omitted it and
+  returned HTTP 422. Loyalty-point discounts had the same latent mismatch and
+  are covered by the same correction.
+- The guard still validates every line, rejects disconnected/tampered grand
+  totals, and performs the existing TaxNet plausibility check. No stored sale,
+  stock, payment, COGS, POS, return, quotation or purchase logic changed.
+- Tests: `tests/Unit/SaleTotalsGuardTest.php` and
+  `tests/Regression/build_q3_sale_totals_guard.cjs`.
+- Source-only change: no migration, no `PosPage.vue` change, no compiled assets,
+  and `public/sw.js` remains v14.

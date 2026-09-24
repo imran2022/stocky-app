@@ -2354,39 +2354,45 @@ This supplements the in-depth Build O1–O9 record appended to
       MODIFY expires_at DATETIME NOT NULL;`.
 - [ ] GitHub repository visibility is Private.
 
-## 33. Build Q1 — Create Sale header Payment Terms and Previous Dues
+## 33. Build Q1 — Create Sale payment-term header
 
-- [ ] In Settings → Features, enable Payment Terms & Due Dates, then open
-      Sales → Create Sale on a desktop at 1200px or wider. Confirm Date,
-      Customer, Payment Term, Due Date and Warehouse appear in that order on a
-      single row.
-- [ ] Choose a customer with its own payment term. Confirm the selector says
-      `Customer default (...)` and Due Date equals Invoice Date plus that term.
-- [ ] Choose a customer without an override. Confirm the selector displays the
-      actual configured system default and Due Date uses it (test with a system
-      default other than 7 days).
-- [ ] Select Immediate, 7 Days, 15 Days and 30 Days; confirm Due Date updates.
-      Select Custom, enter a non-preset number, and confirm the inline days
-      input remains visible and Due Date updates.
-- [ ] Choose a customer whose Customer Ledger closing balance is positive.
-      Confirm a red Previous Dues badge appears beside the Customer label and
-      exactly matches the ledger/brief balance in base currency.
-- [ ] Choose a zero-balance or credit-balance customer. Confirm the Previous
-      Dues badge is hidden.
-- [ ] Disable Payment Terms & Due Dates. Reload Create Sale and confirm Payment
-      Term and Due Date are absent while Date, Customer and Warehouse return to
-      three equal desktop columns. Save a sale and confirm existing OFF-state
-      backend behavior remains unchanged.
-- [ ] Test tablet and mobile widths: fields wrap vertically/readably, Customer
-      quick-add remains clickable, custom days stays inside its field, and no
-      horizontal page overflow appears.
-- [ ] Confirm Tracking Ref, Zone, Courier, totals, payments, credit-limit check,
-      loyalty points, product lines and sale submission behave exactly as
-      before.
-- [ ] Run
-      `node tests/Regression/build_q1_sale_form_payment_terms_header.cjs` and
-      `node tests/Regression/build_m2_payment_terms_fixes_and_due_date_display.cjs`.
-- [ ] Run PHP lint and the database-backed Payment Terms regression suite on a
-      staging/test copy, then run `npm run build:admin` before deployment.
-- [ ] `PosPage.vue` was not changed; confirm `public/sw.js` remains v14 rather
-      than bumping it for an unrelated admin form change.
+- [ ] Payment Terms enabled: Date, Customer, Payment Term, Due Date and
+      Warehouse share one desktop row and stack cleanly on mobile.
+- [ ] Payment Terms disabled: term/due controls are absent and Date/Customer/
+      Warehouse use equal widths.
+- [ ] Custom term input works; Due Date follows invoice/customer/system term.
+- [ ] Positive previous due appears in base currency; zero/credit is hidden.
+- [ ] Create, Edit and quotation conversion remain functional.
+
+## 34. Build Q2 — Zone/Area, Courier and customer search
+
+- [ ] Sales menu contains Zones / Areas and Couriers; both routes work on
+      desktop/mobile and respect DataTable preferences.
+- [ ] Search, sorting, pagination, usage count and last-updated display work.
+- [ ] Page create immediately becomes available to Create Sale/Shipment/POS
+      workflows on their next data load.
+- [ ] Inline create still works and its value appears on the management page.
+- [ ] Rename preserves linked historical/current sales.
+- [ ] Blank, too-long and case/space-equivalent duplicate names are rejected.
+- [ ] User without `Sales_edit` cannot rename; legitimate Sale/POS/Shipment
+      users retain their existing read/inline-create behavior.
+- [ ] Customer search matches name, phone, email and code in Create, Edit and
+      quotation-conversion modes.
+- [ ] Selecting a searched customer still loads previous due, payment terms,
+      loyalty points and credit-limit behavior.
+- [ ] `build_q2_sale_lookup_management.cjs` and existing payment-term regression
+      pass; staging DB/API/browser smoke test completed before deployment.
+
+## 35. Build Q3 — Sale totals validation correction
+
+- [ ] Edit an existing sale with percentage order discount, non-zero Order Tax
+      and shipping; the unchanged valid totals save without HTTP 422.
+- [ ] Create a sale with the same combination; it saves successfully.
+- [ ] Create/Edit with a valid loyalty-points discount; tax is calculated after
+      both discounts and the sale saves.
+- [ ] Tamper with a line subtotal or Grand Total in an API request; the guard
+      still returns HTTP 422 and persists nothing.
+- [ ] Run `node tests/Regression/build_q3_sale_totals_guard.cjs` and
+      `php artisan test --filter=SaleTotalsGuardTest` before deployment.
+- [ ] Run `npm run build:admin` on the deployment source; no prebuilt assets are
+      included in this task.

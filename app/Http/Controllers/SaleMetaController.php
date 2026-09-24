@@ -6,7 +6,7 @@ use App\Models\Sale;
 use App\Models\SaleCourier;
 use App\Models\SaleZone;
 use App\Models\Shipment;
-use Illuminate\Database\QueryException;
+use App\Services\SaleLookupService;
 use Illuminate\Http\Request;
 
 /**
@@ -27,6 +27,13 @@ use Illuminate\Http\Request;
  */
 class SaleMetaController extends Controller
 {
+    protected $lookups;
+
+    public function __construct(SaleLookupService $lookups)
+    {
+        $this->lookups = $lookups;
+    }
+
     /**
      * Read access is intentionally broad enough for every existing workflow
      * that consumes Sale metadata, while excluding unrelated authenticated
@@ -66,70 +73,10 @@ class SaleMetaController extends Controller
         abort_unless($allowed, 403);
     }
 
-    /**
-     * Normalize only harmless presentation whitespace. We deliberately do not
-     * force lowercase storage because the first canonical spelling entered by
-     * staff should remain visible in dropdowns/reports.
-     */
-    private function normalizedName(Request $request): string
+    private function authorizeUpdateAccess(Request $request): void
     {
-        $name = preg_replace('/\s+/u', ' ', trim((string) $request->input('name', '')));
-        $request->merge(['name' => $name]);
-        $request->validate(['name' => 'required|string|max:191']);
-
-        return $name;
-    }
-
-    /**
-     * Resolve an active or soft-deleted lookup case-insensitively. TRIM keeps
-     * compatibility with any historical rows that may contain outer spaces.
-     */
-    private function findLookup(string $modelClass, string $name)
-    {
-        return $modelClass::withTrashed()
-            ->whereRaw('LOWER(TRIM(name)) = LOWER(?)', [$name])
-            ->first();
-    }
-
-    /**
-     * Return an existing lookup, restore a soft-deleted one, or insert a new
-     * canonical row. The retry after QueryException handles the normal unique-
-     * key race where two users submit the same new name concurrently.
-     */
-    private function createOrRestoreLookup(string $modelClass, string $name)
-    {
-        $lookup = $this->findLookup($modelClass, $name);
-        if ($lookup) {
-            if ($lookup->trashed()) {
-                $lookup->restore();
-            }
-
-            return $lookup;
-        }
-
-        try {
-            return $modelClass::create(['name' => $name]);
-        } catch (QueryException $e) {
-            // Only swallow a unique/integrity race. Other database failures
-            // must surface normally instead of being hidden by lookup retry.
-            if (! in_array((string) $e->getCode(), ['23000', '23505'], true)) {
-                throw $e;
-            }
-
-            // Existing DB unique(name) remains the final concurrency guard.
-            // If another request won the race, return that row gracefully;
-            // otherwise rethrow the original database error.
-            $lookup = $this->findLookup($modelClass, $name);
-            if ($lookup) {
-                if ($lookup->trashed()) {
-                    $lookup->restore();
-                }
-
-                return $lookup;
-            }
-
-            throw $e;
-        }
+        $user = $request->user('api');
+        abort_unless($user && $user->can('update', Sale::class), 403);
     }
 
     public function index(Request $request)
@@ -145,7 +92,7 @@ class SaleMetaController extends Controller
     public function storeZone(Request $request)
     {
         $this->authorizeCreateAccess($request);
-        $zone = $this->createOrRestoreLookup(SaleZone::class, $this->normalizedName($request));
+        $zone = $this->lookups->createZone((string) $request->input('name', ''));
 
         return response()->json(['zone' => $zone->only(['id', 'name'])]);
     }
@@ -153,7 +100,55 @@ class SaleMetaController extends Controller
     public function storeCourier(Request $request)
     {
         $this->authorizeCreateAccess($request);
-        $courier = $this->createOrRestoreLookup(SaleCourier::class, $this->normalizedName($request));
+        $courier = $this->lookups->createCourier((string) $request->input('name', ''));
+
+        return response()->json(['courier' => $courier->only(['id', 'name'])]);
+    }
+
+    public function zones(Request $request)
+    {
+        $this->authorizeReadAccess($request);
+        $rows = $this->lookups->zones([
+            'search' => $request->input('search'),
+            'sort_field' => $request->input('SortField'),
+            'sort_type' => $request->input('SortType'),
+            'limit' => $request->input('limit'),
+        ]);
+
+        return response()->json([
+            'zones' => $rows->items(),
+            'totalRows' => $rows->total(),
+        ]);
+    }
+
+    public function couriers(Request $request)
+    {
+        $this->authorizeReadAccess($request);
+        $rows = $this->lookups->couriers([
+            'search' => $request->input('search'),
+            'sort_field' => $request->input('SortField'),
+            'sort_type' => $request->input('SortType'),
+            'limit' => $request->input('limit'),
+        ]);
+
+        return response()->json([
+            'couriers' => $rows->items(),
+            'totalRows' => $rows->total(),
+        ]);
+    }
+
+    public function updateZone(Request $request, SaleZone $zone)
+    {
+        $this->authorizeUpdateAccess($request);
+        $zone = $this->lookups->updateZone($zone, (string) $request->input('name', ''));
+
+        return response()->json(['zone' => $zone->only(['id', 'name'])]);
+    }
+
+    public function updateCourier(Request $request, SaleCourier $courier)
+    {
+        $this->authorizeUpdateAccess($request);
+        $courier = $this->lookups->updateCourier($courier, (string) $request->input('name', ''));
 
         return response()->json(['courier' => $courier->only(['id', 'name'])]);
     }

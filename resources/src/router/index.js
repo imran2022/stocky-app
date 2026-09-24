@@ -99,6 +99,7 @@ const Sales = lazy('Sales', () => import('../pages/sales/Sales.vue'));
 const PosSales = lazy('PosSales', () => import('../pages/sales/PosSales.vue'));
 const SaleDetails = lazy('SaleDetails', () => import('../pages/sales/SaleDetails.vue'));
 const SaleForm = lazy('SaleForm', () => import('../pages/sales/SaleForm.vue'));
+const SaleLookupManager = lazy('SaleLookupManager', () => import('../pages/sales/SaleLookupManager.vue'));
 const Purchases = lazy('Purchases', () => import('../pages/purchases/Purchases.vue'));
 const PurchaseDetails = lazy('PurchaseDetails', () => import('../pages/purchases/PurchaseDetails.vue'));
 const PurchaseForm = lazy('PurchaseForm', () => import('../pages/purchases/PurchaseForm.vue'));
@@ -735,6 +736,8 @@ const routes = [
             { path: 'sales/pos', name: 'pos-sales', component: PosSales, meta: { title: 'POS Sales', permission: 'Sales_view' } },
             { path: 'sales/create', name: 'sale-create', component: SaleForm, meta: { title: 'Add Sale', permission: 'Sales_add' } },
             { path: 'sales/import', name: 'sales-import', component: ImportSales, meta: { title: 'Import Sales', permission: 'Sales_add' } },
+            { path: 'sales/zones', name: 'sale-zones', component: SaleLookupManager, meta: { title: 'Zones / Areas', permission: ['Sales_view', 'Sales_add', 'Sales_edit', 'Pos_view', 'shipment'], lookupType: 'zone' } },
+            { path: 'sales/couriers', name: 'sale-couriers', component: SaleLookupManager, meta: { title: 'Couriers', permission: ['Sales_view', 'Sales_add', 'Sales_edit', 'Pos_view', 'shipment'], lookupType: 'courier' } },
             { path: 'sales/:id(\\d+)/edit', name: 'sale-edit', component: SaleForm, meta: { title: 'Edit Sale', permission: 'Sales_edit' } },
             { path: 'sales/from-quotation/:id(\\d+)', name: 'sale-from-quotation', component: SaleForm, meta: { title: 'Create Sale', permission: 'Sales_add', mode: 'convert' } },
             { path: 'sales/:id(\\d+)', name: 'sale-details', component: SaleDetails, meta: { title: 'Sale Detail', permission: 'Sales_view' } },

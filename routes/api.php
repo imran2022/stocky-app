@@ -1259,8 +1259,12 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     Route::resource('sales', 'SalesController');
     // Custom addition: Tracking Ref / Zone / Courier lookups + bulk import
     Route::get('sale_meta', 'SaleMetaController@index');
+    Route::get('sale_zones', 'SaleMetaController@zones');
     Route::post('sale_zones', 'SaleMetaController@storeZone');
+    Route::put('sale_zones/{zone}', 'SaleMetaController@updateZone');
+    Route::get('sale_couriers', 'SaleMetaController@couriers');
     Route::post('sale_couriers', 'SaleMetaController@storeCourier');
+    Route::put('sale_couriers/{courier}', 'SaleMetaController@updateCourier');
     Route::get('get_import_sales', 'SalesController@get_import_sales');
     Route::post('store_import_sales', 'SalesController@store_import_sales');
     Route::post('preview_import_sales', 'SalesController@preview_import_sales');

@@ -11,31 +11,43 @@
 
     <a-form v-else layout="vertical">
       <a-card size="small" style="margin-bottom: 16px">
-        <a-row :gutter="[16, 0]">
-          <a-col :xs="24" :sm="12" :lg="8" :xl="enablePaymentTerms ? 4 : 8">
+        <a-row :gutter="16">
+          <a-col :xs="24" :md="enablePaymentTerms ? 4 : 8">
             <a-form-item :label="$t('date')" required>
               <a-date-picker v-model:value="sale.date" value-format="YYYY-MM-DD" style="width: 100%" />
             </a-form-item>
           </a-col>
-          <a-col :xs="24" :sm="12" :lg="8" :xl="enablePaymentTerms ? 6 : 8">
+          <a-col :xs="24" :md="enablePaymentTerms ? 6 : 8">
             <a-form-item required>
               <template #label>
-                <span class="customer-field-label">
-                  <span>{{ $t('Customer') }}</span>
-                  <a-tag v-if="previousCustomerDue > 0" color="error" class="previous-due-tag">
-                    {{ $t('Previous_Dues') }}: {{ moneyBase(previousCustomerDue) }}
-                  </a-tag>
-                </span>
+                <span>{{ $t('Customer') }}</span>
+                <a-tag
+                  v-if="selectedClientNetBalance > 0"
+                  color="error"
+                  style="margin-inline-start: 8px; font-weight: 600"
+                >
+                  Previous Dues: {{ moneyBase(selectedClientNetBalance) }}
+                </a-tag>
               </template>
               <div style="display: flex; gap: 8px">
                 <a-select
                   v-model:value="sale.client_id"
-                  show-search option-filter-prop="label"
-                  :placeholder="$t('Choose_Customer')"
+                  show-search
+                  :filter-option="filterClient"
+                  placeholder="Search customer by name, phone or email"
                   :options="clientOptions"
                   style="flex: 1"
                   @change="onClientChange"
-                />
+                >
+                  <template #option="option">
+                    <div class="client-option">
+                      <span class="client-option-name">{{ option.label }}</span>
+                      <span v-if="option.phone || option.email || option.code" class="client-option-meta">
+                        {{ [option.phone, option.email, option.code ? `#${option.code}` : ''].filter(Boolean).join(' · ') }}
+                      </span>
+                    </div>
+                  </template>
+                </a-select>
                 <a-tooltip :title="$t('Quick_Add_Customer')">
                   <a-button @click="quickAddClientOpen = true">
                     <template #icon><PlusOutlined /></template>
@@ -44,17 +56,13 @@
               </div>
             </a-form-item>
           </a-col>
-          <!-- Payment Terms hierarchy, Level 3 (invoice override). Keeping the
-               selector and optional custom-days input in one cell lets Date,
-               Customer, Payment Term, Due Date and Warehouse stay on one
-               desktop row. The whole pair is absent when the feature is off. -->
-          <a-col v-if="enablePaymentTerms" :xs="24" :sm="12" :lg="8" :xl="5">
+          <a-col v-if="enablePaymentTerms" :xs="24" :md="5">
             <a-form-item label="Payment Term">
               <div class="payment-term-control">
-                <a-select v-model:value="paymentTermPreset" style="min-width: 0; flex: 1">
+                <a-select v-model:value="paymentTermPreset" style="width: 100%">
                   <a-select-option value="default">
                     {{ selectedClientPaymentTermDays !== null
-                      ? `Customer default (${paymentTermLabel(selectedClientPaymentTermDays)})`
+                      ? `Use customer default (${paymentTermLabel(selectedClientPaymentTermDays)})`
                       : `System default (${paymentTermLabel(systemDefaultPaymentTermDays)})` }}
                   </a-select-option>
                   <a-select-option value="0">Immediate</a-select-option>
@@ -69,18 +77,17 @@
                   :min="0"
                   :max="3650"
                   placeholder="Days"
-                  aria-label="Custom payment term in days"
-                  class="custom-term-days"
+                  style="width: 92px"
                 />
               </div>
             </a-form-item>
           </a-col>
-          <a-col v-if="enablePaymentTerms" :xs="24" :sm="12" :lg="8" :xl="4">
+          <a-col v-if="enablePaymentTerms" :xs="24" :md="4">
             <a-form-item label="Due Date">
               <a-input :value="dueDatePreview" disabled style="width: 100%" />
             </a-form-item>
           </a-col>
-          <a-col :xs="24" :sm="12" :lg="8" :xl="enablePaymentTerms ? 5 : 8">
+          <a-col :xs="24" :md="enablePaymentTerms ? 5 : 8">
             <a-form-item :label="$t('warehouse')" required>
               <a-select
                 v-model:value="sale.warehouse_id"
@@ -94,7 +101,7 @@
           </a-col>
           <!-- Multi-Currency: entered/displayed amounts are in this currency;
                the model (and the payload) stays in the base currency. -->
-          <a-col v-if="mcEnabled" :xs="24" :sm="12" :lg="8">
+          <a-col v-if="mcEnabled" :xs="24" :md="8">
             <a-form-item :label="$t('Currency')">
               <a-select
                 v-model:value="docCurrencyId"
@@ -766,10 +773,6 @@ const clientIsEligible = ref(false);
 // owe — checked at submit when the sale is not paid in full.
 const selectedClientCreditLimit = ref(0);
 const selectedClientNetBalance = ref(0);
-// The client brief returns the canonical aggregate balance used by the
-// customer ledger and credit-limit check. Only a positive balance is a due;
-// a zero/negative balance means there is nothing to warn about here.
-const previousCustomerDue = computed(() => Math.max(0, Number(selectedClientNetBalance.value) || 0));
 
 // Split payment: one row per method. Empty while the status is pending.
 const payment_lines = ref([]);
@@ -800,7 +803,19 @@ const paymentChange = computed(() => {
   return over > 0 ? over : 0;
 });
 
-const clientOptions = computed(() => clients.value.map(c => ({ value: c.id, label: c.name })));
+const clientOptions = computed(() => clients.value.map(c => ({
+  value: c.id,
+  label: c.name,
+  phone: c.phone || '',
+  email: c.email || '',
+  code: c.code || '',
+  searchText: [c.name, c.phone, c.email, c.code].filter(Boolean).join(' ').toLowerCase(),
+})));
+
+function filterClient(input, option) {
+  return String(option?.searchText || option?.label || '')
+    .includes(String(input || '').trim().toLowerCase());
+}
 
 // Quick Add Customer — legacy appends the new client, selects it, then runs
 // the same selection side effects as picking an existing one.
@@ -1710,43 +1725,29 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.payment-term-control {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.client-option {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.client-option-name {
+  font-weight: 600;
+}
+.client-option-meta {
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .muted {
   color: rgba(0, 0, 0, 0.45);
   font-size: 12px;
-}
-.customer-field-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-.previous-due-tag {
-  margin-inline-end: 0;
-  font-weight: 600;
-  line-height: 20px;
-}
-.payment-term-control {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-}
-.custom-term-days {
-  width: 92px;
-  flex: 0 0 92px;
-}
-@media (max-width: 575px) {
-  .customer-field-label {
-    flex-wrap: wrap;
-    gap: 4px 8px;
-  }
-  .payment-term-control {
-    align-items: stretch;
-  }
-  .custom-term-days {
-    width: 88px;
-    flex-basis: 88px;
-  }
 }
 /* Holds the modal body's height steady while its data loads, so swapping the
    spinner for the form doesn't resize the dialog. */
