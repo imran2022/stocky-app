@@ -433,6 +433,17 @@ class SalesController extends BaseController
                 $request->discount_from_points ?? 0
             );
             SaleTotalsGuard::checkTaxNet($request->GrandTotal ?? 0, $request->TaxNet ?? 0);
+            // Audit Batch 1: exact server-side recomputation (tax_rate, tight tolerance).
+            \App\Support\SaleTotalsVerifier::verify(
+                (array) $request['details'],
+                $request->shipping ?? 0,
+                $request->discount ?? 0,
+                $request->has('discount_Method') ? (string) $request->discount_Method : '2',
+                $request->GrandTotal ?? 0,
+                $request->TaxNet ?? 0,
+                $request->tax_rate ?? 0,
+                $request->discount_from_points ?? 0
+            );
         } catch (\InvalidArgumentException $e) {
             return response()->json([
                 'success' => false,
@@ -861,6 +872,17 @@ class SalesController extends BaseController
                 $request->discount_from_points ?? 0
             );
             SaleTotalsGuard::checkTaxNet($request->GrandTotal ?? 0, $request->TaxNet ?? 0);
+            // Audit Batch 1: exact server-side recomputation (tax_rate, tight tolerance).
+            \App\Support\SaleTotalsVerifier::verify(
+                (array) $request['details'],
+                $request->shipping ?? 0,
+                $request->discount ?? 0,
+                $request->has('discount_Method') ? (string) $request->discount_Method : '2',
+                $request->GrandTotal ?? 0,
+                $request->TaxNet ?? 0,
+                $request->tax_rate ?? 0,
+                $request->discount_from_points ?? 0
+            );
         } catch (\InvalidArgumentException $e) {
             return response()->json([
                 'success' => false,

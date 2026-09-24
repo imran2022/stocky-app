@@ -164,7 +164,7 @@ $goodGrandTotal = ($goodLineTotal * 0.95) + 10; // 5% header discount + shipping
 $goodReq = Request::create('/api/sales', 'POST', [
     'client_id' => $client->id, 'warehouse_id' => $warehouse->id,
     'date' => now()->toDateString(), 'statut' => 'draft', 'notes' => 'Build N1 legit sale',
-    'tax_rate' => 0, 'TaxNet' => 9.45, 'discount' => 5, 'discount_Method' => '1',
+    'tax_rate' => 0, 'TaxNet' => 0, 'discount' => 5, 'discount_Method' => '1',
     'shipping' => 10, 'GrandTotal' => $goodGrandTotal, 'discount_from_points' => 0, 'used_points' => 0,
     'payment' => ['status' => 'pending'],
     'details' => [[

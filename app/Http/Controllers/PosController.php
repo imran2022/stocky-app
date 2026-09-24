@@ -374,6 +374,39 @@ class PosController extends BaseController
         $promotionCodeApplied = trim((string) $request->input('promotion_code', '')) ?: null;
         $appliedPromotions = $promotionResult['applied'] ?? [];
 
+        // Audit Batch 1 (S3): CreatePOS used to trust the client's GrandTotal
+        // and line totals completely. Recompute them server-side (same rules
+        // as SalesController, plus the server-evaluated promotion discount).
+        try {
+            foreach ((array) $request['details'] as $line) {
+                \App\Support\SaleTotalsGuard::checkLine(
+                    $line['quantity'] ?? 0,
+                    $line['Unit_price'] ?? 0,
+                    $line['discount'] ?? 0,
+                    $line['discount_Method'] ?? '2',
+                    $line['tax_percent'] ?? 0,
+                    $line['subtotal'] ?? 0
+                );
+            }
+            \App\Support\SaleTotalsVerifier::verify(
+                (array) $request['details'],
+                $request->shipping ?? 0,
+                $request->discount ?? 0,
+                $request->has('discount_Method') ? (string) $request->discount_Method : '2',
+                $request->GrandTotal ?? 0,
+                $request->TaxNet ?? 0,
+                $request->tax_rate ?? 0,
+                $request->discount_from_points ?? 0,
+                $promotionDiscount
+            );
+        } catch (\InvalidArgumentException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'The submitted totals do not match the line items and were rejected.',
+                'error' => $e->getMessage(),
+            ], 422);
+        }
+
         try {
             $sale = \DB::transaction(function () use ($request, $totalPaid, $saleUuid, $saleAt, $promotionDiscount, $promotionCodeApplied, $appliedPromotions, $walletMethodId) {
                 $helpers = new helpers;
