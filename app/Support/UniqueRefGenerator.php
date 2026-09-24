@@ -55,11 +55,49 @@ class UniqueRefGenerator
                 }
 
                 $lastException = $e;
-                // Loop again: regenerate a fresh Ref on the next iteration.
+                // Audit Batch 3 (H6): inside a transaction the generator reads from the transaction's
+                // own snapshot, so calling it again returns the SAME stale "last Ref" and every retry
+                // collides. Instead, step past the colliding value using locking reads, which always
+                // see the latest committed rows.
+                $generateRef = self::steppingPast($model, (string) $model->Ref);
             }
         }
 
         throw $lastException;
+    }
+
+    /**
+     * Returns a generator that yields the first Ref after $collided that is not yet in the table.
+     * Keeps the prefix, separator and zero padding of the colliding Ref ("SL_0099" -> "SL_0100").
+     */
+    private static function steppingPast(Model $model, string $collided): callable
+    {
+        return function () use ($model, $collided): string {
+            $candidate = $collided;
+            for ($i = 0; $i < 1000; $i++) {
+                $candidate = self::increment($candidate);
+                $taken = $model->newQuery()->getQuery()->newQuery()
+                    ->from($model->getTable())
+                    ->where('Ref', $candidate)
+                    ->lockForUpdate()
+                    ->exists();
+                if (! $taken) {
+                    return $candidate;
+                }
+            }
+
+            return $candidate;
+        };
+    }
+
+    /** "SL_0099" -> "SL_0100"; a Ref with no trailing number gets "_1" appended. */
+    public static function increment(string $ref): string
+    {
+        if (preg_match('/^(.*?)(\d+)$/', $ref, $m)) {
+            return $m[1].str_pad((string) ((int) $m[2] + 1), strlen($m[2]), '0', STR_PAD_LEFT);
+        }
+
+        return $ref.'_1';
     }
 
     /**
