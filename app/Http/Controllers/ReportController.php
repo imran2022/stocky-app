@@ -7314,47 +7314,67 @@ class ReportController extends BaseController
         $warehouse_id = (int) $this->filterWarehouseId($request->warehouse_id);
         $selectedWarehouseIds = $warehouse_id !== 0 ? [$warehouse_id] : $allWarehouseIds;
 
-        // base query + search
-        $productsQuery = Product::with('unit', 'category')
-            ->whereNull('deleted_at')
+        // Audit Batch 4 (H7): the report grain is ONE ROW per product/variant/warehouse that holds a stock
+        // record. Paging, sorting and the row total are done on that grain in SQL. Before, products were paged
+        // (so the row total came from the visible page and broke pagination) and computed columns were sorted
+        // only within the visible page.
+        $rowQuery = DB::table('product_warehouse as pw')
+            ->join('products as p', 'p.id', '=', 'pw.product_id')
+            ->join('warehouses as w', 'w.id', '=', 'pw.warehouse_id')
+            ->leftJoin('product_variants as v', function ($j) {
+                $j->on('v.id', '=', 'pw.product_variant_id')->whereNull('v.deleted_at');
+            })
+            ->whereNull('pw.deleted_at')->whereNull('p.deleted_at')->whereNull('w.deleted_at')
+            ->whereIn('pw.warehouse_id', $selectedWarehouseIds)
+            ->where(function ($q) {
+                // variant products are listed per variant; every other product as a single (variant-less) row
+                $q->where(function ($qq) {
+                    $qq->where('p.type', 'is_variant')->whereNotNull('v.id');
+                })->orWhere(function ($qq) {
+                    $qq->whereRaw("COALESCE(p.type, '') <> 'is_variant'")->whereNull('pw.product_variant_id');
+                });
+            })
             ->when($request->filled('search'), function ($q) use ($request) {
                 $s = $request->search;
                 $q->where(function ($qq) use ($s) {
-                    $qq->where('products.name', 'LIKE', "%{$s}%")
-                        ->orWhere('products.code', 'LIKE', "%{$s}%");
+                    $qq->where('p.name', 'LIKE', "%{$s}%")->orWhere('p.code', 'LIKE', "%{$s}%");
                 });
-            });
+            })
+            ->groupBy('pw.product_id', 'pw.product_variant_id', 'pw.warehouse_id', 'p.code', 'p.name', 'p.cost', 'p.price', 'v.id', 'v.cost', 'v.price')
+            ->select(
+                'pw.product_id', 'pw.product_variant_id', 'pw.warehouse_id',
+                DB::raw('SUM(pw.qte) as qty'),
+                DB::raw('IF(v.id IS NULL, COALESCE(p.cost, 0), COALESCE(v.cost, 0)) as unit_cost'),
+                DB::raw('IF(v.id IS NULL, COALESCE(p.price, 0), COALESCE(v.price, 0)) as unit_price')
+            );
 
-        $totalRows = (clone $productsQuery)->count();
+        $totalRows = (int) DB::query()->fromSub(clone $rowQuery, 'r')->count();
         if ($perPage === -1) {
-            $perPage = $totalRows;
+            $perPage = max($totalRows, 1);
+            $offSet = 0;
         }
 
-        $products = $productsQuery
-            ->orderBy($sqlOrder, $dir ?: 'desc')
+        $sortExpr = [
+            'sku' => 'p.code',
+            'product_name' => 'p.name',
+            'current_quantity' => 'SUM(pw.qte)',
+            'stock_value_cost' => 'SUM(pw.qte) * IF(v.id IS NULL, COALESCE(p.cost, 0), COALESCE(v.cost, 0))',
+            'stock_value_selling' => 'SUM(pw.qte) * IF(v.id IS NULL, COALESCE(p.price, 0), COALESCE(v.price, 0))',
+            'potential_profit' => 'SUM(pw.qte) * (IF(v.id IS NULL, COALESCE(p.price, 0), COALESCE(v.price, 0)) - IF(v.id IS NULL, COALESCE(p.cost, 0), COALESCE(v.cost, 0)))',
+        ][$order] ?? 'pw.product_id';
+        $sortDir = strtolower((string) $dir) === 'asc' ? 'asc' : 'desc';
+
+        $pageRows = $rowQuery
+            ->orderByRaw($sortExpr.' '.$sortDir.', pw.product_id, pw.product_variant_id, pw.warehouse_id')
             ->offset($offSet)
             ->limit($perPage)
             ->get();
 
-        // prefetch variants
-        $productIds = $products->pluck('id')->all();
-        $variantsByProduct = ProductVariant::whereIn('product_id', $productIds)
-            ->whereNull('deleted_at')
-            ->get()
-            ->groupBy('product_id');
-
-        // Get stock data per warehouse
-        $stockRows = product_warehouse::select(
-            'product_id',
-            'product_variant_id',
-            'warehouse_id',
-            DB::raw('SUM(qte) as qty')
-        )
-            ->whereIn('product_id', $productIds)
-            ->whereNull('deleted_at')
-            ->whereIn('warehouse_id', $selectedWarehouseIds)
-            ->groupBy('product_id', 'product_variant_id', 'warehouse_id')
-            ->get();
+        $productIds = $pageRows->pluck('product_id')->unique()->values()->all();
+        $productsById = Product::with('unit', 'category')->whereIn('id', $productIds)->get()->keyBy('id');
+        $variantsById = ProductVariant::whereIn('product_id', $productIds)->get()->keyBy('id');
+        $unitsById = Unit::all()->keyBy('id');
+        $unitShort = fn ($id) => $id ? (optional($unitsById->get($id))->ShortName ?? 'Pcs') : 'Pcs';
 
         // Date range filter — normalize to Y-m-d and default to last 30 days if missing
         $today = Carbon::today();
@@ -7380,6 +7400,7 @@ class ReportController extends BaseController
             ->join('sales', 'sales.id', '=', 'sale_details.sale_id')
             ->whereIn('sale_details.product_id', $productIds)
             ->whereIn('sales.warehouse_id', $selectedWarehouseIds)
+            ->where('sales.statut', 'completed')
             ->whereNull('sales.deleted_at');
 
         if ($dateFrom && $dateTo) {
@@ -7405,6 +7426,7 @@ class ReportController extends BaseController
             ->whereIn('sale_details.product_id', $productIds)
             ->whereIn('sales.warehouse_id', $selectedWarehouseIds)
             ->whereNotNull('sale_details.sale_unit_id')
+            ->where('sales.statut', 'completed')
             ->whereNull('sales.deleted_at');
 
         if ($dateFrom && $dateTo) {
@@ -7430,6 +7452,7 @@ class ReportController extends BaseController
             ->join('transfers', 'transfers.id', '=', 'transfer_details.transfer_id')
             ->whereIn('transfer_details.product_id', $productIds)
             ->whereIn('transfers.from_warehouse_id', $selectedWarehouseIds)
+            ->where('transfers.statut', 'completed')
             ->whereNull('transfers.deleted_at');
 
         if ($dateFrom && $dateTo) {
@@ -7455,6 +7478,7 @@ class ReportController extends BaseController
             ->whereIn('transfer_details.product_id', $productIds)
             ->whereIn('transfers.from_warehouse_id', $selectedWarehouseIds)
             ->whereNotNull('transfer_details.purchase_unit_id')
+            ->where('transfers.statut', 'completed')
             ->whereNull('transfers.deleted_at');
 
         if ($dateFrom && $dateTo) {
@@ -7494,140 +7518,57 @@ class ReportController extends BaseController
             });
 
         $data = [];
-
-        foreach ($products as $product) {
-            // Handle variant products
-            if ($product->type === 'is_variant') {
-                $variants = $variantsByProduct->get($product->id, collect());
-
-                foreach ($variants as $variant) {
-                    $vid = (int) $variant->id;
-                    
-                    // Get stock per warehouse
-                    $warehouseStocks = $stockRows->where('product_id', $product->id)
-                        ->where('product_variant_id', $vid)
-                        ->groupBy('warehouse_id');
-
-                    foreach ($warehouseStocks as $whId => $whStocks) {
-                        $warehouse = $warehouses->firstWhere('id', $whId);
-                        if (!$warehouse) continue;
-
-                        $currentQty = (float) $whStocks->sum('qty');
-                        $costPrice = (float) $variant->cost;
-                        $sellingPrice = (float) $variant->price;
-                        
-                        $stockValueCost = $currentQty * $costPrice;
-                        $stockValueSelling = $currentQty * $sellingPrice;
-                        $potentialProfit = $stockValueSelling - $stockValueCost;
-
-                        $key = $product->id . '_' . $vid . '_' . $whId;
-                        $soldTotal = $soldTotals->get($key);
-                        $transferredTotal = $transferredTotals->get($key);
-                        $totalSold = (float) ($soldTotal->total ?? 0);
-                        $totalTransferred = (float) ($transferredTotal->total ?? 0);
-                        $totalAdjusted = (float) ($adjustedTotals->get($key)->total ?? 0);
-
-                        // Get units
-                        $currentQtyUnit = optional($product->unit)->ShortName ?? 'Pcs';
-                        $soldUnitId = $soldUnits->get($key) ?? $product->unit_sale_id ?? $product->unit_id;
-                        $soldUnit = $soldUnitId ? optional(Unit::find($soldUnitId))->ShortName ?? 'Pcs' : 'Pcs';
-                        $transferredUnitId = $transferredUnits->get($key) ?? $product->unit_purchase_id ?? $product->unit_id;
-                        $transferredUnit = $transferredUnitId ? optional(Unit::find($transferredUnitId))->ShortName ?? 'Pcs' : 'Pcs';
-                        $adjustedUnit = $currentQtyUnit; // Adjusted uses product unit_id
-
-                        $data[] = [
-                            'sku' => $product->code,
-                            'product_name' => $product->name,
-                            'variant' => $variant->name,
-                            'category' => optional($product->category)->name ?? '',
-                            'warehouse' => $warehouse->name,
-                            'selling_price' => $sellingPrice,
-                            'current_quantity' => $currentQty,
-                            'current_quantity_unit' => $currentQtyUnit,
-                            'stock_value_cost' => $stockValueCost,
-                            'stock_value_selling' => $stockValueSelling,
-                            'potential_profit' => $potentialProfit,
-                            'total_units_sold' => $totalSold,
-                            'total_units_sold_unit' => $soldUnit,
-                            'total_units_transferred' => $totalTransferred,
-                            'total_units_transferred_unit' => $transferredUnit,
-                            'total_units_adjusted' => abs($totalAdjusted),
-                            'total_units_adjusted_unit' => $adjustedUnit,
-                        ];
-                    }
-                }
-            } else {
-                // Non-variant products
-                $warehouseStocks = $stockRows->where('product_id', $product->id)
-                    ->whereNull('product_variant_id')
-                    ->groupBy('warehouse_id');
-
-                foreach ($warehouseStocks as $whId => $whStocks) {
-                    $warehouse = $warehouses->firstWhere('id', $whId);
-                    if (!$warehouse) continue;
-
-                    $currentQty = (float) $whStocks->sum('qty');
-                    $costPrice = (float) $product->cost;
-                    $sellingPrice = (float) $product->price;
-                    
-                    $stockValueCost = $currentQty * $costPrice;
-                    $stockValueSelling = $currentQty * $sellingPrice;
-                    $potentialProfit = $stockValueSelling - $stockValueCost;
-
-                    $key = $product->id . '_0_' . $whId;
-                    $soldTotal = $soldTotals->get($key);
-                    $transferredTotal = $transferredTotals->get($key);
-                    $totalSold = (float) ($soldTotal->total ?? 0);
-                    $totalTransferred = (float) ($transferredTotal->total ?? 0);
-                    $totalAdjusted = (float) ($adjustedTotals->get($key)->total ?? 0);
-
-                    // Get units
-                    $currentQtyUnit = optional($product->unit)->ShortName ?? 'Pcs';
-                    $soldUnitId = $soldUnits->get($key) ?? $product->unit_sale_id ?? $product->unit_id;
-                    $soldUnit = $soldUnitId ? optional(Unit::find($soldUnitId))->ShortName ?? 'Pcs' : 'Pcs';
-                    $transferredUnitId = $transferredUnits->get($key) ?? $product->unit_purchase_id ?? $product->unit_id;
-                    $transferredUnit = $transferredUnitId ? optional(Unit::find($transferredUnitId))->ShortName ?? 'Pcs' : 'Pcs';
-                    $adjustedUnit = $currentQtyUnit; // Adjusted uses product unit_id
-
-                    $data[] = [
-                        'sku' => $product->code,
-                        'product_name' => $product->name,
-                        'variant' => '---',
-                        'category' => optional($product->category)->name ?? '',
-                        'warehouse' => $warehouse->name,
-                        'selling_price' => $sellingPrice,
-                        'current_quantity' => $currentQty,
-                        'current_quantity_unit' => $currentQtyUnit,
-                        'stock_value_cost' => $stockValueCost,
-                        'stock_value_selling' => $stockValueSelling,
-                        'potential_profit' => $potentialProfit,
-                        'total_units_sold' => $totalSold,
-                        'total_units_sold_unit' => $soldUnit,
-                        'total_units_transferred' => $totalTransferred,
-                        'total_units_transferred_unit' => $transferredUnit,
-                        'total_units_adjusted' => abs($totalAdjusted),
-                        'total_units_adjusted_unit' => $adjustedUnit,
-                    ];
-                }
+        foreach ($pageRows as $row) {
+            $product = $productsById->get($row->product_id);
+            if (! $product) {
+                continue;
             }
-        }
+            $variant = $row->product_variant_id ? $variantsById->get($row->product_variant_id) : null;
+            $whId = (int) $row->warehouse_id;
+            $warehouse = $warehouses->firstWhere('id', $whId);
+            if (! $warehouse) {
+                continue;
+            }
 
-        // Sort the built page by a computed numeric column (stock_value_cost,
-        // potential_profit, current_quantity, ...) when the requested field is
-        // not one already handled by the SQL query above (sku/product_name map
-        // to real columns; id/code/name/price/cost are real too).
-        if (!in_array($order, ['id', 'code', 'name', 'price', 'cost', 'sku', 'product_name'], true)) {
-            $asc = strtolower($dir) === 'asc';
-            usort($data, function ($a, $b) use ($order, $asc) {
-                $av = (float) str_replace(',', '', (string) ($a[$order] ?? 0));
-                $bv = (float) str_replace(',', '', (string) ($b[$order] ?? 0));
-                return $asc ? $av <=> $bv : $bv <=> $av;
-            });
+            $currentQty = (float) $row->qty;
+            $costPrice = (float) $row->unit_cost;
+            $sellingPrice = (float) $row->unit_price;
+            $stockValueCost = $currentQty * $costPrice;
+            $stockValueSelling = $currentQty * $sellingPrice;
+
+            $key = $product->id.'_'.(int) $row->product_variant_id.'_'.$whId;
+            $totalSold = (float) ($soldTotals->get($key)->total ?? 0);
+            $totalTransferred = (float) ($transferredTotals->get($key)->total ?? 0);
+            $totalAdjusted = (float) ($adjustedTotals->get($key)->total ?? 0);
+
+            $currentQtyUnit = optional($product->unit)->ShortName ?? 'Pcs';
+            $soldUnit = $unitShort($soldUnits->get($key) ?? $product->unit_sale_id ?? $product->unit_id);
+            $transferredUnit = $unitShort($transferredUnits->get($key) ?? $product->unit_purchase_id ?? $product->unit_id);
+
+            $data[] = [
+                'sku' => $product->code,
+                'product_name' => $product->name,
+                'variant' => $variant ? $variant->name : '---',
+                'category' => optional($product->category)->name ?? '',
+                'warehouse' => $warehouse->name,
+                'selling_price' => $sellingPrice,
+                'current_quantity' => $currentQty,
+                'current_quantity_unit' => $currentQtyUnit,
+                'stock_value_cost' => $stockValueCost,
+                'stock_value_selling' => $stockValueSelling,
+                'potential_profit' => $stockValueSelling - $stockValueCost,
+                'total_units_sold' => $totalSold,
+                'total_units_sold_unit' => $soldUnit,
+                'total_units_transferred' => $totalTransferred,
+                'total_units_transferred_unit' => $transferredUnit,
+                'total_units_adjusted' => abs($totalAdjusted),
+                'total_units_adjusted_unit' => $currentQtyUnit, // adjustments use the product unit
+            ];
         }
 
         return response()->json([
             'reports' => $data,
-            'totalRows' => count($data),
+            'totalRows' => $totalRows,
             'warehouses' => $warehouses,
         ]);
     }
