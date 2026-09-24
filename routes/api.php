@@ -300,6 +300,11 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
 
     Route::get('dashboard_data', 'DashboardController@dashboard_data');
     Route::get('today_summary', 'TodaySummaryController@index');
+    // Modern Dashboard: Classic/Modern choice + section layout (own table)
+    Route::get('dashboard_insights', 'DashboardInsightsController@index');
+    Route::get('dashboard_preferences', 'DashboardPreferenceController@show');
+    Route::put('dashboard_preferences', 'DashboardPreferenceController@updateMine');
+    Route::put('dashboard_preferences/default', 'DashboardPreferenceController@updateDefault');
     // Profit analysis by dimension: product|category|unit|customer|date|warehouse
     Route::get('report/profit/{dimension}', 'ProfitReportController@index');
     Route::get('real_time_sales_counter_data', 'DashboardController@real_time_sales_counter_data');

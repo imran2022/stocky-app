@@ -35,6 +35,9 @@ Size = lines added / removed against the pre-audit version.
 | `Http/Controllers/ModuleSettingsController.php`, `SettingsController.php`, `QuickBooksController.php`, `CustomFieldController.php`, `Api/Store/PagesApiController.php`, `WooCommerceSyncController.php` | 1-13 lines | permission checks that were missing (module upload, cache clear, integration secrets) |
 | `Http/Controllers/ClientController.php`, `ProvidersController.php`, `PublicInvoiceController.php`, `TodaySummaryController.php`, `SalesController.php` (customer figures) | 1-60 lines | balances count only received sale returns / completed purchase returns; Today's summary rebuilt on `SalesFigures` + shared COGS |
 | `Http/Controllers/DashboardController.php` (Batch 6) | +8 | extra `hourly` key from `Support/Reporting/DashboardHourly`; deleted expenses ignored in the payment chart |
+| `Http/Controllers/DashboardController.php` (Modern Dashboard) | ~+35 / -25 | four additive numeric keys in `report_dashboard.report` (`today_net_revenue`, `today_cogs`, `today_expenses`, `return_purchases_amount`); `TopProductsMonth()` extracted unchanged from `report_dashboard`; `skip=products` / `only=products` query flags (Classic never sends them) |
+| `resources/src/router/index.js` (Modern Dashboard) | 1 line | `Dashboard` route now loads `pages/dashboard/DashboardSwitch.vue` (which mounts the unchanged Classic `Dashboard.vue`) |
+| `resources/src/pages/Dashboard.vue` (Modern Dashboard) | 1 line | `return_purchases` uses `return_purchases_amount` (fixes NaN for >= 1,000) |
 | `Traits/CalculatesCogsAndAverageCost.php` | +118 / -57 | COGS in base units, sale returns netted |
 | `Services/Custom/PurchaseOrderReceiptService.php`, `Support/UniqueRefGenerator.php` | small | GRN line checks, reference collision retry |
 | `routes/api.php` | -5 | dead routes and the public `products_clean_names` route removed |

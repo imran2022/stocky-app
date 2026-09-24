@@ -58,6 +58,14 @@ class DashboardController extends Controller
             $warehouse_id = 0;
         }
 
+        // Modern Dashboard: slow product rankings on their own (same functions, same scope as above).
+        if ($request->query('only') === 'products') {
+            return response()->json([
+                'product_report' => $this->Top_Products_Year($warehouse_id, $array_warehouses_id),
+                'top_products' => $this->TopProductsMonth($warehouse_id, $array_warehouses_id),
+            ]);
+        }
+
         // Sales & Purchases chart: use header date range + warehouse filter
         $dataSales = $this->SalesChart($warehouse_id, $array_warehouses_id, $request->from, $request->to);
         $datapurchases = $this->PurchasesChart($warehouse_id, $array_warehouses_id, $request->from, $request->to);
@@ -65,7 +73,7 @@ class DashboardController extends Controller
         // Payment Sent & Received chart: also use header date range + warehouse filter
         $Payment_chart = $this->Payment_chart($warehouse_id, $array_warehouses_id, $request->from, $request->to);
         $TopCustomers = $this->TopCustomers($warehouse_id, $array_warehouses_id);
-        $Top_Products_Year = $this->Top_Products_Year($warehouse_id, $array_warehouses_id);
+        $Top_Products_Year = $request->query('skip') === 'products' ? response()->json([]) : $this->Top_Products_Year($warehouse_id, $array_warehouses_id);
         
         // Stat cards and Sales by Payment: Use date range + warehouse filter
         $report_dashboard = $this->report_dashboard($request, $warehouse_id, $array_warehouses_id);
@@ -468,18 +476,12 @@ class DashboardController extends Controller
         return response()->json($products);
     }
 
-    // -------------------- General Report dashboard -------------\\
-
-    public function report_dashboard($request, $warehouse_id, $array_warehouses_id)
+    /** Top 5 products this month (by number of sale lines), completed sales only. Moved out of report_dashboard unchanged. */
+    public function TopProductsMonth($warehouse_id, $array_warehouses_id)
     {
-
         $user = Auth::user();
-        // New way: Check user's record_view field (user-level boolean)
-        // Backward compatibility: If record_view is null, fall back to role permission check
         $view_records = $user->hasRecordView();
-        
 
-        // top selling product this month
         $products = SaleDetail::join('sales', 'sale_details.sale_id', '=', 'sales.id')
             ->join('products', 'sale_details.product_id', '=', 'products.id')
             ->where('sales.deleted_at', null)
@@ -509,6 +511,25 @@ class DashboardController extends Controller
             ->orderBy('total_sales', 'desc')
             ->take(5)
             ->get();
+
+        return $products;
+    }
+
+    // -------------------- General Report dashboard -------------\\
+
+    public function report_dashboard($request, $warehouse_id, $array_warehouses_id)
+    {
+
+        $user = Auth::user();
+        // New way: Check user's record_view field (user-level boolean)
+        // Backward compatibility: If record_view is null, fall back to role permission check
+        $view_records = $user->hasRecordView();
+        
+
+        // top selling product this month
+        // Modern Dashboard: the page asks for the two slow product rankings separately (`only=products`), so it can
+        // show every other figure first. Classic never sends `skip`, so its response is unchanged.
+        $products = $request->query('skip') === 'products' ? collect() : $this->TopProductsMonth($warehouse_id, $array_warehouses_id);
 
         // Stock Alerts
         $product_warehouse_data = product_warehouse::with('warehouse', 'product', 'productVariant')
@@ -727,6 +748,11 @@ class DashboardController extends Controller
         $today_profit_numeric = ($netSales - $netReturns) - $cogsFIFO - $expenses_total + $service['profit'];
         // Return raw numeric value for frontend price formatting
         $data['today_profit'] = $today_profit_numeric;
+        // Modern Dashboard: the parts of the profit above, exposed as plain numbers so the Modern page never re-computes them.
+        $data['today_net_revenue'] = (float) ($netSales - $netReturns);
+        $data['today_cogs'] = $cogsFIFO;
+        $data['today_expenses'] = (float) $expenses_total;
+        $data['return_purchases_amount'] = (float) $return_purchases_total;
         $data['today_service_revenue'] = (float) $service['revenue'];
         $data['today_service_parts_cost'] = (float) $service['parts_cost'];
         $data['today_service_profit'] = (float) $service['profit'];

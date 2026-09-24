@@ -23,7 +23,7 @@ const lazy = (name, loader) => () =>
 const Ping = lazy('Ping', () => import('../pages/Ping.vue'));
 const PublicInvoice = lazy('PublicInvoice', () => import('../pages/public/PublicInvoice.vue'));
 const PosPage = lazy('PosPage', () => import('../pages/pos/PosPage.vue'));
-const Dashboard = lazy('Dashboard', () => import('../pages/Dashboard.vue'));
+const Dashboard = lazy('Dashboard', () => import('../pages/dashboard/DashboardSwitch.vue'));
 const Brands = lazy('Brands', () => import('../pages/Brands.vue'));
 const VehicleCatalog = lazy('VehicleCatalog', () => import('../pages/vehicles/VehicleCatalog.vue'));
 const Categories = lazy('Categories', () => import('../pages/Categories.vue'));

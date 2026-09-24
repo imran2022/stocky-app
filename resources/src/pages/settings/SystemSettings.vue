@@ -506,6 +506,7 @@
 
           <!-- ============================== Dashboard ============================== -->
           <template v-else-if="activeTab === 'dashboard'">
+            <DashboardModeSettings />
             <a-form layout="vertical" style="max-width: 680px">
               <a-row :gutter="16">
                 <a-col :xs="24" :md="8">
@@ -986,6 +987,7 @@
 </template>
 
 <script setup>
+import DashboardModeSettings from '../dashboard/DashboardModeSettings.vue';   // Modern Dashboard: default style + switch on/off
 /**
  * System settings hub. The legacy page fused ~23 tabs; domains that already
  * have dedicated migrated pages (appearance, PWA, mail, SMS, payment

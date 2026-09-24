@@ -2326,7 +2326,7 @@ This supplements the in-depth Build O1–O9 record appended to
 
 - [ ] COGS/average-cost/GRN costing architecture is planned, not shipped.
 - [ ] Warehouse-specific document address is planned, not shipped.
-- [ ] Dashboard 1/Dashboard 2 selector is planned, not shipped.
+- [ ] Classic/Modern dashboard switch is shipped (see section 38).
 - [ ] Extra Manager target/margin/return/no-sale/high-value alerts are not in
       the approved O1–O9 scope.
 
@@ -2427,3 +2427,29 @@ This supplements the in-depth Build O1–O9 record appended to
 - [ ] A user without record_view sees only their own rows in the hourly charts; a warehouse-limited user only their warehouses.
 - [ ] A pending sale and a deleted payment do not appear in the hourly charts.
 - [ ] `php artisan optimize:clear` and Ctrl+F5 after deploy (new admin assets in `public/js`).
+
+## 38. Modern Dashboard
+
+- [ ] Dashboard shows a Classic | Modern switch; Classic looks and behaves exactly as before (incl. Purchases Return >= 1,000 now correct).
+- [ ] Choosing Modern is remembered after reload and per user; another user still sees their own / the organisation default.
+- [ ] Admin: "Make this the default for everyone" changes what a new user sees; "Use the organisation default" clears own choice.
+- [ ] Modern Sales, Purchases, Returns, Dues, Invoices, Profit, Stock value, Sales by payment equal the Classic numbers for the same range and warehouse.
+- [ ] Turn the API off (or break it): Modern shows an error + Retry, never demo or zero numbers.
+- [ ] Customize: drag by the grip, arrow keys on the grip, hide/show, Save, reload = same order; Reset layout returns the default; admin can save for everyone.
+- [ ] Phone (about 390 px), tablet (768), laptop, wide screen, sidebar open/collapsed: no horizontal scroll, nothing cut off; dark mode readable.
+- [ ] Insights: collections %, receivable aging, slow stock, needs-attention counts match Sales/Purchases/Cash Register lists; chips open the right pages.
+- [ ] Recent activity hidden for roles without activity-log permission. Sales map lists unmatched cities and shows the CC BY 4.0 attribution.
+- [ ] `php artisan migrate`, `php artisan optimize:clear`, Ctrl+F5 after deploy (new table + new admin assets).
+- [ ] System Settings > Dashboard: choose the default dashboard; turn "Let users switch" off -> a normal user no longer sees the switch and gets the default; the admin still can.
+- [ ] Classic -> Modern switch is quick (hover/click starts loading); after reload the last choice opens directly; product rankings fill a moment later without blocking the rest.
+- [ ] Insights show no repeated numbers: Sales due appears once (KPI), low/out stock counts once (Needs attention), net profit once (hero) with margin % in Profit margin.
+- [ ] Purchases / Expenses / Net cash flow KPIs show a trend line for multi-day ranges and none for Today.
+- [ ] `php artisan migrate` (adds `allow_user_switch`), `php artisan optimize:clear`, Ctrl+F5.
+- [ ] Phone (390 px): KPI amounts such as "৳ 94,500.00" stay on one line in every card (Return card too); no "Customize" button on phone, still on tablet/desktop.
+- [ ] Sales map: a sale with a Zone appears under that Zone's district even if the customer has no city; districts with sales are dotted and named; "Show all district names" works; the location rule is shown under the map.
+- [ ] Phone: Net cash flow card badge and In / Out stay inside the card at 320-390 px; bottom navigation shows on phones only, POS button opens POS, More sheet lists only pages the user may open; content is not hidden behind the bar.
+- [ ] Map: + / − / Reset work, drag pans when zoomed, districts with sales stay dotted and named at every zoom level.
+- [ ] Map: a district shows colour and a dot only where it really has sales (no shaded islands elsewhere); every dotted district has a name.
+- [ ] Recent activity: tabs filter, days are grouped, a Sale/Purchase row opens its page; role without Activity Log permission sees the "not available" message.
+- [ ] Phone: bottom bar "Menu" opens the sidebar. Hide both product sections in Customize + Save + reload: no `only=products` request in the network tab.
+

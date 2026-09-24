@@ -885,7 +885,8 @@ async function load() {
       today_sales: Number(r.today_sales) || 0,
       today_purchases: Number(r.today_purchases) || 0,
       return_sales: Number(r.return_sales) || 0,
-      return_purchases: Number(r.return_purchases) || 0,
+      // Audit: `return_purchases` arrives formatted ("1,998.00"), which Number() reads as NaN -> 0 for anything >= 1,000.
+      return_purchases: Number(r.return_purchases_amount ?? String(r.return_purchases ?? '').replace(/,/g, '')) || 0,
       sales_due: Number(r.sales_due) || 0,
       purchase_due: Number(r.purchase_due) || 0,
       today_invoices: Number(r.today_invoices) || 0,

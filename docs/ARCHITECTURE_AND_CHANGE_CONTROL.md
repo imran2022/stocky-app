@@ -76,6 +76,12 @@ domains include:
   and permission-gated menu registration must ship with the feature—never as an
   undocumented/manual post-copy step.
 
+## Modern Dashboard
+
+Own table (`dashboard_preferences`), own controllers and `Support\Dashboard` / `Support\Reporting\DashboardInsights` classes; the
+frontend lives under `pages/dashboard/` and `stores/dashboardPrefs.js`. Only the route line and additive report keys touch vendor files.
+Bundled map data is CC BY 4.0 (attribution required, shown in the UI).
+
 ## Frontend release modes
 
 Normal development should run the documented Vite build and deploy the complete

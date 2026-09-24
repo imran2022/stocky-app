@@ -1,5 +1,14 @@
 # Latest Delivery Index
 
+## Current: Modern Dashboard (2026-09-25)
+
+Classic/Modern dashboard switch, drag-and-drop layout, business insights, recent activity and Bangladesh sales map.
+Needs `php artisan migrate` (new table `dashboard_preferences` + column `allow_user_switch`), `php artisan optimize:clear` and Ctrl+F5 (new admin assets in `public/js`).
+Update 5: map island fix + always-named districts, Recent activity tabs/day groups, Menu tab opens sidebar, product rankings skipped when hidden (no migration; source-only, rebuild `npm run build:admin`).
+Update 4: KPI badge/In-Out overflow fix, map zoom (+/-/reset/pan), phone bottom navigation bar (no migration).
+Update 3: mobile KPI amount fix, Customize hidden on phone, sales map placed by Zone, always-visible district labels, typography (no migration beyond v2).
+Description: `CUSTOMIZATIONS.md` "Modern Dashboard" (update 3), checklist section 38, tests `audit_ui1_dashboard_prefs.php` / `audit_ui2_dashboard_insights.php`.
+
 ## Current: Audit Batches 1-6 (2026-09-24)
 
 Delivered as git bundles `STOCKY_AUDIT_FIX_B1..B5_2026-09-24.bundle` (each on top of the previous) plus live-deploy zips

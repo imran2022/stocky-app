@@ -46,6 +46,10 @@ custom behavior.
   controller. Hook list and vendor-merge procedure: `docs/AUDIT_MERGE_GUIDE.md`; details in `CUSTOMIZATIONS.md`
   "Audit Batches 1-5".
 
+- Dashboards: Classic (`pages/Dashboard.vue`, untouched) and Modern (`pages/dashboard/modern/**`) sit behind
+  `pages/dashboard/DashboardSwitch.vue`. Modern must never show demo or invented numbers; new insight figures live in
+  `App\Support\Reporting\DashboardInsights` and reuse `SalesFigures` / `CashFlowFigures`. See `CUSTOMIZATIONS.md` "Modern Dashboard".
+
 - Use small SAFE overlays. Never delete the existing application tree for a
   routine patch.
 - Preserve the current customized 5.8 baseline. Full vendor replacement can
