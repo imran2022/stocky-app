@@ -195,12 +195,23 @@ class PaymentSaleReturnsController extends BaseController
         $this->authorizeForUser($request->user('api'), 'create', PaymentSaleReturns::class);
 
         if ($request['montant'] > 0) {
+            try {
             \DB::transaction(function () use ($request) {
                 $user = Auth::user();
                 // New way: Check user's record_view field (user-level boolean)
                 // Backward compatibility: If record_view is null, fall back to role permission check
                 $view_records = $user->hasRecordView();
-                $SaleReturn = SaleReturn::findOrFail($request['sale_return_id']);
+                $SaleReturn = SaleReturn::lockForUpdate()->findOrFail($request['sale_return_id']);
+                // Audit Batch 1 (S1): a refund can never exceed what is still owed on the return.
+                if ($SaleReturn->deleted_at !== null) {
+                    throw new \InvalidArgumentException('This sale return was deleted.');
+                }
+                $refundable = (float) $SaleReturn->GrandTotal - (float) $SaleReturn->paid_amount;
+                if ((float) $request['montant'] > $refundable + 0.01) {
+                    throw new \InvalidArgumentException(sprintf(
+                        'Refund %.2f exceeds the remaining refundable amount %.2f.', (float) $request['montant'], max(0, $refundable)
+                    ));
+                }
 
                 // Check If User Has Permission view All Records
                 // Warehouse half of the same rule: record_view says whose documents,
@@ -251,6 +262,9 @@ class PaymentSaleReturnsController extends BaseController
                 ]);
 
             }, 10);
+            } catch (\InvalidArgumentException $e) {
+                return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
+            }
         }
 
         return response()->json(['success' => true, 'message' => 'Payment Create successfully'], 200);

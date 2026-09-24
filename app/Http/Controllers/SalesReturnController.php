@@ -189,7 +189,15 @@ class SalesReturnController extends BaseController
             'statut' => 'required',
         ]);
 
+        try {
         $createdReturn = \DB::transaction(function () use ($request) {
+            // Audit Batch 1 (S1): return must fit the original sale (qty, product, price, totals).
+            \App\Support\SaleReturnLimits::assertValid(
+                $request->sale_id, $request->client_id, (array) $request['details'],
+                $request->shipping ?? 0, $request->discount ?? 0, $request->GrandTotal ?? 0,
+                $request->TaxNet ?? 0, $request->tax_rate ?? 0
+            );
+
             $order = new SaleReturn;
 
             $order->date = $request->date;
@@ -306,6 +314,9 @@ class SalesReturnController extends BaseController
 
             return $order;
         }, 10);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
+        }
 
         // ZATCA Phase 2: report the return as a credit note (non-blocking;
         // no-op unless Phase 2 is enabled and onboarding is finished).
@@ -325,12 +336,22 @@ class SalesReturnController extends BaseController
 
         $this->authorizeForUser($request->user('api'), 'update', SaleReturn::class);
 
+        try {
         \DB::transaction(function () use ($request, $id) {
             $user = Auth::user();
             // New way: Check user's record_view field (user-level boolean)
             // Backward compatibility: If record_view is null, fall back to role permission check
             $view_records = $user->hasRecordView();
             $current_SaleReturn = SaleReturn::findOrFail($id);
+            if ($current_SaleReturn->deleted_at !== null) {
+                throw new \InvalidArgumentException('This sale return was deleted and can no longer be edited.');
+            }
+            // Audit Batch 1 (S1): edited return must still fit the original sale.
+            \App\Support\SaleReturnLimits::assertValid(
+                $current_SaleReturn->sale_id, $request->client_id ?? $current_SaleReturn->client_id, (array) $request['details'],
+                $request->shipping ?? 0, $request->discount ?? 0, $request->GrandTotal ?? 0,
+                $request->TaxNet ?? 0, $request->tax_rate ?? 0, (int) $current_SaleReturn->id
+            );
 
             /**
              * Warehouses restriction
@@ -565,6 +586,9 @@ class SalesReturnController extends BaseController
             ]);
 
         }, 10);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
+        }
 
         return response()->json(['success' => true]);
     }
