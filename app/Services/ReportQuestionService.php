@@ -121,6 +121,17 @@ class ReportQuestionService
             $query->where('s.user_id', $user->id);
         }
 
+        // Moving-average costing ON: the cost of each sale line is its stored ledger cost (sales only, like this
+        // query's revenue), otherwise the legacy master-cost recomputation.
+        $costing = \App\Services\Costing\CostingReader::active();
+        $costSql = 'SUM(sale_details.quantity * COALESCE(NULLIF(pv.cost, 0), p.cost, 0))';
+        if ($costing) {
+            \App\Services\Costing\CostingReader::prepare();
+            \App\Services\Costing\CostingReader::ensureWindowCovered($dateFrom, $dateTo, $warehouseId ?: null, $warehouseIds, $viewRecords, $user->id);
+            $query->leftJoin('inventory_cost_ledger as lg', fn ($j) => $j->on('lg.source_id', '=', 'sale_details.id')->where('lg.source_type', '=', 'sale'));
+            $costSql = 'SUM(COALESCE(-lg.value_delta, 0))';
+        }
+
         // Aggregate by product (COALESCE name so chart/table never get null)
         $results = $query
             ->select(
@@ -128,7 +139,7 @@ class ReportQuestionService
                 DB::raw('COALESCE(NULLIF(TRIM(p.name), ""), CONCAT("Product #", sale_details.product_id)) as name'),
                 DB::raw('SUM(sale_details.quantity) as qty'),
                 DB::raw('SUM(sale_details.total) as revenue'),
-                DB::raw('SUM(sale_details.quantity * COALESCE(NULLIF(pv.cost, 0), p.cost, 0)) as cost')
+                DB::raw($costSql.' as cost')
             )
             ->groupBy('sale_details.product_id', 'p.name')
             ->get()

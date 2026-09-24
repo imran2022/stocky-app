@@ -211,6 +211,7 @@ class DashboardInsights
     /** Stock rows use the Classic "Stock Alert" rule (manage_stock, qty <= alert) so the count matches that list. */
     private static function stockHealth(array $ctx): array
     {
+        \App\Services\Costing\CostingReader::prepareStockValue();   // moving-average costing (no-op while off)
         $base = fn () => DB::table('product_warehouse')
             ->join('products', 'product_warehouse.product_id', '=', 'products.id')
             ->whereNull('product_warehouse.deleted_at')->whereNull('products.deleted_at')
@@ -225,6 +226,7 @@ class DashboardInsights
             ->leftJoin('product_variants', function ($j) {
                 $j->on('product_warehouse.product_variant_id', '=', 'product_variants.id')->where('products.is_variant', '=', 1);
             })
+            ->tap(fn ($q) => \App\Services\Costing\CostingReader::joinBalance($q))
             ->where('product_warehouse.qte', '>', 0)
             ->whereDate('products.created_at', '<=', $cut)
             ->whereNotExists(function ($q) use ($cut) {
@@ -232,9 +234,9 @@ class DashboardInsights
                     ->whereColumn('d.product_id', 'product_warehouse.product_id')
                     ->whereNull('s.deleted_at')->where('s.statut', SalesFigures::SALE_STATUS)->where('s.date', '>=', $cut);
             })
-            ->selectRaw('COALESCE(SUM(CASE WHEN products.is_variant = 1 AND product_variants.id IS NOT NULL
-                                           THEN product_warehouse.qte * COALESCE(product_variants.cost, 0)
-                                           ELSE product_warehouse.qte * COALESCE(products.cost, 0) END),0) AS value, COUNT(DISTINCT product_warehouse.product_id) AS n')
+            ->selectRaw('COALESCE(SUM(product_warehouse.qte * '.\App\Services\Costing\CostingReader::unitCostSql(
+                'CASE WHEN products.is_variant = 1 AND product_variants.id IS NOT NULL THEN COALESCE(product_variants.cost, 0) ELSE COALESCE(products.cost, 0) END'
+            ).'),0) AS value, COUNT(DISTINCT product_warehouse.product_id) AS n')
             ->first();
 
         return [

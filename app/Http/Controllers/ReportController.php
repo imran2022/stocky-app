@@ -2800,6 +2800,7 @@ class ReportController extends BaseController
             ->get();
 
         // ✅ Stock Value (restricted by user warehouses)
+        \App\Services\Costing\CostingReader::prepareStockValue();   // moving-average costing: ledger agrees with on-hand quantity (no-op while off)
         $stock_value = DB::table('product_warehouse')
             ->leftJoin('products', 'product_warehouse.product_id', '=', 'products.id')
             ->leftJoin('warehouses', 'product_warehouse.warehouse_id', '=', 'warehouses.id')
@@ -2811,9 +2812,10 @@ class ReportController extends BaseController
             ->when(! $is_all_warehouses, function ($q) use ($allowedWarehouseIds) {
                 $q->whereIn('product_warehouse.warehouse_id', $allowedWarehouseIds);
             })
+            ->tap(fn ($q) => \App\Services\Costing\CostingReader::joinBalance($q))
             ->select(
                 DB::raw('SUM(COALESCE(product_variants.price, products.price) * qte) as price'),
-                DB::raw('SUM(COALESCE(product_variants.cost, products.cost) * qte) as cost'),
+                DB::raw('SUM('.\App\Services\Costing\CostingReader::unitCostSql('COALESCE(product_variants.cost, products.cost)').' * qte) as cost'),
                 'warehouses.name as name'
             )
             ->where('qte', '>', 0)
@@ -3470,6 +3472,15 @@ class ReportController extends BaseController
         $periodDelta = $stockDeltaForRange($start, $end);
         $openingStockPurchase = $closingStockPurchase - $periodDelta['cost'];
         $openingStockSale = $closingStockSale - $periodDelta['price'];
+
+        // Moving-average costing ON: opening / closing stock at COST are the ledger balances on those dates
+        // (what the stock really cost when it was bought), not today's master cost rewound through the period.
+        $costLedgerOn = \App\Services\Costing\CostingReader::active();
+        if ($costLedgerOn) {
+            $closingStockPurchase = \App\Services\Costing\CostingReader::valueAsOf($end, $warehouseId ?: null, $warehouseIds);
+            $openingStockPurchase = \App\Services\Costing\CostingReader::valueAsOf(Carbon::parse($start)->subDay()->toDateString(), $warehouseId ?: null, $warehouseIds);
+            $periodDelta['adjustment_abs_cost'] = \App\Services\Costing\CostingReader::adjustmentAbsCost($start, $end, $warehouseId ?: null, $warehouseIds);
+        }
 
         // -------------------- Purchases / Sales --------------------
         // Audit Batch 4 (H1/H2): both sides come from the shared figures, so "excl. tax" really means
@@ -5302,6 +5313,10 @@ class ReportController extends BaseController
                 'product_warehouse.qte as quantity',
             ]);
 
+        // moving-average costing: shortage is valued at the running average (no-op while off)
+        \App\Services\Costing\CostingReader::prepareStockValue();
+        \App\Services\Costing\CostingReader::joinBalance($rowsQuery);
+
         $totalRows = (clone $rowsQuery)->count();
         if ($perPage == '-1') {
             $perPage = $totalRows;
@@ -5316,7 +5331,7 @@ class ReportController extends BaseController
             $q->orders = null;
             return $q;
         };
-        $costExpr = 'COALESCE(product_variants.cost, products.cost)';
+        $costExpr = \App\Services\Costing\CostingReader::unitCostSql('COALESCE(product_variants.cost, products.cost)');
 
         $totals = $aggBase()->selectRaw("
             COUNT(*) as `lines`,
@@ -7099,6 +7114,9 @@ class ReportController extends BaseController
         $warehouse_id = (int) $this->filterWarehouseId($request->warehouse_id);
         $selectedWarehouseIds = $warehouse_id !== 0 ? [$warehouse_id] : $allWarehouseIds;
 
+        // Moving-average costing (no-op while off): ledger and on-hand quantity agree before values are read
+        \App\Services\Costing\CostingReader::prepareStockValue();
+
         // base query + search
         $productsQuery = Product::with('unit')
             ->whereNull('deleted_at')
@@ -7140,9 +7158,11 @@ class ReportController extends BaseController
                 })
                 ->whereIn('product_warehouse.warehouse_id', $selectedWarehouseIds);
             $applySearch($q);
+            \App\Services\Costing\CostingReader::joinBalance($q);
             return $q;
         };
-        $costExpr = 'COALESCE(product_variants.cost, products.cost)';
+        // running-average cost when moving-average costing is on, the master cost otherwise
+        $costExpr = \App\Services\Costing\CostingReader::unitCostSql('COALESCE(product_variants.cost, products.cost)');
 
         $totalsRow = $valuationBase()
             ->selectRaw("ROUND(SUM(product_warehouse.qte), 2) as units, ROUND(SUM(product_warehouse.qte * {$costExpr}), 2) as asset_value")
@@ -7191,6 +7211,7 @@ class ReportController extends BaseController
 
         // prefetch variants for page products
         $productIds = $products->pluck('id')->all();
+        $costMap = \App\Services\Costing\CostingReader::active() ? \App\Services\Costing\CostingReader::valueMap($selectedWarehouseIds, $productIds) : [];
         $variantsByProduct = ProductVariant::whereIn('product_id', $productIds)
             ->whereNull('deleted_at')
             ->get()
@@ -7247,6 +7268,10 @@ class ReportController extends BaseController
                     $qty = (float) ($stockMap[$product->id][$vid] ?? 0.0);
                     $cost = (float) $variant->cost;               // ✅ default cost from variant
                     $value = $qty * $cost;
+                    if ($costMap && isset($costMap[$product->id.':'.$vid])) {
+                        $value = $costMap[$product->id.':'.$vid]['value'];   // moving-average: value across warehouses
+                        $cost = $costMap[$product->id.':'.$vid]['avg'];
+                    }
 
                     $names[] = $variant->name.' ('.$item['unit_name'].')';
                     $stocks[] = number_format($qty, helpers::price_decimals(), '.', '');   // no thousands sep
@@ -7265,6 +7290,10 @@ class ReportController extends BaseController
                 $qty = (float) ($stockMap[$product->id][0] ?? 0.0);
                 $cost = (float) $product->cost;                   // ✅ default cost from product
                 $value = $product->type === 'is_service' ? 0.0 : ($qty * $cost);
+                if ($costMap && $product->type !== 'is_service' && isset($costMap[$product->id.':0'])) {
+                    $value = $costMap[$product->id.':0']['value'];        // moving-average: value across warehouses
+                    $cost = $costMap[$product->id.':0']['avg'];
+                }
 
                 $item['variant_name'] = '---';
                 $item['stock_hand'] = $product->type !== 'is_service'
@@ -7344,6 +7373,8 @@ class ReportController extends BaseController
         // record. Paging, sorting and the row total are done on that grain in SQL. Before, products were paged
         // (so the row total came from the visible page and broke pagination) and computed columns were sorted
         // only within the visible page.
+        \App\Services\Costing\CostingReader::prepareStockValue();
+        $unitCostSql = \App\Services\Costing\CostingReader::unitCostSql('IF(v.id IS NULL, COALESCE(p.cost, 0), COALESCE(v.cost, 0))');
         $rowQuery = DB::table('product_warehouse as pw')
             ->join('products as p', 'p.id', '=', 'pw.product_id')
             ->join('warehouses as w', 'w.id', '=', 'pw.warehouse_id')
@@ -7370,9 +7401,14 @@ class ReportController extends BaseController
             ->select(
                 'pw.product_id', 'pw.product_variant_id', 'pw.warehouse_id',
                 DB::raw('SUM(pw.qte) as qty'),
-                DB::raw('IF(v.id IS NULL, COALESCE(p.cost, 0), COALESCE(v.cost, 0)) as unit_cost'),
+                DB::raw($unitCostSql.' as unit_cost'),
                 DB::raw('IF(v.id IS NULL, COALESCE(p.price, 0), COALESCE(v.price, 0)) as unit_price')
             );
+        // moving-average costing: bring in the running-average balance (no-op while off)
+        \App\Services\Costing\CostingReader::joinBalance($rowQuery, 'pw');
+        if (\App\Services\Costing\CostingReader::active()) {
+            $rowQuery->groupBy('icb.avg_cost');
+        }
 
         $totalRows = (int) DB::query()->fromSub(clone $rowQuery, 'r')->count();
         if ($perPage === -1) {
@@ -7384,9 +7420,9 @@ class ReportController extends BaseController
             'sku' => 'p.code',
             'product_name' => 'p.name',
             'current_quantity' => 'SUM(pw.qte)',
-            'stock_value_cost' => 'SUM(pw.qte) * IF(v.id IS NULL, COALESCE(p.cost, 0), COALESCE(v.cost, 0))',
+            'stock_value_cost' => 'SUM(pw.qte) * '.$unitCostSql,
             'stock_value_selling' => 'SUM(pw.qte) * IF(v.id IS NULL, COALESCE(p.price, 0), COALESCE(v.price, 0))',
-            'potential_profit' => 'SUM(pw.qte) * (IF(v.id IS NULL, COALESCE(p.price, 0), COALESCE(v.price, 0)) - IF(v.id IS NULL, COALESCE(p.cost, 0), COALESCE(v.cost, 0)))',
+            'potential_profit' => 'SUM(pw.qte) * (IF(v.id IS NULL, COALESCE(p.price, 0), COALESCE(v.price, 0)) - '.$unitCostSql.')',
         ][$order] ?? 'pw.product_id';
         $sortDir = strtolower((string) $dir) === 'asc' ? 'asc' : 'desc';
 
@@ -9350,6 +9386,7 @@ public function sales_by_brand_report(Request $request)
     public function deadStock(Request $request)
     {
         $this->authorizeForUser($request->user('api'), 'Dead_Stock_Report', Product::class);
+        \App\Services\Costing\CostingReader::prepareStockValue();   // moving-average costing: frozen value at running average (no-op while off)
 
         // ---- Inputs
         $perPage = (int) ($request->limit ?? 10);           // -1 => ALL
@@ -9478,6 +9515,12 @@ public function sales_by_brand_report(Request $request)
             });
         }
 
+        \App\Services\Costing\CostingReader::joinBalance($base, 'pwh');
+        // frozen value: legacy = clamped on-hand x master cost; moving average = sum of positive on-hand x running average
+        $fvExpr = \App\Services\Costing\CostingReader::active()
+            ? 'SUM(GREATEST(pwh.qte,0) * COALESCE(icb.avg_cost, pr.cost))'
+            : 'GREATEST(COALESCE(SUM(pwh.qte),0),0) * MAX(pr.cost)';
+
         $select = [
             'pr.id as product_id',
             DB::raw('NULL as product_variant_id'),
@@ -9514,12 +9557,13 @@ public function sales_by_brand_report(Request $request)
             DB::raw('COALESCE(SUM(pwh.qte),0) as on_hand'),
             DB::raw('GREATEST(COALESCE(SUM(pwh.qte),0),0) as on_hand_pos'),
             DB::raw('MAX(pr.cost) as cost'),
+            DB::raw($fvExpr.' as fv_cost'),
             DB::raw($lastDtExpr.' as last_movement_dt'),
         ]);
         $totals = DB::query()->fromSub($sumSub, 't')->selectRaw('
             COUNT(*) as products,
             ROUND(SUM(t.on_hand), 2) as units,
-            ROUND(SUM(t.on_hand_pos * t.cost), 2) as frozen_value,
+            ROUND(SUM(t.fv_cost), 2) as frozen_value,
             SUM(CASE WHEN t.last_movement_dt = "0000-01-01 00:00:00" THEN 1 ELSE 0 END) as never_moved
         ')->first();
         $summary = [
@@ -9532,7 +9576,7 @@ public function sales_by_brand_report(Request $request)
         $top_frozen = (clone $base)
             ->select([
                 DB::raw('pr.name as name'),
-                DB::raw('ROUND(GREATEST(COALESCE(SUM(pwh.qte),0),0) * MAX(pr.cost), 2) as value'),
+                DB::raw('ROUND('.$fvExpr.', 2) as value'),
             ])
             ->havingRaw('value > 0')
             ->orderByDesc('value')
@@ -9541,7 +9585,7 @@ public function sales_by_brand_report(Request $request)
 
         $catSub = (clone $base)->select([
             DB::raw('MAX(pr.category_id) as category_id'),
-            DB::raw('GREATEST(COALESCE(SUM(pwh.qte),0),0) * MAX(pr.cost) as fv'),
+            DB::raw($fvExpr.' as fv'),
         ]);
         $by_category = DB::query()->fromSub($catSub, 't')
             ->leftJoin('categories as c', 'c.id', '=', 't.category_id')
@@ -10848,6 +10892,7 @@ public function draftInvoices(Request $request)
         $sortType = strtolower($request->get('SortType', 'desc')) === 'asc' ? 'asc' : 'desc';
         $sortable = ['dt', 'warehouse', 'qty', 'net_qty', 'ref', 'adj_id'];
 
+        \App\Services\Costing\CostingReader::prepare();   // moving-average costing: new adjustments are costed before they are read (no-op while off)
         $tableBase = (clone $base)
             ->leftJoin('warehouses as w', 'w.id', '=', 'a.warehouse_id')
             ->leftJoin('products as p', 'p.id', '=', 'd.product_id')
@@ -10859,7 +10904,10 @@ public function draftInvoices(Request $request)
             ->selectRaw('w.name as warehouse')
             ->selectRaw('SUM(d.quantity) as qty')
             ->selectRaw('SUM(CASE WHEN d.type="add" THEN d.quantity ELSE -d.quantity END) as net_qty')
-            ->selectRaw('COALESCE(SUM(COALESCE(pv.cost, p.cost, 0) * d.quantity), 0) as purchase_cost')
+            ->when(\App\Services\Costing\CostingReader::active(), fn ($q) => $q->leftJoin('inventory_cost_ledger as lg', fn ($j) => $j->on('lg.source_id', '=', 'd.id')->where('lg.source_type', '=', 'adjustment')))
+            ->selectRaw(\App\Services\Costing\CostingReader::active()
+                ? 'COALESCE(SUM(ABS(lg.value_delta)), 0) as purchase_cost'   // moving average: what the adjusted stock was really worth
+                : 'COALESCE(SUM(COALESCE(pv.cost, p.cost, 0) * d.quantity), 0) as purchase_cost')
             ->selectRaw('COALESCE(SUM(COALESCE(pv.price, p.price, 0) * d.quantity), 0) as sale_price')
             ->groupBy('a.id', 'a.Ref', 'dt', 'w.name');
 

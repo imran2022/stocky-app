@@ -53,27 +53,48 @@ class ProfitReportController extends Controller
             $warehouseId = null;
         }
 
-        $costExpr = 'sd.quantity * COALESCE(pv.cost, p.cost, 0)';
+        // Moving-average costing ON: cost is the per-line cost stored in the ledger, only completed sales count and
+        // received returns net off (revenue, quantity and cost), exactly like the Profit & Loss report. OFF: unchanged.
+        $costing = \App\Services\Costing\CostingReader::active();
+        $s = $costing ? 'sd' : 's';   // alias that carries date / warehouse_id / client_id
+        $costExpr = $costing ? 'sd.line_cost' : 'sd.quantity * COALESCE(pv.cost, p.cost, 0)';
 
-        $base = fn () => DB::table('sale_details as sd')
-            ->join('sales as s', 's.id', '=', 'sd.sale_id')
-            ->join('products as p', 'p.id', '=', 'sd.product_id')
-            ->leftJoin('product_variants as pv', 'pv.id', '=', 'sd.product_variant_id')
-            ->whereNull('s.deleted_at')
-            ->whereBetween('s.date', [$from, $to])
-            ->when($allowed !== null, fn ($q) => $q->whereIn('s.warehouse_id', $allowed))
-            ->when($warehouseId, fn ($q) => $q->where('s.warehouse_id', $warehouseId));
+        // Costing ON: materialize the (union + ledger-join) rows ONCE into an indexed temp table instead of
+        // re-running that join for each of the count/rows/kpi/chart queries below — see CostingReader::profitLinesTemp.
+        // The temp table is uniquely named per request and dies with the connection, so nothing here is reused
+        // across requests or across a different [from,to]/warehouse scope.
+        $tmpTable = $costing ? \App\Services\Costing\CostingReader::profitLinesTemp($from, $to, $warehouseId, $allowed) : null;
+
+        $base = fn () => $costing
+            ? DB::table("{$tmpTable} as sd")
+            : DB::table('sale_details as sd')
+                ->join('sales as s', 's.id', '=', 'sd.sale_id')
+                ->join('products as p', 'p.id', '=', 'sd.product_id')
+                ->leftJoin('product_variants as pv', 'pv.id', '=', 'sd.product_variant_id')
+                ->whereNull('s.deleted_at')
+                ->whereBetween('s.date', [$from, $to])
+                ->when($allowed !== null, fn ($q) => $q->whereIn('s.warehouse_id', $allowed))
+                ->when($warehouseId, fn ($q) => $q->where('s.warehouse_id', $warehouseId));
 
         // ---- Dimension: label expression, joins and group key
-        $dim = [
+        // (the costing branch reads product name/category/unit straight off the temp table — profitLinesTemp()
+        // already carried them over from `products` — instead of joining products/product_variants again here)
+        $dim = $costing ? [
+            'product' => ['label' => 'sd.product_name', 'group' => 'sd.product_id', 'join' => null, 'search' => 'sd.product_name'],
+            'category' => ['label' => "COALESCE(c.name, '—')", 'group' => 'sd.category_id', 'join' => fn ($q) => $q->leftJoin('categories as c', 'c.id', '=', 'sd.category_id'), 'search' => 'c.name'],
+            'unit' => ['label' => "COALESCE(u.ShortName, '—')", 'group' => 'sd.product_unit_id', 'join' => fn ($q) => $q->leftJoin('units as u', 'u.id', '=', 'sd.product_unit_id'), 'search' => 'u.ShortName'],
+            'customer' => ['label' => 'cl.name', 'group' => 'sd.client_id', 'join' => fn ($q) => $q->join('clients as cl', 'cl.id', '=', 'sd.client_id'), 'search' => 'cl.name'],
+            'date' => ['label' => 'sd.date', 'group' => 'sd.date', 'join' => null, 'search' => 'sd.date'],
+            'warehouse' => ['label' => 'w.name', 'group' => 'sd.warehouse_id', 'join' => fn ($q) => $q->join('warehouses as w', 'w.id', '=', 'sd.warehouse_id'), 'search' => 'w.name'],
+        ][$dimension] : [
             'product' => ['label' => 'p.name', 'group' => 'p.id', 'join' => null, 'search' => 'p.name'],
             'category' => ['label' => "COALESCE(c.name, '—')", 'group' => 'p.category_id', 'join' => fn ($q) => $q->leftJoin('categories as c', 'c.id', '=', 'p.category_id'), 'search' => 'c.name'],
             'unit' => ['label' => "COALESCE(u.ShortName, '—')", 'group' => 'u.id', 'join' => fn ($q) => $q->leftJoin('units as u', function ($j) {
                 $j->on(DB::raw('u.id'), '=', DB::raw('COALESCE(sd.sale_unit_id, p.unit_sale_id, p.unit_id)'));
             }), 'search' => 'u.ShortName'],
-            'customer' => ['label' => 'cl.name', 'group' => 's.client_id', 'join' => fn ($q) => $q->join('clients as cl', 'cl.id', '=', 's.client_id'), 'search' => 'cl.name'],
-            'date' => ['label' => 's.date', 'group' => 's.date', 'join' => null, 'search' => 's.date'],
-            'warehouse' => ['label' => 'w.name', 'group' => 's.warehouse_id', 'join' => fn ($q) => $q->join('warehouses as w', 'w.id', '=', 's.warehouse_id'), 'search' => 'w.name'],
+            'customer' => ['label' => 'cl.name', 'group' => "{$s}.client_id", 'join' => fn ($q) => $q->join('clients as cl', 'cl.id', '=', "{$s}.client_id"), 'search' => 'cl.name'],
+            'date' => ['label' => "{$s}.date", 'group' => "{$s}.date", 'join' => null, 'search' => "{$s}.date"],
+            'warehouse' => ['label' => 'w.name', 'group' => "{$s}.warehouse_id", 'join' => fn ($q) => $q->join('warehouses as w', 'w.id', '=', "{$s}.warehouse_id"), 'search' => 'w.name'],
         ][$dimension];
 
         $grouped = fn () => tap($base(), function ($q) use ($dim, $request, $costExpr) {

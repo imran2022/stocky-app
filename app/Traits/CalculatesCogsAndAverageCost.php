@@ -106,6 +106,14 @@ trait CalculatesCogsAndAverageCost
         $user = Auth::user();
         $view_records = $user ? $user->hasRecordView() : false;
 
+        // Moving-average costing ON: COGS is the per-line cost stored in the ledger, not a recomputation from the
+        // master cost or purchase layers. FIFO and AVG are the same number then (one method, one profit).
+        if (\App\Services\Costing\CostingReader::active()) {
+            $stored = \App\Services\Costing\CostingReader::cogsForWindow($start, $end, $warehouseId, $warehouseIds, $view_records, $user?->id);
+
+            return ['fifo' => $stored, 'avg' => $stored];
+        }
+
         $key = fn ($pid, $vid) => $pid.':'.($vid ?? 'null');
 
         $salesQty = $this->cogsSoldQty($start, $end, $warehouseId, $warehouseIds, $view_records)

@@ -1176,6 +1176,8 @@ class DashboardController extends Controller
         };
 
         // Calculate stock value by cost
+        // Moving-average costing ON: qty x running average per warehouse row (no-op while off).
+        \App\Services\Costing\CostingReader::prepareStockValue();
         $stockByCost = product_warehouse::join('products', 'product_warehouse.product_id', '=', 'products.id')
             ->leftJoin('product_variants', function ($join) {
                 $join->on('product_warehouse.product_variant_id', '=', 'product_variants.id')
@@ -1187,13 +1189,10 @@ class DashboardController extends Controller
             ->where(function ($query) use ($warehouseFilter) {
                 $warehouseFilter($query);
             })
-            ->select(DB::raw('SUM(
-                CASE 
-                    WHEN products.is_variant = 1 AND product_variants.id IS NOT NULL 
-                    THEN product_warehouse.qte * COALESCE(product_variants.cost, 0)
-                    ELSE product_warehouse.qte * COALESCE(products.cost, 0)
-                END
-            ) as total_value'))
+            ->tap(fn ($q) => \App\Services\Costing\CostingReader::joinBalance($q))
+            ->select(DB::raw('SUM(product_warehouse.qte * '.\App\Services\Costing\CostingReader::unitCostSql(
+                'CASE WHEN products.is_variant = 1 AND product_variants.id IS NOT NULL THEN COALESCE(product_variants.cost, 0) ELSE COALESCE(products.cost, 0) END'
+            ).') as total_value'))
             ->first();
 
         // Calculate stock value by retail (price)

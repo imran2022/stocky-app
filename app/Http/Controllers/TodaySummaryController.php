@@ -116,6 +116,7 @@ class TodaySummaryController extends Controller
         ];
 
         /* ------------------------------------------------------------ stock */
+        \App\Services\Costing\CostingReader::prepareStockValue();   // moving-average costing (no-op while off)
         $stockRow = $wh(
             DB::table('product_warehouse')
                 ->join('products', 'products.id', '=', 'product_warehouse.product_id')
@@ -125,7 +126,8 @@ class TodaySummaryController extends Controller
                 ->where('products.type', '!=', 'is_service'),
             'product_warehouse.warehouse_id'
         )
-            ->selectRaw('COALESCE(SUM(product_warehouse.qte * COALESCE(product_variants.cost, products.cost, 0)),0) at_cost,
+            ->tap(fn ($q) => \App\Services\Costing\CostingReader::joinBalance($q))
+            ->selectRaw('COALESCE(SUM(product_warehouse.qte * '.\App\Services\Costing\CostingReader::unitCostSql('COALESCE(product_variants.cost, products.cost, 0)').'),0) at_cost,
                          COALESCE(SUM(product_warehouse.qte * COALESCE(product_variants.price, products.price, 0)),0) at_retail,
                          COALESCE(SUM(product_warehouse.qte),0) units')
             ->first();
