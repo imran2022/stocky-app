@@ -177,10 +177,9 @@ $reportResp = $dashboardController->report_dashboard($dashReq, (int) $warehouse-
 $reportData = $reportResp instanceof \Illuminate\Http\JsonResponse ? json_decode($reportResp->getContent(), true) : $reportResp;
 $stats = $reportData['report'] ?? [];
 
-// today_sales = ALL statuses = 300 (completed) + 200 (pending) = 500 —
-// this is the exact divergence that makes "Sales" and "Profit" look
-// unrelated at a glance.
-$assert(abs(($stats['today_sales'] ?? -1) - 500.0) < 0.01, 'today_sales must include BOTH the completed and pending sale (300+200=500). Got: '.($stats['today_sales'] ?? 'MISSING'));
+// today_sales = completed sales only = 300. The pending 200 is not a sale yet (Audit Batch 4 decision:
+// every dashboard figure counts completed documents only), so Sales and Profit now share one revenue base.
+$assert(abs(($stats['today_sales'] ?? -1) - 300.0) < 0.01, 'today_sales must count only the completed sale (300; the pending 200 is excluded). Got: '.($stats['today_sales'] ?? 'MISSING'));
 
 // today_purchases = 500 (the full purchase, regardless of how much of it
 // has been sold) — confirms Purchases is a separate, unrelated figure,

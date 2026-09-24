@@ -3595,7 +3595,7 @@ return [
 'Invoices' => 'Invoices',
 'Quick_Actions' => 'Quick actions',
 'Stock_Valuation_Hint' => 'Valuations are computed for the selected warehouse.',
-'Dashboard_Sales_Hint' => 'Total of all sales in this period, regardless of status (completed, pending, etc.).',
+'Dashboard_Sales_Hint' => 'Total of completed sales in this period, including tax and delivery charge. Pending and draft sales are not counted.',
 'Dashboard_Profit_Hint' => 'Completed sales only, minus cost of goods sold (FIFO) and expenses, plus service job profit. Not simply Sales minus Purchases — buying stock is not an expense until it is sold. Click to see the full breakdown.',
 'By_Cost' => 'By cost',
 'By_Retail' => 'By retail',
