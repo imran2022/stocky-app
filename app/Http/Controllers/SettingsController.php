@@ -1886,6 +1886,7 @@ class SettingsController extends Controller
 
     public function Clear_Cache(Request $request)
     {
+        $this->authorizeForUser($request->user('api'), 'update', Setting::class);   // Audit Batch 5
         Artisan::call('cache:clear');
         Artisan::call('view:clear');
         Artisan::call('route:clear');

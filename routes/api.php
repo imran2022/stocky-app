@@ -66,7 +66,6 @@ Route::group([
     Route::post('reset', 'PasswordResetController@reset');
 });
 
-Route::get('/products_clean_names', 'ProductsController@cleanNames');
 
 Route::post('getAccessToken', 'AuthController@getAccessToken');
 

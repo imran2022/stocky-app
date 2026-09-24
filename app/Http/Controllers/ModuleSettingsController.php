@@ -27,6 +27,7 @@ class ModuleSettingsController extends Controller
 
     public function update_status_module(Request $request)
     {
+        $this->authorizeForUser($request->user('api'), 'update', \App\Models\Setting::class);   // Audit Batch 5: modules are code, settings admins only
         $request->validate([
             'name'   => 'required|string',
             'status' => 'required',
@@ -49,6 +50,7 @@ class ModuleSettingsController extends Controller
 
     public function upload_module(Request $request)
     {
+        $this->authorizeForUser($request->user('api'), 'update', \App\Models\Setting::class);   // Audit Batch 5: modules are code, settings admins only
         $request->validate([
             'module_zip' => 'required|file|mimes:zip',
         ]);
@@ -65,6 +67,16 @@ class ModuleSettingsController extends Controller
 
         $zip = new \ZipArchive;
         if ($zip->open($file->getRealPath()) === true) {
+            // Audit Batch 5: refuse "zip slip" entries that would be written outside the temp folder
+            for ($i = 0; $i < $zip->numFiles; $i++) {
+                $entry = str_replace('\\', '/', (string) $zip->getNameIndex($i));
+                if (str_starts_with($entry, '/') || preg_match('#(^|/)\.\.(/|$)#', $entry)) {
+                    $zip->close();
+                    File::deleteDirectory($tmpPath);
+
+                    return response()->json(['message' => 'Invalid module archive'], 422);
+                }
+            }
             $zip->extractTo($tmpPath);
             $zip->close();
         } else {
@@ -89,7 +101,7 @@ class ModuleSettingsController extends Controller
         $moduleJson = json_decode(File::get($sourceDir . '/module.json'), true);
         $moduleName = $moduleJson['name'] ?? null;
 
-        if (!$moduleName) {
+        if (! is_string($moduleName) || ! preg_match('/^[A-Za-z0-9_-]+$/', $moduleName)) {   // Audit Batch 5: no path characters in the module name
             File::deleteDirectory($tmpPath);
             return response()->json(['message' => 'Invalid module.json'], 422);
         }
