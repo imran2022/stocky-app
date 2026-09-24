@@ -163,6 +163,7 @@ class WooCommerceSyncController extends BaseController
 
     public function getSettings(Request $request)
     {
+        $this->authorizeForUser($request->user('api'), 'view', WooCommerceSetting::class);   // Audit Batch 5: was open to any logged-in user
         $settings = WooCommerceSetting::first();
 
         return response()->json([

@@ -1029,7 +1029,7 @@ class SettingsController extends Controller
             $item['backup_s3_region'] = $settings->backup_s3_region ?? null;
             $item['backup_s3_access_key'] = $settings->backup_s3_access_key ?? null;
             // Only include secret key if include_secrets is true (for security)
-            $includeSecrets = $request->has('include_secrets') && ($request->input('include_secrets') == '1' || $request->input('include_secrets') == 'true' || $request->input('include_secrets') === 1 || $request->input('include_secrets') === true);
+            $includeSecrets = \Illuminate\Support\Facades\Gate::forUser($request->user('api'))->allows('update', Setting::class) && $request->has('include_secrets') && ($request->input('include_secrets') == '1' || $request->input('include_secrets') == 'true' || $request->input('include_secrets') === 1 || $request->input('include_secrets') === true);
             if ($includeSecrets) {
                 $item['backup_s3_secret_key'] = $settings->backup_s3_secret_key ?? null;
             } else {
@@ -1805,7 +1805,7 @@ class SettingsController extends Controller
             $item['backup_s3_region'] = $settings->backup_s3_region ?? null;
             $item['backup_s3_access_key'] = $settings->backup_s3_access_key ?? null;
             // Only include secret key if include_secrets is true (for security)
-            $includeSecrets = $request->has('include_secrets') && ($request->input('include_secrets') == '1' || $request->input('include_secrets') == 'true' || $request->input('include_secrets') === 1 || $request->input('include_secrets') === true);
+            $includeSecrets = \Illuminate\Support\Facades\Gate::forUser($request->user('api'))->allows('update', Setting::class) && $request->has('include_secrets') && ($request->input('include_secrets') == '1' || $request->input('include_secrets') == 'true' || $request->input('include_secrets') === 1 || $request->input('include_secrets') === true);
             if ($includeSecrets) {
                 $item['backup_s3_secret_key'] = $settings->backup_s3_secret_key ?? null;
             } else {

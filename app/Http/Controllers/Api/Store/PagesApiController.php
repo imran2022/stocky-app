@@ -31,6 +31,7 @@ class PagesApiController extends Controller
 
     public function store(Request $req)
     {
+        $this->authorizeForUser(auth('api')->user(), 'update', \App\Models\Setting::class);   // Audit Batch 5: settings admins only
         $data = $req->validate([
             'title' => 'required|string|max:190',
             'slug' => 'nullable|string|max:190|unique:store_pages,slug',
@@ -68,6 +69,7 @@ class PagesApiController extends Controller
 
     public function update(Request $req, $id)
     {
+        $this->authorizeForUser(auth('api')->user(), 'update', \App\Models\Setting::class);   // Audit Batch 5: settings admins only
         $page = StorePage::findOrFail($id);
         $data = $req->validate([
             'title' => 'required|string|max:190',
@@ -99,6 +101,7 @@ class PagesApiController extends Controller
 
     public function destroy($id)
     {
+        $this->authorizeForUser(auth('api')->user(), 'update', \App\Models\Setting::class);   // Audit Batch 5: settings admins only
         $page = StorePage::findOrFail($id);
         $page->delete();
 

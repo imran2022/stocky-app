@@ -219,6 +219,7 @@ class QuickBooksController extends Controller
     /** GET /quickbooks/status (behind auth) */
     public function status()
     {
+        $this->authorizeForUser(auth('api')->user(), 'update', \App\Models\Setting::class);   // Audit Batch 5: settings admins only
         $env = $this->env();
         $row = QuickBooksToken::where('environment', $env)->latest()->first();
 
@@ -238,6 +239,7 @@ class QuickBooksController extends Controller
     /** POST /quickbooks/disconnect (behind auth) */
     public function disconnect()
     {
+        $this->authorizeForUser(auth('api')->user(), 'update', \App\Models\Setting::class);   // Audit Batch 5: settings admins only
         $env = $this->env();
         $rows = QuickBooksToken::where('environment', $env)->get();
         foreach ($rows as $r) {
@@ -252,12 +254,14 @@ class QuickBooksController extends Controller
     /** GET /quickbooks/settings (behind auth) — read from .env only */
     public function quickbookgetSettings()
     {
+        $this->authorizeForUser(auth('api')->user(), 'update', \App\Models\Setting::class);   // Audit Batch 5: settings admins only
         return response()->json(config('services.quickbooks'));
     }
 
     /** POST /quickbooks/settings (behind auth) — write to .env */
     public function saveSettings(Request $request)
     {
+        $this->authorizeForUser(auth('api')->user(), 'update', \App\Models\Setting::class);   // Audit Batch 5: settings admins only
         $data = $request->validate([
             'client_id' => 'required|string',
             'client_secret' => 'required|string',
@@ -331,6 +335,7 @@ class QuickBooksController extends Controller
 
     public function audits(Request $request)
     {
+        $this->authorizeForUser(auth('api')->user(), 'update', \App\Models\Setting::class);   // Audit Batch 5: settings admins only
         $level = $request->query('level'); // optional
         $q = QuickBooksAudit::query()->latest();
         if ($level) {
@@ -359,6 +364,7 @@ class QuickBooksController extends Controller
     // Count totals with both NULL and empty string
     public function clientsStats()
     {
+        $this->authorizeForUser(auth('api')->user(), 'update', \App\Models\Setting::class);   // Audit Batch 5: settings admins only
         $total = \App\Models\Client::where('deleted_at', '=', null)->count();
         $synced = \App\Models\Client::where('deleted_at', '=', null)->whereNotNull('quickbooks_id')
             ->where('quickbooks_id', '!=', '')
@@ -375,6 +381,7 @@ class QuickBooksController extends Controller
     // Paginated unsynced list with optional search
     public function clientsUnsynced(Request $request)
     {
+        $this->authorizeForUser(auth('api')->user(), 'update', \App\Models\Setting::class);   // Audit Batch 5: settings admins only
         $q = trim((string) $request->query('q', ''));
         $perPage = 10;
 
@@ -405,6 +412,7 @@ class QuickBooksController extends Controller
     // Sync all or selected clients
     public function syncClients(Request $request)
     {
+        $this->authorizeForUser(auth('api')->user(), 'update', \App\Models\Setting::class);   // Audit Batch 5: settings admins only
         /** @var \App\Services\QuickBooksService $qb */
         $qb = app(\App\Services\QuickBooksService::class);
 

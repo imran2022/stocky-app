@@ -37,6 +37,7 @@ class CustomFieldController extends BaseController
      */
     public function store(Request $request)
     {
+        $this->authorizeForUser(auth('api')->user(), 'update', \App\Models\Setting::class);   // Audit Batch 5: settings admins only
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'field_type' => 'required|in:text,number,textarea,date,select,checkbox',
@@ -91,6 +92,7 @@ class CustomFieldController extends BaseController
      */
     public function update(Request $request, $id)
     {
+        $this->authorizeForUser(auth('api')->user(), 'update', \App\Models\Setting::class);   // Audit Batch 5: settings admins only
         $customField = CustomField::where('deleted_at', '=', null)->findOrFail($id);
 
         $validated = $request->validate([
