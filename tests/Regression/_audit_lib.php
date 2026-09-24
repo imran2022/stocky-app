@@ -26,6 +26,8 @@ function call($ctrlClass, $method, array $payload, $verb='POST', $args=[]) {
         return [404, 'model not found'];
     } catch (Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $e) {
         return [$e->getStatusCode(), $e->getMessage()];
+    } catch (Illuminate\Auth\Access\AuthorizationException $e) {
+        return [403, $e->getMessage()];
     } catch (Illuminate\Validation\ValidationException $e) {
         return [422, json_encode($e->errors())];
     } catch (Throwable $e) {

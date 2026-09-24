@@ -10585,11 +10585,9 @@ public function draftInvoices(Request $request)
     // ===================== CUSTOMER LOYALTY POINTS REPORT =====================
     public function customerLoyaltyPoints(Request $request)
     {
-        // Permission (create a permission key for this report if needed)
-        try {
-            $this->authorizeForUser($request->user('api'), 'customer_loyalty_points_report', \App\Models\Sale::class);
-        } catch (\Throwable $e) { /* fallback allow if no policy */
-        }
+        // Audit Batch 3 (R1): the permission check used to be wrapped in a catch-all that swallowed the 403,
+        // so any logged-in user could read the loyalty report. The policy method and permission key exist.
+        $this->authorizeForUser($request->user('api'), 'customer_loyalty_points_report', \App\Models\Sale::class);
 
         // Date range
         $start = $request->filled('from') ? \Carbon\Carbon::parse($request->get('from'))->startOfDay() : now()->subDays(29)->startOfDay();
