@@ -51,7 +51,7 @@
   </ModernCard>
 </template>
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import ModernCard from '../parts/ModernCard.vue';
 import { useFormat } from '../../../../composables/useFormat';
 import { useTt } from '../useTt';
@@ -68,31 +68,37 @@ const ZMAX = 8;
 const zoom = ref(1);
 const cx = ref(0), cy = ref(0); // top-left of the visible window, in map units
 const panning = ref(false);
-let drag = null;
+const aspect = ref(0.8);       // width / height of the map box on screen (read from the page, so the view always fills the box)
+let drag = null, ro = null;
 const W = computed(() => map.value?.viewBox[0] || 1), H = computed(() => map.value?.viewBox[1] || 1);
+const VH = computed(() => H.value / zoom.value), VW = computed(() => VH.value * aspect.value);
 function clampView() {
-  const vw = W.value / zoom.value, vh = H.value / zoom.value;
-  cx.value = Math.min(Math.max(0, cx.value), W.value - vw);
-  cy.value = Math.min(Math.max(0, cy.value), H.value - vh);
+  // Wider/taller window than the map: keep it centred. Otherwise keep the window inside the map.
+  cx.value = VW.value >= W.value ? (W.value - VW.value) / 2 : Math.min(Math.max(0, cx.value), W.value - VW.value);
+  cy.value = VH.value >= H.value ? (H.value - VH.value) / 2 : Math.min(Math.max(0, cy.value), H.value - VH.value);
 }
-const vb = computed(() => (map.value ? `${cx.value} ${cy.value} ${W.value / zoom.value} ${H.value / zoom.value}` : '0 0 1 1'));
+const vb = computed(() => (map.value ? `${cx.value} ${cy.value} ${VW.value} ${VH.value}` : '0 0 1 1'));
+function measure() { const r = svgEl.value?.getBoundingClientRect(); if (r && r.width && r.height) { aspect.value = r.width / r.height; clampView(); } }
+watch(svgEl, el => { ro?.disconnect(); if (el && typeof ResizeObserver !== 'undefined') { ro = new ResizeObserver(measure); ro.observe(el); } measure(); });
+watch(map, () => nextTick(() => { measure(); clampView(); }));
+onBeforeUnmount(() => ro?.disconnect());
 // Zoom around a point (in map units) so what is under the pointer / centre stays put.
 function zoomAt(f, px, py) {
   const nz = Math.min(ZMAX, Math.max(1, zoom.value * f));
   if (nz === zoom.value) return;
-  const rx = (px - cx.value) / (W.value / zoom.value), ry = (py - cy.value) / (H.value / zoom.value);
+  const rx = (px - cx.value) / VW.value, ry = (py - cy.value) / VH.value;
   zoom.value = nz;
-  cx.value = px - rx * (W.value / nz); cy.value = py - ry * (H.value / nz);
+  cx.value = px - rx * VW.value; cy.value = py - ry * VH.value;
   clampView();
 }
-const zoomBy = f => zoomAt(f, cx.value + W.value / zoom.value / 2, cy.value + H.value / zoom.value / 2);
-function resetZoom() { zoom.value = 1; cx.value = 0; cy.value = 0; tip.value = null; }
+const zoomBy = f => zoomAt(f, cx.value + VW.value / 2, cy.value + VH.value / 2);
+function resetZoom() { zoom.value = 1; cx.value = 0; cy.value = 0; clampView(); tip.value = null; }
 // Ctrl/Cmd + wheel zooms (a plain wheel keeps scrolling the page).
 function onWheel(e) {
   if (!(e.ctrlKey || e.metaKey) || !svgEl.value) return;
   e.preventDefault();
-  const r = svgEl.value.getBoundingClientRect(), vw = W.value / zoom.value, vh = H.value / zoom.value;
-  zoomAt(e.deltaY < 0 ? 1.25 : 0.8, cx.value + ((e.clientX - r.left) / r.width) * vw, cy.value + ((e.clientY - r.top) / r.height) * vh);
+  const r = svgEl.value.getBoundingClientRect();
+  zoomAt(e.deltaY < 0 ? 1.25 : 0.8, cx.value + ((e.clientX - r.left) / r.width) * VW.value, cy.value + ((e.clientY - r.top) / r.height) * VH.value);
 }
 function panStart(e) { if (zoom.value > 1) drag = { x: e.clientX, y: e.clientY, cx: cx.value, cy: cy.value, id: e.pointerId, moved: false }; }
 function panMove(e) {
@@ -101,8 +107,8 @@ function panMove(e) {
   if (!drag.moved && Math.hypot(dx, dy) < 5) return;
   if (!drag.moved) { drag.moved = true; panning.value = true; tip.value = null; try { svgEl.value.setPointerCapture(e.pointerId); } catch (_) {} }
   const r = svgEl.value.getBoundingClientRect();
-  cx.value = drag.cx - (dx / r.width) * (W.value / zoom.value);
-  cy.value = drag.cy - (dy / r.height) * (H.value / zoom.value);
+  cx.value = drag.cx - (dx / r.width) * VW.value;
+  cy.value = drag.cy - (dy / r.height) * VH.value;
   clampView();
 }
 function panEnd() { drag = null; panning.value = false; }

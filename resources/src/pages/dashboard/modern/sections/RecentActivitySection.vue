@@ -34,7 +34,7 @@ const props = defineProps({ ctx: { type: Object, required: true } });
 const tt = useTt();
 const ins = computed(() => props.ctx.insights);
 const tab = ref('all');
-const SHOW = 12;
+const SHOW = 5;   // the card stays short: the full list is one click away (View all)
 
 // One kind per row, from the module name the Activity Log already records.
 function kindOf(module) {

@@ -255,8 +255,11 @@ button.dm-kpi { appearance: none; }
 .dm-map { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); align-items: start; }
 @container dm (min-width: 720px) { .dm-map { grid-template-columns: minmax(220px, 0.9fr) minmax(0, 1.1fr); } }
 .dm-map-fig { position: relative; margin: 0 auto; width: 100%; max-width: 380px; }
-.dm-map-fig svg { display: block; width: 100%; height: auto; }
+.dm-map-fig svg { display: block; width: 100%; height: auto; aspect-ratio: 4 / 5; outline: none; -webkit-tap-highlight-color: transparent; }
+.dm-map-fig svg path, .dm-map-fig svg circle { outline: none; }
+@container dm (min-width: 720px) { .dm-map { grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr); } .dm-map-fig { max-width: 560px; } .dm-map-fig svg { aspect-ratio: 1 / 1; } }
 .dm-map-fig path { stroke: var(--dm-surface); stroke-width: 0.7; transition: opacity 0.15s ease; }
+.dm-map-fig path:focus { outline: none; }
 .dm-map-fig path:focus-visible { outline: none; stroke: var(--dm-ink); stroke-width: 1.6; }
 .dm-map-tip { position: absolute; pointer-events: none; z-index: 3; min-width: 140px; max-width: 220px; padding: 8px 10px; border-radius: 10px; background: var(--dm-surface); border: 1px solid var(--dm-line); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); font-size: 12px; line-height: 1.4; }
 .dm-map-tip b { display: block; font-size: 13px; }

@@ -5188,3 +5188,8 @@ Tests: `audit_ui1_dashboard_prefs.php`, `audit_ui2_dashboard_insights.php`.
 - **Phone bottom bar:** the last tab is now "Menu" and opens the normal sidebar (it presses the top bar's own menu button; no vendor file changed).
 - **Fewer requests:** if both product-ranking sections are hidden in the layout, the slowest query (`dashboard_data?only=products`) is not requested at all; turning a section on fetches it then.
 
+### Modern Dashboard — update 6 (2026-09-25): map fills its box, no click frame, Recent activity 5 rows
+
+- **Map size / zoom.** The map box now uses the full width of its column (square up to 560 px on desktop, 4:5 on phones). While zoomed, the view is computed from the box's real shape, so it fills the whole box (before, it stayed inside a narrow 380 px strip with empty space on both sides). Zoom, pan, reset unchanged.
+- **Black frame on click** was the browser's focus outline on the clicked district / map; removed (keyboard focus still shows a dark district border).
+- **Recent activity** shows at most 5 rows (tabs and day groups stay); "View all" opens the full Activity Log.
