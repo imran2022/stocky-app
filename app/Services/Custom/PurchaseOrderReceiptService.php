@@ -117,6 +117,29 @@ class PurchaseOrderReceiptService
      *     request (same shape applyReceipt() reads: purchase_order_detail_id,
      *     product_id, product_variant_id, quantity, purchase_unit_id).
      */
+    /**
+     * Audit fix (Batch 3, P6). Two ways a GRN could dodge the "cannot receive more than ordered" cap:
+     *  - a NEGATIVE (or zero) quantity on a PO-linked GRN reduced the running total, letting a later
+     *    line over-receive;
+     *  - a line for a product that IS on the PO but carries no purchase_order_detail_id was never
+     *    checked at all. (Extra products that are not on the PO stay allowed.)
+     */
+    private function assertReceivableLines(PurchaseOrder $po, array $requestDetails): void
+    {
+        $onPo = PurchaseOrderDetail::where('purchase_order_id', $po->id)->get(['product_id', 'product_variant_id'])
+            ->map(fn ($d) => $d->product_id.'|'.(int) ($d->product_variant_id ?? 0))->flip();
+
+        foreach ($requestDetails as $row) {
+            if ((float) ($row['quantity'] ?? 0) <= 0) {
+                abort(422, 'Every GRN line against a Purchase Order must have a quantity greater than zero.');
+            }
+            if (empty($row['purchase_order_detail_id'])
+                && $onPo->has(((int) ($row['product_id'] ?? 0)).'|'.(int) ($row['product_variant_id'] ?? 0))) {
+                abort(422, 'A GRN line for a product on the Purchase Order must be linked to its Purchase Order line.');
+            }
+        }
+    }
+
     public function lockAndValidateReceiptLines(PurchaseOrder $po, array $requestDetails): void
     {
         // Lock the PO row itself so a concurrent edit/cancel of the PO
@@ -125,6 +148,8 @@ class PurchaseOrderReceiptService
         if (! $lockedPo || ! in_array($lockedPo->status, ['ordered', 'partially_received'], true)) {
             abort(422, 'This Purchase Order is no longer in a receivable state.');
         }
+
+        $this->assertReceivableLines($lockedPo, $requestDetails);
 
         $detailIds = [];
         foreach ($requestDetails as $row) {
