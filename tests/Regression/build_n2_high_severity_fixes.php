@@ -258,6 +258,16 @@ $overpayReq = Request::create('/api/payment_sales', 'POST', [
     'montant' => 1245.06, 'payment_method_id' => 1, 'change' => 201.00, 'notes' => 'N2 overpay test',
 ]);
 app()->instance('request', $overpayReq);
+// Audit B3 (S4): an applied amount above what is due is now REFUSED (previously silently capped). The UI sends the
+// applied amount as `montant` and the note handed over as `received_amount`, so the legitimate flow is montant = due.
+$refused = false;
+try { $paymentSalesController->store($overpayReq); } catch (Illuminate\Validation\ValidationException $e) { $refused = true; }
+$assert($refused, 'H-01/S4: a payment larger than the amount due must be refused.');
+$overpayReq = Request::create('/api/payment_sales', 'POST', [
+    'sale_id' => $overpaySale->id, 'date' => now()->toDateString(),
+    'montant' => 1044.06, 'payment_method_id' => 1, 'change' => 201.00, 'notes' => 'N2 overpay test',
+]);
+app()->instance('request', $overpayReq);
 $paymentSalesController->store($overpayReq);
 $overpaySale->refresh();
 $approx($overpaySale->paid_amount, 1044.06, 'H-01: Sale.paid_amount must be capped at GrandTotal even when tendered amount is higher (audit repro: tendered 1245.06, due 1044.06).');
@@ -277,6 +287,14 @@ $paymentPurchasesController = app(PaymentPurchasesController::class);
 $overpayPurReq = Request::create('/api/payment_purchases', 'POST', [
     'purchase_id' => $overpayPurchase->id, 'date' => now()->toDateString(),
     'montant' => 20301, 'payment_method_id' => 1, 'change' => 301, 'notes' => 'N2 overpay test', 'account_id' => null,
+]);
+app()->instance('request', $overpayPurReq);
+$refused = false;
+try { $paymentPurchasesController->store($overpayPurReq); } catch (Illuminate\Validation\ValidationException $e) { $refused = true; }
+$assert($refused, 'H-01/S4: a purchase payment larger than the amount due must be refused.');
+$overpayPurReq = Request::create('/api/payment_purchases', 'POST', [
+    'purchase_id' => $overpayPurchase->id, 'date' => now()->toDateString(),
+    'montant' => 20000, 'payment_method_id' => 1, 'change' => 301, 'notes' => 'N2 overpay test', 'account_id' => null,
 ]);
 app()->instance('request', $overpayPurReq);
 $paymentPurchasesController->store($overpayPurReq);

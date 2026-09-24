@@ -55,11 +55,18 @@ class UniqueRefGenerator
                 }
 
                 $lastException = $e;
-                // Audit Batch 3 (H6): inside a transaction the generator reads from the transaction's
-                // own snapshot, so calling it again returns the SAME stale "last Ref" and every retry
-                // collides. Instead, step past the colliding value using locking reads, which always
-                // see the latest committed rows.
-                $generateRef = self::steppingPast($model, (string) $model->Ref);
+                // Audit Batch 3 (H6): inside a transaction the generator reads from the transaction's own
+                // snapshot, so asking it again can return the SAME stale "last Ref" and every retry would
+                // collide. Ask it once more; if it still hands back a taken value, step past the collision
+                // using locking reads, which always see the latest committed rows.
+                $collided = (string) $model->Ref;
+                $generateRef = function () use ($generateRef, $model, $collided): string {
+                    $next = (string) $generateRef();
+
+                    return $next !== $collided && ! self::exists($model, $next)
+                        ? $next
+                        : (self::steppingPast($model, $collided))();
+                };
             }
         }
 
@@ -76,18 +83,23 @@ class UniqueRefGenerator
             $candidate = $collided;
             for ($i = 0; $i < 1000; $i++) {
                 $candidate = self::increment($candidate);
-                $taken = $model->newQuery()->getQuery()->newQuery()
-                    ->from($model->getTable())
-                    ->where('Ref', $candidate)
-                    ->lockForUpdate()
-                    ->exists();
-                if (! $taken) {
+                if (! self::exists($model, $candidate)) {
                     return $candidate;
                 }
             }
 
             return $candidate;
         };
+    }
+
+    /** Locking read (sees the latest committed rows, unlike the transaction snapshot). */
+    private static function exists(Model $model, string $ref): bool
+    {
+        return $model->newQuery()->getQuery()->newQuery()
+            ->from($model->getTable())
+            ->where('Ref', $ref)
+            ->lockForUpdate()
+            ->exists();
     }
 
     /** "SL_0099" -> "SL_0100"; a Ref with no trailing number gets "_1" appended. */
