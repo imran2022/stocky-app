@@ -537,6 +537,7 @@ class PurchasesReturnController extends BaseController
                 );
             }
 
+            \App\Support\PaymentReconciler::assertTotalCoversPayments('purchase_returns', (int) $current_PurchaseReturn->id, (float) $request['GrandTotal']);   // Audit Batch 5
             $due = $request['GrandTotal'] - $current_PurchaseReturn->paid_amount;
             if ($due === 0.0 || $due < 0.0) {
                 $payment_statut = 'paid';

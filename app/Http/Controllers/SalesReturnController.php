@@ -564,6 +564,7 @@ class SalesReturnController extends BaseController
                 );
             }
 
+            \App\Support\PaymentReconciler::assertTotalCoversPayments('sale_returns', (int) $current_SaleReturn->id, (float) $request['GrandTotal']);   // Audit Batch 5
             $due = $request['GrandTotal'] - $current_SaleReturn->paid_amount;
             if ($due === 0.0 || $due < 0.0) {
                 $payment_statut = 'paid';

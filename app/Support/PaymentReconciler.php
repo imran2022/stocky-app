@@ -61,6 +61,31 @@ class PaymentReconciler
         }
     }
 
+    /**
+     * An edit may not shrink a document below what has already been paid on it: the surplus would sit as a
+     * negative due with no payment row to correct. The user removes / reduces the payment first, then edits.
+     *
+     * @param  string  $docTable  sales | purchases | sale_returns | purchase_returns
+     *
+     * @throws ValidationException
+     */
+    public static function assertTotalCoversPayments(string $docTable, int $id, float $newGrandTotal): void
+    {
+        [$paymentTable, $fk] = [
+            'sales' => ['payment_sales', 'sale_id'],
+            'purchases' => ['payment_purchases', 'purchase_id'],
+            'sale_returns' => ['payment_sale_returns', 'sale_return_id'],
+            'purchase_returns' => ['payment_purchase_returns', 'purchase_return_id'],
+        ][$docTable];
+
+        $paid = self::paidSum($paymentTable, $fk, $id);
+        if ($paid > $newGrandTotal + 0.01) {
+            throw ValidationException::withMessages(['GrandTotal' => [sprintf(
+                'The new total %.2f is below the %.2f already paid on this document. Remove or reduce the payment first.', $newGrandTotal, $paid
+            )]]);
+        }
+    }
+
     /** Sum of live payment rows for a document, optionally excluding one payment row. */
     public static function paidSum(string $paymentTable, string $fk, int $docId, ?int $exceptPaymentId = null): float
     {
