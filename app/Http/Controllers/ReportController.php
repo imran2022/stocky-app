@@ -64,6 +64,21 @@ use Illuminate\Support\Facades\Auth;
 
 class ReportController extends BaseController
 {
+    /** @var array<int|string, \App\Models\Unit|null> units already loaded in this request (Audit Batch 5: reports looked the same unit up once per sale line) */
+    private array $unitCache = [];
+
+    private function cachedUnit($id)
+    {
+        if ($id === null || $id === '') {
+            return null;
+        }
+        if (! array_key_exists($id, $this->unitCache)) {
+            $this->unitCache[$id] = Unit::find($id);
+        }
+
+        return $this->unitCache[$id];
+    }
+
     use CalculatesCogsAndAverageCost;
     // ----------- Get Last 5 Sales --------------\\
 
@@ -4787,14 +4802,14 @@ class ReportController extends BaseController
 
             // check if detail has sale_unit_id Or Null
             if ($detail->sale_unit_id !== null) {
-                $unit = Unit::where('id', $detail->sale_unit_id)->first();
+                $unit = $this->cachedUnit($detail->sale_unit_id);
             } else {
                 $product_unit_sale_id = Product::with('unitSale')
                     ->where('id', $detail->product_id)
                     ->first();
 
                 if ($product_unit_sale_id['unitSale']) {
-                    $unit = Unit::where('id', $product_unit_sale_id['unitSale']->id)->first();
+                    $unit = $this->cachedUnit($product_unit_sale_id['unitSale']->id);
                 }
                 $unit = null;
             }
@@ -4925,13 +4940,13 @@ class ReportController extends BaseController
 
             // check if detail has sale_unit_id Or Null
             if ($detail->sale_unit_id !== null) {
-                $unit = Unit::where('id', $detail->sale_unit_id)->first();
+                $unit = $this->cachedUnit($detail->sale_unit_id);
             } else {
                 $product_unit_sale_id = Product::with('unitSale')
                     ->where('id', $detail->product_id)
                     ->first();
                 if ($product_unit_sale_id['unitSale']) {
-                    $unit = Unit::where('id', $product_unit_sale_id['unitSale']->id)->first();
+                    $unit = $this->cachedUnit($product_unit_sale_id['unitSale']->id);
                 }
                 $unit = null;
             }
@@ -5062,12 +5077,12 @@ class ReportController extends BaseController
 
             // -------check if detail has purchase_unit_id Or Null
             if ($detail->purchase_unit_id !== null) {
-                $unit = Unit::where('id', $detail->purchase_unit_id)->first();
+                $unit = $this->cachedUnit($detail->purchase_unit_id);
             } else {
                 $product_unit_purchase_id = Product::with('unitPurchase')
                     ->where('id', $detail->product_id)
                     ->first();
-                $unit = Unit::where('id', $product_unit_purchase_id['unitPurchase']->id)->first();
+                $unit = $this->cachedUnit($product_unit_purchase_id['unitPurchase']->id);
             }
 
             if ($detail->product_variant_id) {
@@ -5202,12 +5217,12 @@ class ReportController extends BaseController
 
             // -------check if detail has purchase_unit_id Or Null
             if ($detail->purchase_unit_id !== null) {
-                $unit = Unit::where('id', $detail->purchase_unit_id)->first();
+                $unit = $this->cachedUnit($detail->purchase_unit_id);
             } else {
                 $product_unit_purchase_id = Product::with('unitPurchase')
                     ->where('id', $detail->product_id)
                     ->first();
-                $unit = Unit::where('id', $product_unit_purchase_id['unitPurchase']->id)->first();
+                $unit = $this->cachedUnit($product_unit_purchase_id['unitPurchase']->id);
             }
 
             if ($detail->product_variant_id) {
@@ -5472,14 +5487,14 @@ class ReportController extends BaseController
 
             // check if detail has sale_unit_id Or Null
             if ($detail->sale_unit_id !== null) {
-                $unit = Unit::where('id', $detail->sale_unit_id)->first();
+                $unit = $this->cachedUnit($detail->sale_unit_id);
             } else {
                 $product_unit_sale_id = Product::with('unitSale')
                     ->where('id', $detail->product_id)
                     ->first();
 
                 if ($product_unit_sale_id['unitSale']) {
-                    $unit = Unit::where('id', $product_unit_sale_id['unitSale']->id)->first();
+                    $unit = $this->cachedUnit($product_unit_sale_id['unitSale']->id);
                 }
                 $unit = null;
             }
@@ -6039,7 +6054,7 @@ class ReportController extends BaseController
                 $sold_qty = 0;
                 if (count($lims_product_sale_data)) {
                     foreach ($lims_product_sale_data as $product_sale) {
-                        $unit = Unit::find($product_sale->sale_unit_id);
+                        $unit = $this->cachedUnit($product_sale->sale_unit_id);
 
                         // Lines without a sale unit (POS/imports, deleted units)
                         // count as base quantity instead of crashing.
@@ -6054,7 +6069,7 @@ class ReportController extends BaseController
                     }
                 }
 
-                $unit_shortname = Unit::where('id', $product->unit_id)->first();
+                $unit_shortname = $this->cachedUnit($product->unit_id);
 
                 $nestedData['sold_qty'] = $sold_qty.' '.($unit_shortname->ShortName ?? '');
 
@@ -6296,14 +6311,14 @@ class ReportController extends BaseController
 
             // check if detail has sale_unit_id Or Null
             if ($detail->sale_unit_id !== null) {
-                $unit = Unit::where('id', $detail->sale_unit_id)->first();
+                $unit = $this->cachedUnit($detail->sale_unit_id);
             } else {
                 $product_unit_sale_id = Product::with('unitSale')
                     ->where('id', $detail->product_id)
                     ->first();
 
                 if ($product_unit_sale_id['unitSale']) {
-                    $unit = Unit::where('id', $product_unit_sale_id['unitSale']->id)->first();
+                    $unit = $this->cachedUnit($product_unit_sale_id['unitSale']->id);
                 }
                 $unit = null;
             }
@@ -6500,14 +6515,14 @@ class ReportController extends BaseController
 
             // check if detail has sale_unit_id Or Null
             if ($detail->sale_unit_id !== null) {
-                $unit = Unit::where('id', $detail->sale_unit_id)->first();
+                $unit = $this->cachedUnit($detail->sale_unit_id);
             } else {
                 $product_unit_sale_id = Product::with('unitSale')
                     ->where('id', $detail->product_id)
                     ->first();
 
                 if ($product_unit_sale_id['unitSale']) {
-                    $unit = Unit::where('id', $product_unit_sale_id['unitSale']->id)->first();
+                    $unit = $this->cachedUnit($product_unit_sale_id['unitSale']->id);
                 }
                 $unit = null;
             }
@@ -6971,12 +6986,12 @@ class ReportController extends BaseController
 
             // -------check if detail has purchase_unit_id Or Null
             if ($detail->purchase_unit_id !== null) {
-                $unit = Unit::where('id', $detail->purchase_unit_id)->first();
+                $unit = $this->cachedUnit($detail->purchase_unit_id);
             } else {
                 $product_unit_purchase_id = Product::with('unitPurchase')
                     ->where('id', $detail->product_id)
                     ->first();
-                $unit = Unit::where('id', $product_unit_purchase_id['unitPurchase']->id)->first();
+                $unit = $this->cachedUnit($product_unit_purchase_id['unitPurchase']->id);
             }
 
             if ($detail->product_variant_id) {
@@ -7619,7 +7634,7 @@ class ReportController extends BaseController
         $purchase_quantity = 0;
         foreach ($purchases as $purchase) {
 
-            $unit = Unit::where('id', $purchase->purchase_unit_id)->first();
+            $unit = $this->cachedUnit($purchase->purchase_unit_id);
 
             if ($unit) {
                 if ($unit->operator == '/') {
