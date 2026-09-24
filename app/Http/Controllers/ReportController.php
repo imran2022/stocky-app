@@ -771,6 +771,11 @@ class ReportController extends BaseController
     // (kept your existing helper usage)
     $Purchases = $helpers->Show_Records($Purchases);
 
+    // Audit Batch 4: totals only ever describe RECEIVED purchases unless the user explicitly picks another status.
+    if (! $request->filled('statut')) {
+        $Purchases->where('purchases.statut', 'received');
+    }
+
     // Multiple Filter
     $Filtred = $helpers->filter($Purchases, $columns, $param, $request)
         // Search With Multiple Param
@@ -981,6 +986,11 @@ class ReportController extends BaseController
     //  Check If User Has Permission Show All Records
     // (kept your existing helper usage)
     $Sales = $helpers->Show_Records($Sales);
+
+    // Audit Batch 4: totals only ever describe COMPLETED sales unless the user explicitly picks another status.
+    if (! $request->filled('statut')) {
+        $Sales->where('sales.statut', \App\Support\Reporting\SalesFigures::SALE_STATUS);
+    }
 
     // Multiple Filter
     $Filtred = $helpers->filter($Sales, $columns, $param, $request)
