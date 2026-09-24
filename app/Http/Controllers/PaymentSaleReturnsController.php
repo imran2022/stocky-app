@@ -261,6 +261,9 @@ class PaymentSaleReturnsController extends BaseController
                     'payment_statut' => $payment_statut,
                 ]);
 
+                // Audit Batch 3 (S4/P4): payment rows are the source of truth for paid_amount / payment_statut.
+                \App\Support\PaymentReconciler::syncSaleReturn((int) $SaleReturn->id);
+
             }, 10);
             } catch (\InvalidArgumentException $e) {
                 return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
@@ -303,6 +306,11 @@ class PaymentSaleReturnsController extends BaseController
             }
 
             $SaleReturn = SaleReturn::find($payment->sale_return_id);
+            \App\Support\PaymentReconciler::assertWithinDue(
+                (float) $SaleReturn->GrandTotal,
+                \App\Support\PaymentReconciler::paidSum('payment_sale_returns', 'sale_return_id', (int) $SaleReturn->id, (int) $payment->id),
+                (float) $request['montant']
+            );
             $old_total_paid = $SaleReturn->paid_amount - $payment->montant;
             $new_total_paid = $old_total_paid + $request['montant'];
             $due = $SaleReturn->GrandTotal - $new_total_paid;
@@ -350,6 +358,9 @@ class PaymentSaleReturnsController extends BaseController
                 'paid_amount' => $new_total_paid,
                 'payment_statut' => $payment_statut,
             ]);
+
+            // Audit Batch 3 (S4/P4): payment rows are the source of truth for paid_amount / payment_statut.
+            \App\Support\PaymentReconciler::syncSaleReturn((int) $SaleReturn->id);
 
         }, 10);
 
@@ -421,6 +432,9 @@ class PaymentSaleReturnsController extends BaseController
                 'paid_amount' => $total_paid,
                 'payment_statut' => $payment_statut,
             ]);
+
+            // Audit Batch 3 (S4/P4): payment rows are the source of truth for paid_amount / payment_statut.
+            \App\Support\PaymentReconciler::syncSaleReturn((int) $SaleReturn->id);
 
         }, 10);
 

@@ -271,6 +271,13 @@ class PaymentSalesController extends BaseController
                     }
                 }
 
+                // Audit Batch 3 (S4): payments may not push the payment rows past the sale total.
+                \App\Support\PaymentReconciler::assertWithinDue(
+                    (float) $sale->GrandTotal,
+                    \App\Support\PaymentReconciler::paidSum('payment_sales', 'sale_id', (int) $sale->id) - $amount_paid_now,
+                    (float) $amount_paid_now
+                );
+
                 // Security fix (Build N2 / audit H-01): see
                 // app/Support/PaymentCapper.php.
                 $total_paid = PaymentCapper::capPaid($sale->GrandTotal, $sale->paid_amount + $amount_paid_now);
@@ -292,8 +299,15 @@ class PaymentSalesController extends BaseController
                 }
 
             } catch (Exception $e) {
-                return response()->json(['message' => $e->getMessage()], 500);
+                // Audit Batch 3: never swallow validation errors or answer 500 from inside the transaction closure.
+                if ($e instanceof \Illuminate\Validation\ValidationException) {
+                    throw $e;
+                }
+                throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json(['message' => $e->getMessage()], 500));
             }
+
+            // Audit Batch 3 (S4/P4): payment rows are the source of truth for paid_amount / payment_statut.
+            \App\Support\PaymentReconciler::syncSale((int) $sale->id);
 
         }, 10);
 
@@ -346,6 +360,11 @@ class PaymentSalesController extends BaseController
             }
 
             $sale = Sale::find($payment->sale_id);
+            \App\Support\PaymentReconciler::assertWithinDue(
+                (float) $sale->GrandTotal,
+                \App\Support\PaymentReconciler::paidSum('payment_sales', 'sale_id', (int) $sale->id, (int) $payment->id),
+                (float) $request['montant']
+            );
             $old_total_paid = $sale->paid_amount - $payment->montant;
             // Security fix (Build N2 / audit H-01): see app/Support/PaymentCapper.php.
             $new_total_paid = PaymentCapper::capPaid($sale->GrandTotal, $old_total_paid + $request['montant']);
@@ -360,9 +379,10 @@ class PaymentSalesController extends BaseController
             }
 
             // delete old balance
+            // Audit Batch 3 (S5): a credit-card payment (method 1) is never rewritten below, so its account must not be touched either.
             $account = Account::where('id', $payment->account_id)->exists();
 
-            if ($account) {
+            if ($account && (string) $payment->payment_method_id !== '1') {
                 // Account exists, perform the update
                 $account = Account::find($payment->account_id);
                 $account->update([
@@ -401,8 +421,15 @@ class PaymentSalesController extends BaseController
                 }
 
             } catch (Exception $e) {
-                return response()->json(['message' => $e->getMessage()], 500);
+                // Audit Batch 3: never swallow validation errors or answer 500 from inside the transaction closure.
+                if ($e instanceof \Illuminate\Validation\ValidationException) {
+                    throw $e;
+                }
+                throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json(['message' => $e->getMessage()], 500));
             }
+
+            // Audit Batch 3 (S4/P4): payment rows are the source of truth for paid_amount / payment_statut.
+            \App\Support\PaymentReconciler::syncSale((int) $sale->id);
 
         }, 10);
 
@@ -476,6 +503,9 @@ class PaymentSalesController extends BaseController
                 'paid_amount' => $total_paid,
                 'payment_statut' => $payment_statut,
             ]);
+
+            // Audit Batch 3 (S4/P4): payment rows are the source of truth for paid_amount / payment_statut.
+            \App\Support\PaymentReconciler::syncSale((int) $sale->id);
 
         }, 10);
 
@@ -672,7 +702,11 @@ class PaymentSalesController extends BaseController
                     'body' => $message_text]);
 
             } catch (Exception $e) {
-                return response()->json(['message' => $e->getMessage()], 500);
+                // Audit Batch 3: never swallow validation errors or answer 500 from inside the transaction closure.
+                if ($e instanceof \Illuminate\Validation\ValidationException) {
+                    throw $e;
+                }
+                throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json(['message' => $e->getMessage()], 500));
             }
         }
         // termii

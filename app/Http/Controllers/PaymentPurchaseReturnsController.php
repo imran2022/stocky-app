@@ -200,7 +200,13 @@ class PaymentPurchaseReturnsController extends BaseController
                 // New way: Check user's record_view field (user-level boolean)
                 // Backward compatibility: If record_view is null, fall back to role permission check
                 $view_records = $user->hasRecordView();
-                $PurchaseReturn = PurchaseReturn::findOrFail($request['purchase_return_id']);
+                $PurchaseReturn = PurchaseReturn::lockForUpdate()->findOrFail($request['purchase_return_id']);
+                \App\Support\LiveDocument::assert($PurchaseReturn, 'purchase return');
+                \App\Support\PaymentReconciler::assertWithinDue(
+                    (float) $PurchaseReturn->GrandTotal,
+                    \App\Support\PaymentReconciler::paidSum('payment_purchase_returns', 'purchase_return_id', (int) $PurchaseReturn->id),
+                    (float) $request['montant']
+                );
 
                 // Check If User Has Permission view All Records
                 // Warehouse half of the same rule: record_view says whose documents,
@@ -250,6 +256,9 @@ class PaymentPurchaseReturnsController extends BaseController
                     'payment_statut' => $payment_statut,
                 ]);
 
+                // Audit Batch 3 (S4/P4): payment rows are the source of truth for paid_amount / payment_statut.
+                \App\Support\PaymentReconciler::syncPurchaseReturn((int) $PurchaseReturn->id);
+
             }, 10);
         }
 
@@ -288,6 +297,11 @@ class PaymentPurchaseReturnsController extends BaseController
             }
 
             $PurchaseReturn = PurchaseReturn::find($payment->purchase_return_id);
+            \App\Support\PaymentReconciler::assertWithinDue(
+                (float) $PurchaseReturn->GrandTotal,
+                \App\Support\PaymentReconciler::paidSum('payment_purchase_returns', 'purchase_return_id', (int) $PurchaseReturn->id, (int) $payment->id),
+                (float) $request['montant']
+            );
             $old_total_paid = $PurchaseReturn->paid_amount - $payment->montant;
             $new_total_paid = $old_total_paid + $request['montant'];
             $due = $PurchaseReturn->GrandTotal - $new_total_paid;
@@ -336,6 +350,9 @@ class PaymentPurchaseReturnsController extends BaseController
                 'paid_amount' => $new_total_paid,
                 'payment_statut' => $payment_statut,
             ]);
+
+            // Audit Batch 3 (S4/P4): payment rows are the source of truth for paid_amount / payment_statut.
+            \App\Support\PaymentReconciler::syncPurchaseReturn((int) $PurchaseReturn->id);
 
         }, 10);
 
@@ -407,6 +424,9 @@ class PaymentPurchaseReturnsController extends BaseController
                 'paid_amount' => $total_paid,
                 'payment_statut' => $payment_statut,
             ]);
+
+            // Audit Batch 3 (S4/P4): payment rows are the source of truth for paid_amount / payment_statut.
+            \App\Support\PaymentReconciler::syncPurchaseReturn((int) $PurchaseReturn->id);
 
         }, 10);
 

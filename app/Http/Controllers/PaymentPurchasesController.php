@@ -222,6 +222,13 @@ class PaymentPurchasesController extends BaseController
                     $this->authorizeForUser($request->user('api'), 'check_record', $purchase);
                 }
 
+                // Audit Batch 3 (P4): payments may not push the payment rows past the purchase total.
+                \App\Support\PaymentReconciler::assertWithinDue(
+                    (float) $purchase->GrandTotal,
+                    \App\Support\PaymentReconciler::paidSum('payment_purchases', 'purchase_id', (int) $purchase->id),
+                    (float) $request['montant']
+                );
+
                 // Security fix (Build N2 / audit H-01): see app/Support/PaymentCapper.php.
                 $total_paid = PaymentCapper::capPaid($purchase->GrandTotal, $purchase->paid_amount + $request['montant']);
                 $due = $purchase->GrandTotal - $total_paid;
@@ -261,6 +268,9 @@ class PaymentPurchasesController extends BaseController
                     'payment_statut' => $payment_statut,
                 ]);
 
+                // Audit Batch 3 (S4/P4): payment rows are the source of truth for paid_amount / payment_statut.
+                \App\Support\PaymentReconciler::syncPurchase((int) $purchase->id);
+
             }, 10);
         }
 
@@ -298,7 +308,13 @@ class PaymentPurchasesController extends BaseController
                 $this->authorizeForUser($request->user('api'), 'check_record', $payment);
             }
 
-            $purchase = Purchase::whereId($request['purchase_id'])->first();
+            // Audit Batch 3 (P4): the payment belongs to the purchase it was created on - never trust a purchase_id from the edit request.
+            $purchase = Purchase::whereId($payment->purchase_id)->first();
+            \App\Support\PaymentReconciler::assertWithinDue(
+                (float) $purchase->GrandTotal,
+                \App\Support\PaymentReconciler::paidSum('payment_purchases', 'purchase_id', (int) $purchase->id, (int) $payment->id),
+                (float) $request['montant']
+            );
             $old_total_paid = $purchase->paid_amount - $payment->montant;
             // Security fix (Build N2 / audit H-01): see app/Support/PaymentCapper.php.
             $new_total_paid = PaymentCapper::capPaid($purchase->GrandTotal, $old_total_paid + $request['montant']);
@@ -347,6 +363,9 @@ class PaymentPurchasesController extends BaseController
             $purchase->paid_amount = $new_total_paid;
             $purchase->payment_statut = $payment_statut;
             $purchase->save();
+
+            // Audit Batch 3 (S4/P4): payment rows are the source of truth for paid_amount / payment_statut.
+            \App\Support\PaymentReconciler::syncPurchase((int) $purchase->id);
 
         }, 10);
 
@@ -420,6 +439,9 @@ class PaymentPurchasesController extends BaseController
                 'paid_amount' => $total_paid,
                 'payment_statut' => $payment_statut,
             ]);
+
+            // Audit Batch 3 (S4/P4): payment rows are the source of truth for paid_amount / payment_statut.
+            \App\Support\PaymentReconciler::syncPurchase((int) $purchase->id);
 
         }, 10);
 
