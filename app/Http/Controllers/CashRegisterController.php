@@ -121,7 +121,8 @@ class CashRegisterController extends BaseController
 
         $register->total_sales = $totalSales;
 
-        $expectedCash = ($register->opening_balance ?? 0) + ($register->cash_in ?? 0) - ($register->cash_out ?? 0) + ($register->total_sales ?? 0);
+        // Audit Batch 3 (R2): expected cash = cash actually received/refunded in the shift, not the value of all sales.
+        $expectedCash = \App\Support\CashRegisterCash::expected($register, $now);
         $counted = (float) $data['counted_cash'];
         $difference = $counted - $expectedCash;
 
