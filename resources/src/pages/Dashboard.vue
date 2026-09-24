@@ -120,7 +120,7 @@
         <a-row :gutter="[16, 16]">
         <a-col :xs="24" :xl="12">
           <a-card class="chart-card" :title="$t('Payment_Sent_Received')">
-            <apexchart v-if="paymentChart.series.length" :key="'payment-' + loadCount" type="area" height="300" :options="paymentChart.options" :series="paymentChart.series" />
+            <apexchart v-if="paymentChart.series.length" :key="'payment-' + loadCount" :type="paymentChart.type || 'area'" height="300" :options="paymentChart.options" :series="paymentChart.series" />
             <a-empty v-else :description="$t('No_data_available')" style="padding: 48px 0" />
           </a-card>
         </a-col>
@@ -680,10 +680,21 @@ const warehouseColumns = computed(() => [
   { title: t('Amount'), key: 'amount', align: 'right' },
 ]);
 
-function buildCharts(days, salesData, purchasesData, products, customers, pay) {
+// Audit Batch 6: with a one-day range (Today) the backend sends 24 hourly values; the Sales & Purchases chart
+// becomes an hourly line and the Payment chart hourly bars. Longer ranges are drawn exactly as before.
+const hourLabel = h => `${String(h).padStart(2, '0')}:00`;
+
+function buildCharts(days, salesData, purchasesData, products, customers, pay, hourly) {
+  const isHourly = !!(hourly && Array.isArray(hourly.hours) && hourly.hours.length);
+  if (isHourly) {
+    days = hourly.hours.map(hourLabel);
+    salesData = hourly.sales;
+    purchasesData = hourly.purchases;
+    pay = { days, sent: hourly.sent, received: hourly.received };
+  }
   const sales = (salesData || []).map(v => Number(v) || 0);
   const purchases = (purchasesData || []).map(v => Number(v) || 0);
-  const singleSalesDay = (days || []).length <= 1;
+  const singleSalesDay = !isHourly && (days || []).length <= 1;
 
   salesChart.value = {
     series: [
@@ -693,9 +704,9 @@ function buildCharts(days, salesData, purchasesData, products, customers, pay) {
     options: {
       chart: { ...CHART_BASE, type: 'area', stacked: false },
       colors: ['#168cf4', '#0aa678'],
-      stroke: { curve: 'smooth', width: singleSalesDay ? 0 : 3 },
+      stroke: { curve: isHourly ? 'straight' : 'smooth', width: singleSalesDay ? 0 : 3 },
       fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.42, opacityTo: 0.08, stops: [0, 95] } },
-      markers: { size: singleSalesDay ? 4 : 0, hover: { size: 6 }, strokeWidth: 1, strokeColors: '#ffffff' },
+      markers: { size: singleSalesDay ? 4 : (isHourly ? 3 : 0), hover: { size: 6 }, strokeWidth: 1, strokeColors: '#ffffff' },
       dataLabels: { enabled: false },
       legend: { position: 'bottom', horizontalAlign: 'center', labels: { colors: '#595959' }, markers: { radius: 6 } },
       xaxis: { categories: days, axisBorder: { show: false }, axisTicks: { show: false }, labels: { hideOverlappingLabels: true } },
@@ -720,9 +731,28 @@ function buildCharts(days, salesData, purchasesData, products, customers, pay) {
   };
   const received = (pay.received || []).map(v => Number(v) || 0);
   const sent = (pay.sent || []).map(v => Number(v) || 0);
-  const singlePaymentDay = (pay.days || []).length <= 1;
+  const singlePaymentDay = !isHourly && (pay.days || []).length <= 1;
 
-  paymentChart.value = {
+  paymentChart.value = isHourly ? {
+    type: 'bar',
+    series: [
+      { name: t('Sent'), data: sent },
+      { name: t('Received'), data: received },
+    ],
+    options: {
+      chart: { ...CHART_BASE, type: 'bar', stacked: false },
+      colors: ['#f43f5e', '#10b981'],
+      plotOptions: { bar: { columnWidth: '62%', borderRadius: 3, borderRadiusApplication: 'end' } },
+      stroke: { show: true, width: 2, colors: ['transparent'] },
+      dataLabels: { enabled: false },
+      legend: { position: 'bottom', horizontalAlign: 'center', labels: { colors: '#595959' }, markers: { radius: 6 } },
+      xaxis: { categories: days, axisBorder: { show: false }, axisTicks: { show: false }, labels: { rotate: -45, rotateAlways: false, hideOverlappingLabels: true } },
+      yaxis: { min: 0, forceNiceScale: true, labels: { formatter: compactNumber } },
+      grid: GRID,
+      tooltip: { theme: 'light', shared: true, intersect: false, y: { formatter: v => money(v) } },
+    },
+  } : {
+    type: 'area',
     series: [
       { name: t('Sent'), data: sent },
       { name: t('Received'), data: received },
@@ -833,7 +863,8 @@ function applyDemo() {
   salesByWarehouse.value = DEMO.salesByWarehouse;
   buildCharts(
     DEMO.days, DEMO.sales, DEMO.purchases, DEMO.products, DEMO.customers,
-    { days: DEMO.days, sent: DEMO.paymentSent, received: DEMO.paymentReceived }
+    { days: DEMO.days, sent: DEMO.paymentSent, received: DEMO.paymentReceived },
+    null
   );
 }
 
@@ -886,7 +917,8 @@ async function load() {
       data.purchases.original.data,
       data.product_report.original || [],
       data.customers?.original || [],
-      { days: pay.days || [], sent: pay.payment_sent || [], received: pay.payment_received || [] }
+      { days: pay.days || [], sent: pay.payment_sent || [], received: pay.payment_received || [] },
+      data.hourly || null
     );
   } catch (e) {
     applyDemo();

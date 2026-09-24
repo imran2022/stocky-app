@@ -83,6 +83,11 @@ class DashboardController extends Controller
         $hourly_sales_today = $this->HourlySalesToday($warehouse_id, $array_warehouses_id);
         $sales_by_warehouse = $this->SalesByWarehouse($warehouse_id, $array_warehouses_id, $request->from, $request->to);
 
+        // Audit Batch 6: a one-day range gets 24 hourly points for the Sales/Purchases and Payment charts.
+        $hourly = ($request->from === $request->to)
+            ? \App\Support\Reporting\DashboardHourly::build($warehouse_id, $array_warehouses_id, Carbon::parse($request->from)->toDateString())
+            : null;
+
         return response()->json([
             'warehouses' => $warehouses,
             'sales' => $dataSales,
@@ -95,6 +100,7 @@ class DashboardController extends Controller
             'stock_value' => $stock_value,
             'hourly_sales_today' => $hourly_sales_today,
             'sales_by_warehouse' => $sales_by_warehouse,
+            'hourly' => $hourly,
         ]);
 
     }
@@ -907,6 +913,7 @@ class DashboardController extends Controller
             ->pluck('count', 'date');
 
         $Payment_Expense = Expense::whereBetween('date', [$start->toDateString(), $end->toDateString()])
+            ->whereNull('deleted_at')   // Audit Batch 6
             ->where(function ($query) use ($view_records) {
                 if (! $view_records) {
                     return $query->where('user_id', '=', Auth::user()->id);
