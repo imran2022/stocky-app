@@ -11,6 +11,8 @@ use Illuminate\Support\Facades\Schema;
 
 class TodaySummaryController extends Controller
 {
+    use \App\Traits\CalculatesCogsAndAverageCost; // Audit B5: same COGS as Dashboard / P&L
+
     /**
      * Everything the topbar "Today's summary" drawer shows, in one call.
      *
@@ -51,20 +53,25 @@ class TodaySummaryController extends Controller
         };
 
         /* ------------------------------------------------------------ sales */
-        $s = $own($wh(DB::table('sales')->whereNull('deleted_at')->whereDate('date', $today)))
-            ->selectRaw('COUNT(*) c, COALESCE(SUM(GrandTotal),0) net, COALESCE(SUM(TaxNet),0) tax,
-                         COALESCE(SUM(discount),0) disc, COALESCE(SUM(shipping),0) ship')
-            ->first();
+        // Audit B5: same definitions as Dashboard / P&L (SalesFigures): completed sales only, line tax + order tax.
+        $salesScope = function ($q) use ($today, $own, $wh) {
+            $q->whereBetween('sales.date', [$today, $today]);
+            $wh($q, 'sales.warehouse_id');
+            $own($q, 'sales.user_id');
+        };
+        $sf = \App\Support\Reporting\SalesFigures::sales($salesScope);
+        $s = (object) ['c' => $sf['count'], 'net' => $sf['gross'], 'tax' => $sf['tax'], 'ship' => $sf['shipping'],
+                       'disc' => $sf['discount'] + $sf['points_discount'] + $sf['promotion_discount']];
         $itemsSold = (float) $own($wh(
             DB::table('sale_details')
                 ->join('sales', 'sales.id', '=', 'sale_details.sale_id')
-                ->whereNull('sales.deleted_at')->whereDate('sales.date', $today),
+                ->whereNull('sales.deleted_at')->where('sales.statut', 'completed')->where('sales.date', $today),
             'sales.warehouse_id'
         ), 'sales.user_id')->sum('sale_details.quantity');
-        $saleReturns = (float) $own($wh(DB::table('sale_returns')->where('statut', 'received')->whereNull('deleted_at')->whereDate('date', $today)))
+        $saleReturns = (float) $own($wh(DB::table('sale_returns')->where('statut', 'received')->whereNull('deleted_at')->where('date', $today)))
             ->sum('GrandTotal');
 
-        $taxableSales = max(0, $s->net - $s->tax - $s->ship);
+        $taxableSales = $sf['net'];
         $sales = [
             'transactions' => (int) $s->c,
             'gross' => round($taxableSales + $s->disc, 2),
@@ -78,20 +85,24 @@ class TodaySummaryController extends Controller
         ];
 
         /* -------------------------------------------------------- purchases */
-        $p = $own($wh(DB::table('purchases')->whereNull('deleted_at')->whereDate('date', $today)))
-            ->selectRaw('COUNT(*) c, COALESCE(SUM(GrandTotal),0) net, COALESCE(SUM(TaxNet),0) tax,
-                         COALESCE(SUM(discount),0) disc, COALESCE(SUM(shipping),0) ship')
-            ->first();
+        $purchScope = function ($q) use ($today, $own, $wh) {
+            $q->whereBetween('purchases.date', [$today, $today]);
+            $wh($q, 'purchases.warehouse_id');
+            $own($q, 'purchases.user_id');
+        };
+        $pf = \App\Support\Reporting\SalesFigures::purchases($purchScope);
+        $p = (object) ['c' => $pf['count'], 'net' => $pf['gross'], 'tax' => $pf['tax'], 'ship' => $pf['shipping'],
+                       'disc' => $pf['discount']];
         $itemsPurchased = (float) $own($wh(
             DB::table('purchase_details')
                 ->join('purchases', 'purchases.id', '=', 'purchase_details.purchase_id')
-                ->whereNull('purchases.deleted_at')->whereDate('purchases.date', $today),
+                ->whereNull('purchases.deleted_at')->where('purchases.statut', 'received')->where('purchases.date', $today),
             'purchases.warehouse_id'
         ), 'purchases.user_id')->sum('purchase_details.quantity');
-        $purchaseReturns = (float) $own($wh(DB::table('purchase_returns')->where('statut', 'completed')->whereNull('deleted_at')->whereDate('date', $today)))
+        $purchaseReturns = (float) $own($wh(DB::table('purchase_returns')->where('statut', 'completed')->whereNull('deleted_at')->where('date', $today)))
             ->sum('GrandTotal');
 
-        $taxablePurch = max(0, $p->net - $p->tax - $p->ship);
+        $taxablePurch = $pf['net'];
         $purchases = [
             'transactions' => (int) $p->c,
             'gross' => round($taxablePurch + $p->disc, 2),
@@ -213,29 +224,30 @@ class TodaySummaryController extends Controller
         ];
 
         /* ----------------------------------------------------------- profit */
-        $cogs = (float) $own($wh(
-            DB::table('sale_details')
-                ->join('sales', 'sales.id', '=', 'sale_details.sale_id')
-                ->leftJoin('product_variants', 'product_variants.id', '=', 'sale_details.product_variant_id')
-                ->leftJoin('products', 'products.id', '=', 'sale_details.product_id')
-                ->whereNull('sales.deleted_at')->whereDate('sales.date', $today),
-            'sales.warehouse_id'
-        ), 'sales.user_id')
-            ->selectRaw('COALESCE(SUM(sale_details.quantity * COALESCE(product_variants.cost, products.cost, 0)),0) v')
-            ->value('v');
+        // Same COGS as Dashboard / P&L (FIFO, base-unit quantities, received returns netted off).
+        $cogsWarehouses = $warehouseIds ?? DB::table('warehouses')->pluck('id')->map(fn ($i) => (int) $i)->all();
+        $cogs = $cogsWarehouses ? (float) ($this->calcCogsAndAvgCostFast($today, $today, null, $cogsWarehouses)['fifo'] ?? 0.0) : 0.0;
+
+        // Net sales after net returns, exactly like the Dashboard profit figure.
+        $retScope = function ($q) use ($today, $own, $wh) {
+            $q->whereBetween('sale_returns.date', [$today, $today]);
+            $wh($q, 'sale_returns.warehouse_id');
+            $own($q, 'sale_returns.user_id');
+        };
+        $profitBase = $taxableSales - \App\Support\Reporting\SalesFigures::saleReturns($retScope)['net'];
 
         $expenses = (float) $own($wh(
             DB::table('expenses')->whereNull('deleted_at')->whereDate('date', $today)
         ))->sum('amount');
 
-        $grossProfit = $taxableSales - $cogs;
+        $grossProfit = $profitBase - $cogs;
         $netProfit = $grossProfit - $expenses;
         $profit = [
             'cogs' => round($cogs, 2),
             'gross' => round($grossProfit, 2),
-            'gross_pct' => $taxableSales > 0 ? round($grossProfit / $taxableSales * 100) : 0,
+            'gross_pct' => $profitBase > 0 ? round($grossProfit / $profitBase * 100) : 0,
             'net' => round($netProfit, 2),
-            'net_pct' => $taxableSales > 0 ? round($netProfit / $taxableSales * 100) : 0,
+            'net_pct' => $profitBase > 0 ? round($netProfit / $profitBase * 100) : 0,
             'tax_collected' => $sales['tax'],
             'tax_paid' => $purchases['tax'],
             'expenses' => round($expenses, 2),
