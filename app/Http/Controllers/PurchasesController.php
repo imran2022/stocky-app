@@ -413,6 +413,7 @@ class PurchasesController extends BaseController
             // Backward compatibility: If record_view is null, fall back to role permission check
             $view_records = $user->hasRecordView();
             $current_Purchase = Purchase::findOrFail($id);
+            \App\Support\LiveDocument::assert($current_Purchase, 'purchase');
 
             // Phase 1.4 safe-edit guard: this update() method does not
             // reconcile a PO-linked GRN's old/new receipt contribution (see
@@ -684,6 +685,7 @@ class PurchasesController extends BaseController
             // Backward compatibility: If record_view is null, fall back to role permission check
             $view_records = $user->hasRecordView();
             $current_Purchase = Purchase::findOrFail($id);
+            \App\Support\LiveDocument::assert($current_Purchase, 'purchase');
 
              /**
              * Warehouses restriction

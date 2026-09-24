@@ -898,6 +898,7 @@ class SalesController extends BaseController
             // Backward compatibility: If record_view is null, fall back to role permission check
             $view_records = $user->hasRecordView();
             $current_Sale = Sale::findOrFail($id);
+            \App\Support\LiveDocument::assert($current_Sale, 'sale');
 
              /**
              * Warehouses restriction
@@ -1360,6 +1361,7 @@ class SalesController extends BaseController
             // Backward compatibility: If record_view is null, fall back to role permission check
             $view_records = $user->hasRecordView();
             $current = \App\Models\Sale::with(['details.product'])->findOrFail($id);
+            \App\Support\LiveDocument::assert($current, 'sale');
 
             /**
              * Warehouses restriction
@@ -1564,6 +1566,7 @@ class SalesController extends BaseController
                     return response()->json(['success' => false, 'Return exist for the Transaction' => false], 403);
                 } else {
                     $current_Sale = Sale::findOrFail($sale_id);
+                    \App\Support\LiveDocument::assert($current_Sale, 'sale');
 
                      /**
                      * Warehouses restriction

@@ -312,6 +312,7 @@ class TransferController extends BaseController
             // Backward compatibility: If record_view is null, fall back to role permission check
             $view_records = $user->hasRecordView();
             $current_Transfer = Transfer::findOrFail($id);
+            \App\Support\LiveDocument::assert($current_Transfer, 'transfer');
 
             // Check If User Has Permission view All Records
             // Warehouse half of the same rule: record_view says whose documents,
@@ -616,6 +617,7 @@ class TransferController extends BaseController
             // Backward compatibility: If record_view is null, fall back to role permission check
             $view_records = $user->hasRecordView();
             $current_Transfer = Transfer::findOrFail($id);
+            \App\Support\LiveDocument::assert($current_Transfer, 'transfer');
             $Old_Details = TransferDetail::where('transfer_id', $id)->get();
 
             // Check If User Has Permission view All Records
@@ -1368,6 +1370,7 @@ class TransferController extends BaseController
             $transfer = Transfer::with('details')
                 ->where('deleted_at', '=', null)
                 ->findOrFail($id);
+            \App\Support\LiveDocument::assert($transfer, 'transfer');
 
             // Warehouse half of the same rule: record_view says whose documents,
             // the assigned warehouses say which warehouses they may come from.

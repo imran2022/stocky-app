@@ -20,6 +20,10 @@ function call($ctrlClass, $method, array $payload, $verb='POST', $args=[]) {
         $body = $r instanceof Illuminate\Http\JsonResponse || $r instanceof Illuminate\Http\Response ? $r->getContent() : json_encode($r);
         $code = method_exists($r,'getStatusCode') ? $r->getStatusCode() : '-';
         return [$code, substr($body,0,4000)];
+    } catch (Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+        return [404, 'model not found'];
+    } catch (Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $e) {
+        return [$e->getStatusCode(), $e->getMessage()];
     } catch (Illuminate\Validation\ValidationException $e) {
         return ['422v', json_encode($e->errors())];
     } catch (Throwable $e) {

@@ -304,6 +304,7 @@ class PurchasesReturnController extends BaseController
             // Backward compatibility: If record_view is null, fall back to role permission check
             $view_records = $user->hasRecordView();
             $current_PurchaseReturn = PurchaseReturn::findOrFail($id);
+            \App\Support\LiveDocument::assert($current_PurchaseReturn, 'purchase return');
 
             /**
              * Warehouses restriction
@@ -537,6 +538,7 @@ class PurchasesReturnController extends BaseController
             // Backward compatibility: If record_view is null, fall back to role permission check
             $view_records = $user->hasRecordView();
             $current_PurchaseReturn = PurchaseReturn::findOrFail($id);
+            \App\Support\LiveDocument::assert($current_PurchaseReturn, 'purchase return');
 
              /**
              * Warehouses restriction
@@ -679,6 +681,7 @@ class PurchasesReturnController extends BaseController
 
             foreach ($selectedIds as $PurchaseReturn_id) {
                 $current_PurchaseReturn = PurchaseReturn::findOrFail($PurchaseReturn_id);
+                \App\Support\LiveDocument::assert($current_PurchaseReturn, 'purchase return');
 
                 /**
                  * Warehouses restriction

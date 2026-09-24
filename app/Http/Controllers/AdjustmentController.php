@@ -292,6 +292,7 @@ class AdjustmentController extends BaseController
         // Backward compatibility: If record_view is null, fall back to role permission check
         $view_records = $user->hasRecordView();
         $current_adjustment = Adjustment::findOrFail($id);
+        \App\Support\LiveDocument::assert($current_adjustment, 'adjustment');
 
          /**
          * Warehouses restriction
@@ -514,6 +515,7 @@ class AdjustmentController extends BaseController
             // Backward compatibility: If record_view is null, fall back to role permission check
             $view_records = $user->hasRecordView();
             $current_adjustment = Adjustment::findOrFail($id);
+            \App\Support\LiveDocument::assert($current_adjustment, 'adjustment');
 
             /**
              * Warehouses restriction

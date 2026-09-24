@@ -210,6 +210,7 @@ class PaymentPurchasesController extends BaseController
                 // Backward compatibility: If record_view is null, fall back to role permission check
                 $view_records = $user->hasRecordView();
                 $purchase = Purchase::findOrFail($request['purchase_id']);
+                \App\Support\LiveDocument::assert($purchase, 'purchase');
 
                 // Check If User Has Permission view All Records
                 // Warehouse half of the same rule: record_view says whose documents,
