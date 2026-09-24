@@ -78,12 +78,12 @@ class ProvidersController extends BaseController
 
             $item['due'] = $item['total_amount'] - $item['total_paid'];
 
-            $item['total_amount_return'] = DB::table('purchase_returns')
+            $item['total_amount_return'] = DB::table('purchase_returns')->where('statut', 'completed')
                 ->where('deleted_at', '=', null)
                 ->where('provider_id', $provider->id)
                 ->sum('GrandTotal');
 
-            $item['total_paid_return'] = DB::table('purchase_returns')
+            $item['total_paid_return'] = DB::table('purchase_returns')->where('statut', 'completed')
                 ->where('deleted_at', '=', null)
                 ->where('provider_id', $provider->id)
                 ->sum('paid_amount');
@@ -261,11 +261,11 @@ class ProvidersController extends BaseController
 
         // Purchase-return due (same formula as the suppliers list) so the
         // details page can offer the same pay-due actions.
-        $data['return_Due'] = DB::table('purchase_returns')
+        $data['return_Due'] = DB::table('purchase_returns')->where('statut', 'completed')
             ->where('deleted_at', '=', null)
             ->where('provider_id', $id)
             ->sum('GrandTotal')
-            - DB::table('purchase_returns')
+            - DB::table('purchase_returns')->where('statut', 'completed')
                 ->where('deleted_at', '=', null)
                 ->where('provider_id', $id)
                 ->sum('paid_amount');

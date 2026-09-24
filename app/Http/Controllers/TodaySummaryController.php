@@ -61,7 +61,7 @@ class TodaySummaryController extends Controller
                 ->whereNull('sales.deleted_at')->whereDate('sales.date', $today),
             'sales.warehouse_id'
         ), 'sales.user_id')->sum('sale_details.quantity');
-        $saleReturns = (float) $own($wh(DB::table('sale_returns')->whereNull('deleted_at')->whereDate('date', $today)))
+        $saleReturns = (float) $own($wh(DB::table('sale_returns')->where('statut', 'received')->whereNull('deleted_at')->whereDate('date', $today)))
             ->sum('GrandTotal');
 
         $taxableSales = max(0, $s->net - $s->tax - $s->ship);
@@ -88,7 +88,7 @@ class TodaySummaryController extends Controller
                 ->whereNull('purchases.deleted_at')->whereDate('purchases.date', $today),
             'purchases.warehouse_id'
         ), 'purchases.user_id')->sum('purchase_details.quantity');
-        $purchaseReturns = (float) $own($wh(DB::table('purchase_returns')->whereNull('deleted_at')->whereDate('date', $today)))
+        $purchaseReturns = (float) $own($wh(DB::table('purchase_returns')->where('statut', 'completed')->whereNull('deleted_at')->whereDate('date', $today)))
             ->sum('GrandTotal');
 
         $taxablePurch = max(0, $p->net - $p->tax - $p->ship);

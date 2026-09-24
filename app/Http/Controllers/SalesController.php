@@ -2878,11 +2878,11 @@ class SalesController extends BaseController
         $sales_grand = (clone $salesQuery)->sum('GrandTotal');
         $sales_paid = (clone $salesQuery)->sum('paid_amount');
 
-        $return_grand = DB::table('sale_returns')
+        $return_grand = DB::table('sale_returns')->where('statut', 'received')
             ->whereNull('deleted_at')
             ->where('client_id', $clientId)
             ->sum('GrandTotal');
-        $return_paid = DB::table('sale_returns')
+        $return_paid = DB::table('sale_returns')->where('statut', 'received')
             ->whereNull('deleted_at')
             ->where('client_id', $clientId)
             ->sum('paid_amount');

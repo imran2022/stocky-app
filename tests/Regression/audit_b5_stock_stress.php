@@ -20,7 +20,7 @@ $sales = [];      // id => [pid, wh, qty]
 $purchases = [];  // id => [pid, wh, qty]
 $adjust = [];     // id => wh
 $transfers = [];  // id => true
-$srets = []; $prets = [];
+$srets = []; $prets = []; $damages = [];
 $log = [];
 $pick = fn (array $a) => $a[mt_rand(0, count($a) - 1)];
 $keyOf = fn (array $a) => $a ? array_keys($a)[mt_rand(0, count($a) - 1)] : null;
@@ -66,6 +66,43 @@ $ops = [
         [$c, $b] = call(CT_P, 'store', pHdr($wh, ['GrandTotal' => $q * 120, 'details' => [plm($pid, $q, 120, ['purchase_unit_id' => 2])]]));
         if ($c == 200) { $purchases[(int) DB::table('purchases')->max('id')] = [$pid, $wh, $q]; }
         return "purchase(box x12) p$pid wh$wh q$q -> $c";
+    },
+    'sale_status' => function () use (&$sales, $keyOf, $pick) {
+        $id = $keyOf($sales); if (! $id) { return 'sale_status skipped'; }
+        $r = DB::table('sales')->where('id', $id)->first(); $d = DB::table('sale_details')->where('sale_id', $id)->first();
+        if ($d->sale_unit_id != 1) { return 'sale_status skipped (box)'; } $st = $pick(['completed', 'pending', 'ordered']);
+        [$c] = updSale($id, [line($d->product_id, (int) $d->quantity, 100, ['id' => $d->id])], ['warehouse_id' => $r->warehouse_id, 'statut' => $st]);
+        return "sale_status #$id {$r->statut}->$st -> $c";
+    },
+    'purchase_status' => function () use (&$purchases, $keyOf, $pick) {
+        $id = $keyOf($purchases); if (! $id) { return 'purchase_status skipped'; }
+        $r = DB::table('purchases')->where('id', $id)->first(); $d = DB::table('purchase_details')->where('purchase_id', $id)->first();
+        if ($d->purchase_unit_id != 1) { return 'purchase_status skipped (box)'; } $st = $pick(['received', 'pending', 'ordered']);
+        [$c] = call(CT_P, 'update', pHdr($r->warehouse_id, ['statut' => $st, 'GrandTotal' => $d->quantity * 10, 'details' => [plm($d->product_id, (int) $d->quantity, 10, ['id' => $d->id])]]), 'PUT', [$id]);
+        return "purchase_status #$id {$r->statut}->$st -> $c";
+    },
+    'adjust_edit' => function () use (&$adjust, $keyOf, $pick, $PRODUCTS) {
+        $id = $keyOf($adjust); if (! $id) { return 'adjust_edit skipped'; }
+        [$pid, $q, $type] = [$pick($PRODUCTS), mt_rand(1, 6), $pick(['add', 'sub'])];
+        [$c] = call(CT_A, 'update', adjPayload($adjust[$id], $type, $q, $pid), 'PUT', [$id]);
+        return "adjust_edit #$id $type p$pid q$q -> $c";
+    },
+    'transfer_edit' => function () use (&$transfers, $keyOf, $pick, $PRODUCTS) {
+        $id = $keyOf($transfers); if (! $id) { return 'transfer_edit skipped'; }
+        [$pid, $q, $st] = [$pick($PRODUCTS), mt_rand(1, 5), $pick(['completed', 'sent', 'pending'])]; $t = DB::table('transfers')->where('id', $id)->first();
+        [$c] = call(CT_T, 'update', trPayload((int) $t->from_warehouse_id, (int) $t->to_warehouse_id, $pid, $q, $st), 'PUT', [$id]);
+        return "transfer_edit #$id p$pid q$q ->$st -> $c";
+    },
+    'damage' => function () use ($pick, $PRODUCTS, $WH, &$damages) {
+        [$pid, $wh, $q] = [$pick($PRODUCTS), $pick($WH), mt_rand(1, 3)];
+        [$c] = call(App\Http\Controllers\DamageController::class, 'store', ['warehouse_id' => $wh, 'date' => date('Y-m-d'), 'notes' => 'b5', 'details' => [['product_id' => $pid, 'product_variant_id' => null, 'quantity' => $q]]]);
+        if ($c == 200) { $damages[(int) DB::table('damages')->max('id')] = 1; }
+        return "damage p$pid wh$wh q$q -> $c";
+    },
+    'damage_delete' => function () use (&$damages, $keyOf) {
+        $id = $keyOf($damages); if (! $id) { return 'damage_delete skipped'; }
+        [$c] = call(App\Http\Controllers\DamageController::class, 'destroy', [], 'DELETE', [$id]); if ($c == 200) { unset($damages[$id]); }
+        return "damage_delete #$id -> $c";
     },
     'sale_pending' => function () use (&$sales, $pick, $PRODUCTS, $WH) {
         [$pid, $wh, $q] = [$pick($PRODUCTS), $pick($WH), mt_rand(1, 8)];
@@ -150,7 +187,7 @@ $ops = [
         return "transfer_delete #$id -> $c";
     },
 ];
-$weights = ['pos' => 3, 'sale_box' => 2, 'purchase_box' => 2, 'purchase' => 6, 'sale' => 6, 'sale_pending' => 1, 'sale_edit' => 3, 'sale_delete' => 2, 'sale_return' => 2, 'sale_return_delete' => 1,
+$weights = ['sale_status' => 2, 'purchase_status' => 2, 'adjust_edit' => 1, 'transfer_edit' => 2, 'damage' => 1, 'damage_delete' => 1, 'pos' => 3, 'sale_box' => 2, 'purchase_box' => 2, 'purchase' => 6, 'sale' => 6, 'sale_pending' => 1, 'sale_edit' => 3, 'sale_delete' => 2, 'sale_return' => 2, 'sale_return_delete' => 1,
     'purchase_edit' => 2, 'purchase_delete' => 1, 'purchase_return' => 2, 'purchase_return_delete' => 1, 'adjust' => 2, 'adjust_delete' => 1, 'transfer' => 2, 'transfer_delete' => 1];
 $bag = []; foreach ($weights as $k => $w) { for ($i = 0; $i < $w; $i++) { $bag[] = $k; } }
 

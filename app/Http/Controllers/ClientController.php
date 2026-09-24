@@ -106,12 +106,12 @@ class ClientController extends BaseController
 
             $item['due'] = $item['total_amount'] - $item['total_paid'];
 
-            $item['total_amount_return'] = DB::table('sale_returns')
+            $item['total_amount_return'] = DB::table('sale_returns')->where('statut', 'received')
                 ->where('deleted_at', '=', null)
                 ->where('client_id', $client->id)
                 ->sum('GrandTotal');
 
-            $item['total_paid_return'] = DB::table('sale_returns')
+            $item['total_paid_return'] = DB::table('sale_returns')->where('statut', 'received')
                 ->where('sale_returns.deleted_at', '=', null)
                 ->where('sale_returns.client_id', $client->id)
                 ->sum('paid_amount');
@@ -1359,12 +1359,12 @@ class ClientController extends BaseController
         $sale_due = $total_amount - $total_paid;
 
         // -------- RETURNS TOTALS --------
-        $total_amount_return = DB::table('sale_returns')
+        $total_amount_return = DB::table('sale_returns')->where('statut', 'received')
             ->whereNull('deleted_at')
             ->where('client_id', $client->id)
             ->sum('GrandTotal');
 
-        $total_paid_return = DB::table('sale_returns')
+        $total_paid_return = DB::table('sale_returns')->where('statut', 'received')
             ->whereNull('deleted_at')
             ->where('client_id', $client->id)
             ->sum('paid_amount');
@@ -1429,12 +1429,12 @@ class ClientController extends BaseController
 
         $sale_due = $total_amount - $total_paid;
 
-        $total_amount_return = DB::table('sale_returns')
+        $total_amount_return = DB::table('sale_returns')->where('statut', 'received')
             ->whereNull('deleted_at')
             ->where('client_id', $client->id)
             ->sum('GrandTotal');
 
-        $total_paid_return = DB::table('sale_returns')
+        $total_paid_return = DB::table('sale_returns')->where('statut', 'received')
             ->whereNull('deleted_at')
             ->where('client_id', $client->id)
             ->sum('paid_amount');
