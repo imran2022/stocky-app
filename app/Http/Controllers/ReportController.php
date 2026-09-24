@@ -234,8 +234,10 @@ class ReportController extends BaseController
             ->get();
 
         foreach ($clients as $client) {
+            // Audit Batch 4: count completed sales only, like every amount on this row.
             $item['total_sales'] = DB::table('sales')
                 ->where('deleted_at', '=', null)
+                ->where('statut', 'completed')
                 ->where('client_id', $client->id)
                 ->count();
 
@@ -255,11 +257,13 @@ class ReportController extends BaseController
 
             $item['total_amount_return'] = DB::table('sale_returns')
                 ->where('deleted_at', '=', null)
+                ->where('statut', 'received')
                 ->where('client_id', $client->id)
                 ->sum('GrandTotal');
 
             $item['total_paid_return'] = DB::table('sale_returns')
                 ->where('sale_returns.deleted_at', '=', null)
+                ->where('sale_returns.statut', 'received')
                 ->where('sale_returns.client_id', $client->id)
                 ->sum('paid_amount');
 
@@ -1323,6 +1327,7 @@ class ReportController extends BaseController
         }
 
         $base = Sale::whereNull('sales.deleted_at')
+            ->where('sales.statut', 'completed')   // Audit Batch 4: completed sales only
             ->when(! $is_all_warehouses, function ($q) use ($allowedWarehouseIds) {
                 $q->whereIn('warehouse_id', $allowedWarehouseIds);
             })
@@ -1644,8 +1649,10 @@ class ReportController extends BaseController
             ->get();
 
         foreach ($providers as $provider) {
+            // Audit Batch 4: received purchases only, like every amount on this row.
             $item['total_purchase'] = DB::table('purchases')
                 ->where('deleted_at', '=', null)
+                ->where('statut', 'received')
                 ->where('provider_id', $provider->id)
                 ->count();
 
@@ -1665,11 +1672,13 @@ class ReportController extends BaseController
 
             $item['total_amount_return'] = DB::table('purchase_returns')
                 ->where('deleted_at', '=', null)
+                ->where('statut', 'completed')
                 ->where('provider_id', $provider->id)
                 ->sum('GrandTotal');
 
             $item['total_paid_return'] = DB::table('purchase_returns')
                 ->where('deleted_at', '=', null)
+                ->where('statut', 'completed')
                 ->where('provider_id', $provider->id)
                 ->sum('paid_amount');
 
@@ -1691,6 +1700,7 @@ class ReportController extends BaseController
         // ---- Whole-set stats + top-10 chart for the summary/visual.
         $purAgg = DB::table('purchases')
             ->whereNull('deleted_at')
+            ->where('statut', 'received')
             ->selectRaw("COUNT(*) as cnt,
                          COALESCE(SUM(CASE WHEN statut = 'received' THEN GrandTotal ELSE 0 END),0) as grand,
                          COALESCE(SUM(CASE WHEN statut = 'received' THEN paid_amount ELSE 0 END),0) as paid")
@@ -3634,6 +3644,7 @@ class ReportController extends BaseController
                 }
             })
             ->whereNull('sales.deleted_at')
+            ->where('sales.statut', 'completed')   // Audit Batch 4: completed sales only
             ->whereBetween('sale_details.date', [$from, $to]);
 
         $products_data = $base()
@@ -4711,6 +4722,8 @@ class ReportController extends BaseController
         }
 
         $sale_details_data = SaleDetail::with('product', 'sale', 'sale.client', 'sale.warehouse')
+            // Audit Batch 4: only lines of live, COMPLETED sales (also skips orphan lines whose sale is gone, which used to crash the page)
+            ->whereHas('sale', fn ($q) => $q->whereNull('deleted_at')->where('statut', 'completed'))
             ->where(function ($query) use ($ShowRecord) {
                 if (! $ShowRecord) {
                     $query->whereHas('sale', function ($q) {
@@ -5986,11 +5999,11 @@ class ReportController extends BaseController
                     ->where(function ($query) use ($request, $array_warehouses_id) {
                         if ($request->warehouse_id) {
                             return $query->whereHas('sale', function ($q) use ($request) {
-                                $q->where('warehouse_id', $request->warehouse_id);
+                                $q->where('warehouse_id', $request->warehouse_id)->where('statut', 'completed')->whereNull('deleted_at');   // Audit Batch 4
                             });
                         } else {
                             return $query->whereHas('sale', function ($q) use ($array_warehouses_id) {
-                                $q->whereIn('warehouse_id', $array_warehouses_id);
+                                $q->whereIn('warehouse_id', $array_warehouses_id)->where('statut', 'completed')->whereNull('deleted_at');   // Audit Batch 4
                             });
 
                         }
@@ -6010,11 +6023,11 @@ class ReportController extends BaseController
                     ->where(function ($query) use ($request, $array_warehouses_id) {
                         if ($request->warehouse_id) {
                             return $query->whereHas('sale', function ($q) use ($request) {
-                                $q->where('warehouse_id', $request->warehouse_id);
+                                $q->where('warehouse_id', $request->warehouse_id)->where('statut', 'completed')->whereNull('deleted_at');   // Audit Batch 4
                             });
                         } else {
                             return $query->whereHas('sale', function ($q) use ($array_warehouses_id) {
-                                $q->whereIn('warehouse_id', $array_warehouses_id);
+                                $q->whereIn('warehouse_id', $array_warehouses_id)->where('statut', 'completed')->whereNull('deleted_at');   // Audit Batch 4
                             });
 
                         }
@@ -6064,11 +6077,11 @@ class ReportController extends BaseController
                     ->where(function ($query) use ($request, $array_warehouses_id) {
                         if ($request->warehouse_id) {
                             return $query->whereHas('sale', function ($q) use ($request) {
-                                $q->where('warehouse_id', $request->warehouse_id);
+                                $q->where('warehouse_id', $request->warehouse_id)->where('statut', 'completed')->whereNull('deleted_at');   // Audit Batch 4
                             });
                         } else {
                             return $query->whereHas('sale', function ($q) use ($array_warehouses_id) {
-                                $q->whereIn('warehouse_id', $array_warehouses_id);
+                                $q->whereIn('warehouse_id', $array_warehouses_id)->where('statut', 'completed')->whereNull('deleted_at');   // Audit Batch 4
                             });
 
                         }
@@ -6088,11 +6101,11 @@ class ReportController extends BaseController
                     ->where(function ($query) use ($request, $array_warehouses_id) {
                         if ($request->warehouse_id) {
                             return $query->whereHas('sale', function ($q) use ($request) {
-                                $q->where('warehouse_id', $request->warehouse_id);
+                                $q->where('warehouse_id', $request->warehouse_id)->where('statut', 'completed')->whereNull('deleted_at');   // Audit Batch 4
                             });
                         } else {
                             return $query->whereHas('sale', function ($q) use ($array_warehouses_id) {
-                                $q->whereIn('warehouse_id', $array_warehouses_id);
+                                $q->whereIn('warehouse_id', $array_warehouses_id)->where('statut', 'completed')->whereNull('deleted_at');   // Audit Batch 4
                             });
 
                         }
@@ -6179,6 +6192,8 @@ class ReportController extends BaseController
         }
 
         $sale_details_data = SaleDetail::with('product', 'sale', 'sale.client', 'sale.warehouse', 'sale.user')
+            // Audit Batch 4: only lines of live, COMPLETED sales (also skips orphan lines whose sale is gone, which used to crash the page)
+            ->whereHas('sale', fn ($q) => $q->whereNull('deleted_at')->where('statut', 'completed'))
             ->where(function ($query) use ($ShowRecord) {
                 if (! $ShowRecord) {
                     return $query->whereHas('sale', function ($q) {
@@ -6405,6 +6420,8 @@ class ReportController extends BaseController
         $data = [];
 
         $sale_details_data = SaleDetail::with('product', 'sale', 'sale.client', 'sale.warehouse')
+            // Audit Batch 4: only lines of live, COMPLETED sales (also skips orphan lines whose sale is gone, which used to crash the page)
+            ->whereHas('sale', fn ($q) => $q->whereNull('deleted_at')->where('statut', 'completed'))
             ->where(function ($query) use ($view_records) {
                 if (! $view_records) {
                     return $query->whereHas('sale', function ($q) {
@@ -8841,6 +8858,7 @@ class ReportController extends BaseController
         ->where(function ($query) use ($from, $to) {
             $query->where(function ($qq) use ($from, $to) {
                 $qq->whereNull('sales.deleted_at')
+                    ->where('sales.statut', 'completed')   // Audit Batch 4: completed sales only
                     ->whereBetween('sales.date', [$from, $to]);
             })
             ->orWhereNull('sales.date'); // categories without sales
@@ -8995,6 +9013,7 @@ public function sales_by_brand_report(Request $request)
         ->where(function ($query) use ($from, $to) {
             $query->where(function ($qq) use ($from, $to) {
                 $qq->whereNull('sales.deleted_at')
+                    ->where('sales.statut', 'completed')   // Audit Batch 4: completed sales only
                     ->whereBetween('sales.date', [$from, $to]);
             })
             ->orWhereNull('sales.date'); // brands without sales
@@ -9196,6 +9215,7 @@ public function sales_by_brand_report(Request $request)
 
             $salesQuery = DB::table('sales')
                 ->whereNull('deleted_at')
+                ->where('statut', 'completed')   // Audit Batch 4: completed sales only (payment columns below use the same set)
                 // Credit the sale to the attributed salesperson (Change Salesperson
                 // at POS), falling back to the cashier for plain sales.
                 ->whereRaw('COALESCE(seller_id, user_id) = ?', [$user->id])
@@ -9209,7 +9229,7 @@ public function sales_by_brand_report(Request $request)
             // If we have full datetime bounds, filter on combined date+time
             if ($startDateTime && $endDateTime) {
                 $salesQuery->whereBetween(
-                    DB::raw("CONCAT(date, ' ', time)"),
+                    DB::raw("CONCAT(date, ' ', COALESCE(time, '12:00:00'))"),   // NULL time no longer drops the sale (matches the Sales report)
                     [$startDateTime, $endDateTime]
                 );
             } elseif ($start_date && $end_date) {
@@ -9230,6 +9250,7 @@ public function sales_by_brand_report(Request $request)
                 ->join('sales', 'payment_sales.sale_id', '=', 'sales.id')
                 ->whereNull('payment_sales.deleted_at')
                 ->whereNull('sales.deleted_at')
+                ->where('sales.statut', 'completed')
                 // Same attribution as total_sales above (the sale's credited
                 // seller, not payment_sales.user_id = whoever recorded the
                 // payment) so each row's method columns sum to its total.
@@ -9245,7 +9266,7 @@ public function sales_by_brand_report(Request $request)
 
             if ($startDateTime && $endDateTime) {
                 $paymentsQuery->whereBetween(
-                    DB::raw("CONCAT(payment_sales.date, ' ', sales.time)"),
+                    DB::raw("CONCAT(payment_sales.date, ' ', COALESCE(sales.time, '12:00:00'))"),
                     [$startDateTime, $endDateTime]
                 );
             } elseif ($start_date && $end_date) {
