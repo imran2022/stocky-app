@@ -5092,3 +5092,18 @@ Fixed 500s: warranty report, orphan sale lines, 4 dead report routes. Vue: Profi
   (product decision); some send-SMS/WhatsApp endpoints lack a permission check; draft->POS conversion and account balance
   vs payments have no dedicated stress test yet.
 - Deploy: `php artisan migrate` (indexes) then `php artisan optimize:clear`.
+
+## Audit Batch 6 — Dashboard "Today" hourly charts (2026-09-24)
+
+- When the Dashboard header range is ONE day (Today or a single custom day), the Sales & Purchases chart is an hourly
+  line (00:00-23:00) and Payment Sent & Received is an hourly bar chart. 7D / 30D / MTD / YTD are drawn exactly as
+  before (one point per day).
+- New class `App\Support\Reporting\DashboardHourly`: same rows, scope (record_view, warehouse filter) and definitions as
+  the day-by-day charts, only grouped by hour, so the 24 hourly values always add up to the daily value. Sales hour =
+  `sales.time`, purchases hour = `purchases.time`, payments/expenses hour = `created_at`.
+  Sales = completed only; purchases = received only.
+- Hook: `DashboardController::dashboard_data` returns an extra `hourly` key (null unless from == to). The daily Payment
+  chart now also ignores soft-deleted expenses.
+- Vue: `resources/src/pages/Dashboard.vue` (`buildCharts(..., hourly)`); admin assets rebuilt (`npm run build:admin`).
+- Test: `tests/Regression/audit_b6_dashboard_hourly.php`.
+- Note: a payment's hour is the time the payment row was recorded (created_at); payment rows have no separate time column.

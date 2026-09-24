@@ -1,10 +1,11 @@
 # Latest Delivery Index
 
-## Current: Audit Batches 1-5 (2026-09-24)
+## Current: Audit Batches 1-6 (2026-09-24)
 
 Delivered as git bundles `STOCKY_AUDIT_FIX_B1..B5_2026-09-24.bundle` (each on top of the previous) plus live-deploy zips
 `LIVE_DEPLOY_AUDIT_B4/B5_2026-09-24.zip`. Batch 5 needs `php artisan migrate` (indexes) and `php artisan optimize:clear`.
-Description: `CUSTOMIZATIONS.md` "Audit Batches 1-5", checklist section 36, merge procedure
+Batch 6 (Dashboard hourly charts) adds rebuilt `public/js` admin assets, no migration.
+Description: `CUSTOMIZATIONS.md` "Audit Batches 1-5" and "Audit Batch 6", checklist section 36, merge procedure
 `docs/AUDIT_MERGE_GUIDE.md`, tests `tests/Regression/audit_*.php` (`tests/run_regression.sh`).
 
 ## Current: PO+GRN Phase 1.4 — supplier match, over-receipt lock, unsafe-edit block

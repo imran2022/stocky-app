@@ -2418,3 +2418,12 @@ This supplements the in-depth Build O1–O9 record appended to
 - [ ] `php artisan migrate` ran (14 `idx_b5_*` indexes exist); `php artisan optimize:clear` ran; Ctrl+F5 done.
 - [ ] Run `tests/run_regression.sh`; only the 12 documented harness-only `build_*` scripts may fail.
 - [ ] After a vendor upgrade, follow `docs/AUDIT_MERGE_GUIDE.md` and re-run the regression suite.
+
+## 37. Audit Batch 6 — Dashboard hourly charts
+
+- [ ] Dashboard > Today: Sales & Purchases shows an hourly line 00:00-23:00; Payment Sent & Received shows hourly bars.
+- [ ] Sum of the hourly Sales points equals the Sales card; hourly Received/Sent bars add up to the day's payments.
+- [ ] 7D, 30D, MTD, YTD and a multi-day Custom range look exactly as before.
+- [ ] A user without record_view sees only their own rows in the hourly charts; a warehouse-limited user only their warehouses.
+- [ ] A pending sale and a deleted payment do not appear in the hourly charts.
+- [ ] `php artisan optimize:clear` and Ctrl+F5 after deploy (new admin assets in `public/js`).
