@@ -35,7 +35,9 @@ custom behavior.
 | G1 | Product Insight base-quantity readiness | Active |
 | Phase 0 | Purchase Form quick wins | Active |
 | PO+GRN | Purchase Order workflow linked to GRN receipts | Active |
-| PO+GRN registration hotfix | API/router/menu registrations packaged, not manual | Latest |
+| PO+GRN registration hotfix | API/router/menu registrations packaged, not manual | Active |
+| Modern Dashboard | Classic/Modern switch, insights, sales map, mobile nav | Active |
+| Inventory Costing (Moving Average) | Per-line COGS, historical stock value, corrections on edit | Latest, OFF by default |
 
 ## Non-negotiable business/technical contracts
 
@@ -49,6 +51,14 @@ custom behavior.
 - Dashboards: Classic (`pages/Dashboard.vue`, untouched) and Modern (`pages/dashboard/modern/**`) sit behind
   `pages/dashboard/DashboardSwitch.vue`. Modern must never show demo or invented numbers; new insight figures live in
   `App\Support\Reporting\DashboardInsights` and reuse `SalesFigures` / `CashFlowFigures`. See `CUSTOMIZATIONS.md` "Modern Dashboard".
+
+- Costing: `App\Services\Costing\*` is the ONLY place that computes COGS/stock value when Moving Average is on
+  (`inventory_cost_meta.costing_method = 'moving_average'`). It is OFF by default (`legacy`) and every hooked report/
+  dashboard/controller falls back to its original master-cost math while off — see `CUSTOMIZATIONS.md` "Inventory
+  Costing (Moving Average)" for the full hook list, the enabling procedure (`php artisan costing:rebuild`), and the
+  documented limitations. Do not compute COGS or stock value from `products.cost` / `product_variants.cost` directly
+  in new code once this is enabled anywhere — read through `CostingReader` instead, so it still works whichever
+  method is active.
 
 - Use small SAFE overlays. Never delete the existing application tree for a
   routine patch.

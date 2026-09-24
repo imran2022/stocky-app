@@ -5193,3 +5193,100 @@ Tests: `audit_ui1_dashboard_prefs.php`, `audit_ui2_dashboard_insights.php`.
 - **Map size / zoom.** The map box now uses the full width of its column (square up to 560 px on desktop, 4:5 on phones). While zoomed, the view is computed from the box's real shape, so it fills the whole box (before, it stayed inside a narrow 380 px strip with empty space on both sides). Zoom, pan, reset unchanged.
 - **Black frame on click** was the browser's focus outline on the clicked district / map; removed (keyboard focus still shows a dark district border).
 - **Recent activity** shows at most 5 rows (tabs and day groups stay); "View all" opens the full Activity Log.
+
+## Inventory Costing (Moving Average)
+
+**Problem.** The vendor stored no per-sale cost. COGS was recomputed at report time from `products.cost` /
+`product_variants.cost` (a single "master cost" field), so editing a product's cost changed the profit of sales made
+months ago, different reports could disagree with each other (some used FIFO layers from purchases, some a cumulative
+average, some the current master cost), and there was no way to ask "what was my stock worth on 1 January".
+
+**Design.** Documents (purchases, sales, returns, adjustments, transfers, damages) stay the single source of truth —
+nothing about how a document is created, edited or deleted changes. A new, additive service layer
+(`app/Services/Costing/`) replays every product's documents in chronological order through a pure Moving Weighted
+Average engine and stores the result:
+
+- `App\Services\Costing\MovingAverageEngine` — pure function, no I/O: given one product/variant/warehouse's
+  chronological movements, returns the ledger rows and running balance. Rules: a receipt (purchase, purchase return,
+  transfer-in, positive adjustment) blends into the average; every kind of stock-out leaves at the current average
+  except a sale return, which comes back at its *original sale line's* cost (so a return can never manufacture or
+  destroy profit) and a purchase return, which leaves at the cost written on the return line itself. A receipt into a
+  zero-or-negative balance resets the average to that receipt's cost. Rows carrying a fallback/estimated cost are
+  flagged `is_estimated`.
+- `App\Services\Costing\MovementSource` — loads a product's movements from the documents in one set-based query per
+  source type (mirrors the inclusion rules already used by `ProductMovementLedgerService`: which statuses count,
+  which warehouse a transfer affects and when, soft-deleted headers excluded, service products skipped).
+- `App\Services\Costing\InventoryCostingService` — the write side: turns Moving Average on/off
+  (`costing_method` in `inventory_cost_meta`, default `legacy` — deploying this changes nothing until an admin
+  switches it), costs a batch of products (`syncProducts`), and keeps the ledger fresh for readers through four cheap
+  checks so nothing in the UI ever has to wait for a full rebuild: (1) id high-water marks on the detail tables catch
+  new documents, (2) a per-window row-count check catches an edit/status-flip/delete that didn't create a new id,
+  (3) an on-hand-qty-vs-ledger-balance check catches stock changed by an import or a raw DB edit, (4) a full
+  CRC32 fingerprint verification of every product's documents runs at most once per 30 seconds
+  (`ensureFresh`) and on demand (`costing:rebuild --verify`). All four are read-triggered, not written on the
+  document-save path — no controller that writes a Sale/Purchase/etc. was changed.
+- `App\Services\Costing\CostingReader` — the only door reports/dashboards use. Every method is a no-op / pass-through
+  while costing is off, so wiring a report to it never changes a number until Moving Average is switched on. When on:
+  a sale line's COGS is its ledger row (immune to later master-cost edits); a sale return reverses the *original
+  sale's* cost, never the current one; stock value is qty x running average per warehouse, and can be asked "as of"
+  any date (last ledger balance on/before it); a Profit-report-style base query
+  (`profitLinesBase`/`profitLinesTemp`) gives one row per completed sale line and received return line with its
+  ledger cost, for reports that group by product/category/unit/customer/date/warehouse.
+
+**Data (all new tables, nothing in a vendor table altered):** migration
+`2026_09_26_000001_create_inventory_costing_tables.php` creates `inventory_cost_ledger` (one row per movement:
+qty/cost/value delta, running balance and average, `is_estimated`), `inventory_cost_balances` (current balance per
+product/variant/warehouse), `inventory_cost_seeds` (write-once valuation for on-hand stock no document explains — see
+below), `inventory_cost_stamps` (write-once cost for an adjustment that adds stock but carries no cost of its own),
+`inventory_cost_keys` (per-product document fingerprint, for `verify()`), `inventory_cost_corrections` (an audit trail
+row every time re-costing changes a *previously posted* sale/return line's cost — e.g. an old GRN's cost gets
+corrected behind the app), and `inventory_cost_meta` (the on/off switch and sync bookkeeping).
+
+**Cost basis for a purchase line:** the app's own "Net Unit Cost" — the line's discount removed and its inclusive tax
+carved out with the same formula already used by `PurchasesController::show`, converted to a per-base-unit cost (a
+box purchase is divided by its pack size). Order-level discount/shipping/landed cost is **not** currently allocated
+into unit cost — documented limitation, Phase 2 candidate.
+
+**Unexplained stock (imports, marketplace syncs, a raw DB edit that changed `product_warehouse.qte` with no
+document):** handled as write-once "seeds", never silently absorbed into the average or dropped. The *first*
+unexplained amount for a product/warehouse is dated just before that key's first real movement and valued at the
+product's master cost (this is the one-time "opening stock" valuation — exactly what an opening Adjustment would have
+been, had one been entered); any *later* unexplained increase is valued at the running average at that point, and
+dated now; an unexplained *decrease* is dated now with no cost (it only removes qty). An adjustment that adds stock
+but was never given a cost gets the same write-once master-cost stamp. Both are recorded so the same unexplained
+amount is never re-priced on a later resync.
+
+**Historical stock value:** because every row keeps its running balance and average, "stock value as of 1 January" is
+answered from the ledger (`CostingReader::valueAsOf`), not recomputed — no report has to guess what the average was
+back then.
+
+**Known limitations (by design, documented rather than silently approximated):**
+- Undocumented opening stock is dated at the product's first real movement, not at the (unknown) date it actually
+  arrived — its rupee value is still correct, only its *placement in time* is a best estimate.
+- Order-level landed cost (freight, customs, etc. entered once for a whole purchase) is not yet allocated across
+  lines; only the per-line Net Unit Cost is used.
+- Damage and adjustment-*out* losses are tracked in the ledger but are **not** currently deducted from the Profit
+  report's profit figure — this is an accounting-policy choice (some businesses expense write-offs immediately,
+  others net them elsewhere) left to the business to decide; the cost is available (`adjustmentAbsCost`) for whoever
+  wires that decision in.
+- A receipt landing on a negative balance (stock had gone negative, e.g. a sale allowed to oversell) resets the
+  average to that receipt's cost rather than preserving strict value conservation through the negative period — a
+  known edge case of Moving Average costing generally, not specific to this implementation.
+- Batch/expiry/GRN-level cost tracing (FIFO by batch) is **not** part of this phase — every GRN blends into one
+  running average per product/variant/warehouse. If the business needs to trace cost back to a specific GRN/batch
+  (e.g. expiry-driven stock, batch recalls), that is a Phase 2 design (FIFO/batch costing) with its own settings
+  switch; Moving Average and FIFO are designed to be switchable per `costing_method` without re-touching the report
+  hooks, since every hook reads through `CostingReader` rather than the engine directly.
+
+**Report/dashboard hooks (all additive; each is a no-op while costing is off):**
+`app/Traits/CalculatesCogsAndAverageCost.php` (Dashboard/Today Summary/P&L COGS), `ReportController`
+(`inventory_valuation_summary`, `stock_inventory_valuation`, `Warhouse_Count_Stock`, `analyticsSummary` opening/closing
+stock and adjustment cost, `negative_stock_report`, `deadStock`, the Adjustment report's `purchase_cost`),
+`DashboardController` (`StockValue`), `TodaySummaryController` (stock at cost), `App\Support\Reporting\DashboardInsights`
+(slow-stock value), `ProfitReportController` (base query, cost expression, and — for the by-dimension breakdown —
+`CostingReader::profitLinesTemp`, which materializes the window's sale/return lines into one indexed temporary table
+instead of re-running the ledger join for each of the count/rows/kpi/chart queries; the temp table is uniquely named
+per request and dies with the connection, so nothing is cached or reused across requests), `ReportQuestionService`
+(by-product profit cost).
+
+**Enabling procedure (deploy -> migrate -> compare -> switch on):**

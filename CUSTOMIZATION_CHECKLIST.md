@@ -2453,3 +2453,32 @@ This supplements the in-depth Build O1–O9 record appended to
 - [ ] Recent activity: tabs filter, days are grouped, a Sale/Purchase row opens its page; role without Activity Log permission sees the "not available" message.
 - [ ] Phone: bottom bar "Menu" opens the sidebar. Hide both product sections in Customize + Save + reload: no `only=products` request in the network tab.
 
+
+## 39. Inventory Costing (Moving Average)
+
+- [ ] Deploying this migration + code changes nothing by itself: with `costing_method` left at its default
+      (`legacy`), every hooked report/dashboard shows the exact same numbers as before (verify with the existing
+      full regression suite in legacy mode).
+- [ ] `php artisan migrate --path=database/migrations/2026_09_26_000001_create_inventory_costing_tables.php` creates
+      the new `inventory_cost_*` tables; no vendor table's columns changed.
+- [ ] `php artisan costing:rebuild --dry-run` costs every product into the ledger WITHOUT switching anything on, and
+      prints legacy vs Moving Average COGS + stock value for a window so the business can see the effect first.
+- [ ] `php artisan costing:rebuild --apply --enable` costs everything and turns Moving Average on; safe to re-run
+      `--apply` alone later (e.g. after a bulk import) — it always fully replaces a product's ledger rows.
+- [ ] Once on: a sale's stored COGS never changes when a product's master cost is edited afterwards.
+- [ ] Once on: a sale return reverses the *original sale's* cost, not the current average or master cost.
+- [ ] Once on: P&L, Profit report (every dimension: product/category/unit/customer/date/warehouse),
+      `stock_inventory_valuation`, `inventory_valuation_summary`, Dashboard stock value, Today Summary stock value,
+      and analytics opening/closing stock all agree with each other for the same window/date.
+- [ ] Editing an old purchase/GRN's cost behind the app (no controller) is detected on the next read (within the 30 s
+      TTL, or immediately via `php artisan costing:rebuild --verify`) and logged to `inventory_cost_corrections`.
+- [ ] A full rebuild from the documents (`syncProducts` on every product) matches the incrementally maintained
+      ledger exactly (checked by `build_costing_realworld.php` and `build_costing_stress.php`).
+- [ ] Large dataset (200 products / 730 days / ~287k lines): every sale line's stored COGS matches an independent
+      set of books; P&L and the Profit report by-dimension breakdown both return in a few seconds, not tens of
+      seconds (`build_costing_large.php`).
+- [ ] `php artisan costing:rebuild --verify` (or the new daily scheduled entry) is a no-op while costing is off.
+- [ ] Damage/adjustment-out losses are NOT deducted from Profit report profit — this is a documented, deliberate
+      accounting-policy gap, not a bug (see `CUSTOMIZATIONS.md`).
+- [ ] Batch/expiry/GRN-trace (FIFO by batch) is out of scope for this phase — every GRN blends into one average;
+      confirm this matches what the business needs before promoting Moving Average to the only supported method.

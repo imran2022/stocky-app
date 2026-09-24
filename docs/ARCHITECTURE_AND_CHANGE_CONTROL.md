@@ -82,6 +82,16 @@ Own table (`dashboard_preferences`), own controllers and `Support\Dashboard` / `
 frontend lives under `pages/dashboard/` and `stores/dashboardPrefs.js`. Only the route line and additive report keys touch vendor files.
 Bundled map data is CC BY 4.0 (attribution required, shown in the UI).
 
+## Inventory Costing (Moving Average)
+
+Own tables (`inventory_cost_*`, one migration, nothing in a vendor table altered) and own service layer
+(`app/Services/Costing/*`): `MovingAverageEngine` (pure replay function), `MovementSource` (loads a product's
+documents), `InventoryCostingService` (write side — sync, verify, on/off switch), `CostingReader` (the only door
+reports use; a no-op pass-through while off). Report/dashboard files only gained additive hooks that branch on
+`CostingReader::active()` — the legacy branch is byte-for-byte the original code path. OFF by default; switched with
+`php artisan costing:rebuild`. See `CUSTOMIZATIONS.md` "Inventory Costing (Moving Average)" for the full design,
+limitations, and enabling procedure.
+
 ## Frontend release modes
 
 Normal development should run the documented Vite build and deploy the complete

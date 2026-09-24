@@ -20,6 +20,10 @@ All hooks are marked with a comment containing `Audit Batch` / `Audit fix (Batch
 | `app/Support/Reporting/CashFlowFigures.php` | Cash Flow: one set of entries feeds both table and chart; includes return refunds |
 | `database/migrations/2026_09_24_000001_add_report_and_stock_indexes.php` | report / date / stock indexes (additive, idempotent) |
 | `tests/Regression/audit_*.php`, `tests/run_regression.sh` | regression tests, incl. seeded stock and money stress tests |
+| `app/Services/Costing/MovingAverageEngine.php`, `MovementSource.php`, `InventoryCostingService.php`, `CostingReader.php` | Inventory Costing (Moving Average) — see `CUSTOMIZATIONS.md`; no-op while `costing_method = legacy` |
+| `app/Console/Commands/CostingRebuild.php` | `php artisan costing:rebuild` — dry-run compare, apply, enable, verify |
+| `database/migrations/2026_09_26_000001_create_inventory_costing_tables.php` | `inventory_cost_*` tables (additive, idempotent) |
+| `tests/Regression/unit_costing_engine.php`, `build_costing_scenario.php`, `build_costing_realworld.php`, `build_costing_stress.php`, `build_costing_large.php` | costing regression + large-data tests |
 
 ## Vendor files that carry hooks (re-check after taking a new vendor version)
 
@@ -39,6 +43,12 @@ Size = lines added / removed against the pre-audit version.
 | `resources/src/router/index.js` (Modern Dashboard) | 1 line | `Dashboard` route now loads `pages/dashboard/DashboardSwitch.vue` (which mounts the unchanged Classic `Dashboard.vue`) |
 | `resources/src/pages/Dashboard.vue` (Modern Dashboard) | 1 line | `return_purchases` uses `return_purchases_amount` (fixes NaN for >= 1,000) |
 | `Traits/CalculatesCogsAndAverageCost.php` | +118 / -57 | COGS in base units, sale returns netted |
+| `Traits/CalculatesCogsAndAverageCost.php` (Costing) | +6 | when Moving Average is on, returns the stored per-line COGS instead of recomputing; no-op while off |
+| `Http/Controllers/ReportController.php` (Costing) | ~+70 | `inventory_valuation_summary`, `stock_inventory_valuation`, `Warhouse_Count_Stock`, `analyticsSummary`, `negative_stock_report`, `deadStock`, Adjustment report cost — all branch on `CostingReader::active()`, legacy branch unchanged |
+| `Http/Controllers/DashboardController.php`, `TodaySummaryController.php` (Costing) | few lines each | stock value at cost through `CostingReader`, no-op while off |
+| `Support/Reporting/DashboardInsights.php` (Costing) | few lines | slow-stock value through `CostingReader`, no-op while off |
+| `Http/Controllers/ProfitReportController.php` (Costing) | ~+40 | base query, cost expression and dimensions swap to the ledger when on (via `CostingReader::profitLinesTemp`, one materialized temp table per request instead of re-joining per dimension query); legacy branch unchanged |
+| `Services/ReportQuestionService.php` (Costing) | few lines | by-product profit cost through the ledger when on |
 | `Services/Custom/PurchaseOrderReceiptService.php`, `Support/UniqueRefGenerator.php` | small | GRN line checks, reference collision retry |
 | `routes/api.php` | -5 | dead routes and the public `products_clean_names` route removed |
 | `resources/src/pages/Dashboard.vue` (Batch 6) | ~+45 | hourly line/bars when `hourly` is present (needs `npm run build:admin`) |

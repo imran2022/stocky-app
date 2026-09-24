@@ -1,5 +1,18 @@
 # Latest Delivery Index
 
+## Current: Inventory Costing — Moving Average (2026-09-26)
+
+Per-sale-line COGS and historically-correct stock value, replacing the old master-cost-at-report-time math. OFF by
+default (`inventory_cost_meta.costing_method = 'legacy'`) — deploying changes nothing until an admin runs
+`php artisan costing:rebuild --dry-run` (compare, no change) then `--apply --enable`. New tables only
+(migration `2026_09_26_000001_create_inventory_costing_tables.php`); every report hook is additive and a no-op while
+off. Description: `CUSTOMIZATIONS.md` "Inventory Costing (Moving Average)", checklist section 39, tests
+`unit_costing_engine.php` / `build_costing_scenario.php` / `build_costing_realworld.php` / `build_costing_stress.php`
+/ `build_costing_large.php` (all in `tests/Regression/`).
+Known limitations: order-level landed cost not yet allocated per line; damage/adjustment-out losses not deducted from
+Profit report profit (accounting-policy decision left to the business); batch/expiry/GRN-trace (FIFO) is a Phase 2
+candidate behind the same `costing_method` switch.
+
 ## Current: Modern Dashboard (2026-09-25)
 
 Classic/Modern dashboard switch, drag-and-drop layout, business insights, recent activity and Bangladesh sales map.
