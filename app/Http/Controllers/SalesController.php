@@ -453,6 +453,8 @@ class SalesController extends BaseController
         }
 
         $sale = \DB::transaction(function () use ($request) {
+            // Audit Batch 3 (S8): loyalty points can only be redeemed if they exist and are worth the discount.
+            \App\Support\LoyaltyRedemption::assertValid($request->client_id, $request->used_points ?? 0, $request->discount_from_points ?? 0);
             // Audit Batch 2 (S9/S10): honour "Allow overselling = off" server-side, under row locks.
             if ($request->statut === 'completed') {
                 \App\Support\StockGuard::assertAvailable(
@@ -944,6 +946,11 @@ class SalesController extends BaseController
                 $new_sale_details = $request['details'];
                 $length = count($new_sale_details);
 
+                // Audit Batch 3 (S8): points already spent by this sale (same customer) count as available again.
+                \App\Support\LoyaltyRedemption::assertValid(
+                    $request->client_id, $request->used_points ?? 0, $request->discount_from_points ?? 0,
+                    (int) $current_Sale->client_id === (int) $request->client_id ? (float) ($current_Sale->used_points ?? 0) : 0.0
+                );
                 // Audit Batch 2 (S9/S10): the edit hands its old quantities back, then takes the new ones.
                 if ($request->statut === 'completed') {
                     $heldByOldLines = ($current_Sale->statut === 'completed' && (int) $current_Sale->warehouse_id === (int) $request->warehouse_id)

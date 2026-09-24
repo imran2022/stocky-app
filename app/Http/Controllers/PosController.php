@@ -409,6 +409,8 @@ class PosController extends BaseController
 
         try {
             $sale = \DB::transaction(function () use ($request, $totalPaid, $saleUuid, $saleAt, $promotionDiscount, $promotionCodeApplied, $appliedPromotions, $walletMethodId) {
+                // Audit Batch 3 (S8): loyalty points can only be redeemed if they exist and are worth the discount.
+                \App\Support\LoyaltyRedemption::assertValid($request->client_id, $request->used_points ?? 0, $request->discount_from_points ?? 0);
                 // Audit Batch 2 (S9/S10): honour "Allow overselling = off" server-side, under row locks.
                 \App\Support\StockGuard::assertAvailable(
                     $request->warehouse_id,
