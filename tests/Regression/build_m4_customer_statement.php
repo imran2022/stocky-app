@@ -63,7 +63,7 @@ $product = \Illuminate\Support\Facades\DB::table('products')->whereNull('deleted
 $nextClientCode = ((int) Client::max('code')) + 1;
 $client = Client::create([
     'name' => 'Build M4 Statement Client', 'firstname' => 'M4', 'lastname' => 'Client',
-    'code' => (string) $nextClientCode,
+    'code' => (string) (7770000 + $nextClientCode),
     'opening_balance' => 500, // customer owes 500 to start
     'adresse' => '221B Baker Street, Test City',
     'phone' => '+1-555-0100',

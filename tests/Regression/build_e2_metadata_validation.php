@@ -24,6 +24,9 @@ $rules = file_get_contents($root.'/app/Support/SaleMetadataRules.php');
 $sales = file_get_contents($root.'/app/Http/Controllers/SalesController.php');
 $shipments = file_get_contents($root.'/app/Http/Controllers/ShipmentController.php');
 $meta = file_get_contents($root.'/app/Http/Controllers/SaleMetaController.php');
+// Q2 moved the lookup find-or-create logic (name normalisation, case-insensitive duplicate check,
+// restore of soft-deleted rows, race retry) out of the controller into this service.
+$lookup = file_get_contents($root.'/app/Services/SaleLookupService.php');
 
 $assert($rules !== false, 'SaleMetadataRules.php must be readable.');
 $assert($sales !== false, 'SalesController.php must be readable.');
@@ -59,10 +62,10 @@ if ($meta !== false) {
     $contains($meta, "\$user->can('Sales_pos', Sale::class)", 'POS users must retain on-the-fly metadata creation convenience.');
     $contains($meta, "\$user->can('create', Shipment::class)", 'Shipment users must retain on-the-fly Courier creation convenience.');
     $contains($meta, 'abort_unless($allowed, 403);', 'Unrelated authenticated users must be rejected by the metadata endpoint.');
-    $contains($meta, "preg_replace('/\\s+/u', ' ', trim", 'Lookup names must normalize outer/repeated whitespace.');
-    $contains($meta, "whereRaw('LOWER(TRIM(name)) = LOWER(?)'", 'Lookup duplicate detection must be case-insensitive and trim-safe.');
-    $contains($meta, '::withTrashed()', 'Soft-deleted lookup rows must be reusable/restorable instead of duplicated.');
-    $contains($meta, 'catch (QueryException $e)', 'Concurrent unique-key creation races must be retried gracefully.');
+    $contains($lookup, "preg_replace('/\\s+/u', ' ', trim", 'Lookup names must normalize outer/repeated whitespace.');
+    $contains($lookup, "whereRaw('LOWER(TRIM(name)) = LOWER(?)'", 'Lookup duplicate detection must be case-insensitive and trim-safe.');
+    $contains($lookup, '::withTrashed()', 'Soft-deleted lookup rows must be reusable/restorable instead of duplicated.');
+    $contains($lookup, 'catch (QueryException $e)', 'Concurrent unique-key creation races must be retried gracefully.');
     $notContains($meta, '->delete()', 'Build E2 must not introduce Zone/Courier delete behavior.');
 }
 
