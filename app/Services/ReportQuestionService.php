@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Models\Sale;
-use App\Models\SaleDetail;
 use App\Models\Product;
 use App\Models\Client;
 use App\Models\PaymentSale;
@@ -103,45 +102,52 @@ class ReportQuestionService
         $sortBy = $filters['sort_by'] ?? 'profit';
         $sortDir = $filters['sort_dir'] ?? 'desc';
 
-        // Build base query
-        $query = SaleDetail::join('sales as s', 's.id', '=', 'sale_details.sale_id')
-            ->join('products as p', 'p.id', '=', 'sale_details.product_id')
-            ->leftJoin('product_variants as pv', 'pv.id', '=', 'sale_details.product_variant_id')
-            ->whereNull('s.deleted_at')
-            ->where('s.statut', 'completed')
-            ->whereBetween('sale_details.date', [$dateFrom, $dateTo]);
-
-        if ($warehouseId) {
-            $query->where('s.warehouse_id', $warehouseId);
-        } else {
-            $query->whereIn('s.warehouse_id', $warehouseIds);
-        }
-
-        if (!$viewRecords) {
-            $query->where('s.user_id', $user->id);
-        }
-
-        // Moving-average costing ON: the cost of each sale line is its stored ledger cost (sales only, like this
-        // query's revenue), otherwise the legacy master-cost recomputation.
+        // Audit fix (ReportQuestionService costing parity, follow-up to Inventory Costing update 5): this AI
+        // "ask a report question" feature used to run its OWN, cruder legacy-COGS formula
+        // (SUM(qty * today's flat master/variant cost), raw sale-unit quantity, sale returns never netted off) —
+        // a third, untested formula reintroducing exactly the bug class `LegacyProfitLines`/`HistoricalCostAtDate`
+        // were built to eliminate in the Profit Report. It also never netted received returns off revenue/qty in
+        // EITHER costing mode. Now built on the same normalized sources the Profit Report uses — completed sales
+        // plus received returns (netted), base-unit quantities, warehouse-specific date-anchored average cost in
+        // legacy mode, the stored ledger cost in Moving Average mode — so this feature can never disagree with the
+        // Profit Report again. The existing "own records only" restriction (hasRecordView) is preserved exactly.
         $costing = \App\Services\Costing\CostingReader::active();
-        $costSql = 'SUM(sale_details.quantity * COALESCE(NULLIF(pv.cost, 0), p.cost, 0))';
+        $allowed = $warehouseId ? null : $warehouseIds;
+        $userId = $viewRecords ? null : ($user->id ?? null);
+
+        $tmpTable = $costing
+            ? \App\Services\Costing\CostingReader::profitLinesTemp($dateFrom, $dateTo, $warehouseId ?: null, $allowed, $viewRecords, $userId)
+            : \App\Support\Reporting\LegacyProfitLines::temp($dateFrom, $dateTo, $warehouseId ?: null, $allowed, $viewRecords, $userId);
+
+        $costExpr = 'sd.line_cost';
+        $query = DB::table("{$tmpTable} as sd")->join('products as p', 'p.id', '=', 'sd.product_id');
         if ($costing) {
-            \App\Services\Costing\CostingReader::prepare();
-            \App\Services\Costing\CostingReader::ensureWindowCovered($dateFrom, $dateTo, $warehouseId ?: null, $warehouseIds, $viewRecords, $user->id);
-            $query->leftJoin('inventory_cost_ledger as lg', fn ($j) => $j->on('lg.source_id', '=', 'sale_details.id')->where('lg.source_type', '=', 'sale'));
-            $costSql = 'SUM(COALESCE(-lg.value_delta, 0))';
+            $query->leftJoin('product_variants as pv', 'pv.id', '=', 'sd.product_variant_id'); // unused in cost, kept for parity/name lookups
+        } else {
+            $soldProductIds = DB::table($tmpTable)->distinct()->pluck('product_id')->all();
+            $histCostTable = \App\Support\Reporting\HistoricalCostAtDate::temp($dateTo, $warehouseId ?: null, $allowed, $soldProductIds);
+            $query->leftJoin('product_variants as pv', 'pv.id', '=', 'sd.product_variant_id')
+                ->leftJoin("{$histCostTable} as hc", function ($j) {
+                    $j->on('hc.product_id', '=', 'sd.product_id')
+                        ->on('hc.warehouse_id', '=', 'sd.warehouse_id')
+                        ->whereRaw('hc.product_variant_id <=> sd.product_variant_id');
+                });
+            $costExpr = 'sd.base_quantity * COALESCE(hc.avg_cost, pv.cost, p.cost, 0)';
         }
 
-        // Aggregate by product (COALESCE name so chart/table never get null)
+        // qty stays the raw (sale-unit) quantity in both modes — same column this feature has always displayed;
+        // only the COST calculation needs the base-unit quantity (see LegacyProfitLines). Changing the Qty column
+        // itself to base units is a separate report-presentation decision, deliberately out of scope here (same as
+        // the Sale Return pack/unit fix).
         $results = $query
             ->select(
-                'sale_details.product_id',
-                DB::raw('COALESCE(NULLIF(TRIM(p.name), ""), CONCAT("Product #", sale_details.product_id)) as name'),
-                DB::raw('SUM(sale_details.quantity) as qty'),
-                DB::raw('SUM(sale_details.total) as revenue'),
-                DB::raw($costSql.' as cost')
+                'sd.product_id',
+                DB::raw('COALESCE(NULLIF(TRIM(p.name), ""), CONCAT("Product #", sd.product_id)) as name'),
+                DB::raw('SUM(sd.quantity) as qty'),
+                DB::raw('SUM(sd.total) as revenue'),
+                DB::raw('SUM('.$costExpr.') as cost')
             )
-            ->groupBy('sale_details.product_id', 'p.name')
+            ->groupBy('sd.product_id', 'p.name')
             ->get()
             ->map(function ($item) {
                 $revenue = (float) $item->revenue;

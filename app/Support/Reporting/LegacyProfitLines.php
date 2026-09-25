@@ -30,15 +30,19 @@ class LegacyProfitLines
     /**
      * @param  int[]|null  $allowed  restrict to these warehouses when $warehouseId is not set; null means no
      *                               warehouse restriction at all (every warehouse).
+     * @param  bool  $viewRecords  when false, restrict to documents owned by $userId (own-records-only screens).
+     *                             Default true preserves every existing caller's behaviour unchanged.
+     * @param  int|null  $userId  required when $viewRecords is false.
      * @return string temp table name
      */
-    public static function temp(string $from, string $to, ?int $warehouseId, ?array $allowed): string
+    public static function temp(string $from, string $to, ?int $warehouseId, ?array $allowed, bool $viewRecords = true, ?int $userId = null): string
     {
         $wh = fn ($q, string $col) => $q->when($warehouseId, fn ($w) => $w->where($col, $warehouseId),
             fn ($w) => $allowed === null ? $w : $w->whereIn($col, $allowed));
+        $own = fn ($q, string $col) => $q->when(! $viewRecords && $userId !== null, fn ($w) => $w->where($col, $userId));
 
         $saleBaseQty = UnitQuantityResolver::baseQuantityExpression('sd.quantity', 'sd.pack_multiplier', 'su');
-        $sales = $wh(
+        $sales = $own($wh(
             DB::table('sale_details as sd')
                 ->join('sales as s', 's.id', '=', 'sd.sale_id')
                 ->leftJoin('units as su', 'su.id', '=', 'sd.sale_unit_id')
@@ -46,12 +50,12 @@ class LegacyProfitLines
                 ->where('s.statut', 'completed')
                 ->whereBetween('s.date', [$from, $to]),
             's.warehouse_id'
-        )->selectRaw("sd.id as line_id, sd.sale_unit_id, sd.product_id, sd.product_variant_id,
+        ), 's.user_id')->selectRaw("sd.id as line_id, sd.sale_unit_id, sd.product_id, sd.product_variant_id,
                        sd.quantity as quantity, ({$saleBaseQty}) as base_quantity, sd.total as total,
                        s.date, s.warehouse_id, s.client_id");
 
         $retBaseQty = UnitQuantityResolver::baseQuantityExpression('rd.quantity', 'rd.pack_multiplier', 'ru');
-        $returns = $wh(
+        $returns = $own($wh(
             DB::table('sale_return_details as rd')
                 ->join('sale_returns as sr', 'sr.id', '=', 'rd.sale_return_id')
                 ->leftJoin('units as ru', 'ru.id', '=', 'rd.sale_unit_id')
@@ -59,7 +63,7 @@ class LegacyProfitLines
                 ->where('sr.statut', 'received')
                 ->whereBetween('sr.date', [$from, $to]),
             'sr.warehouse_id'
-        )->selectRaw("-rd.id as line_id, rd.sale_unit_id, rd.product_id, rd.product_variant_id,
+        ), 'sr.user_id')->selectRaw("-rd.id as line_id, rd.sale_unit_id, rd.product_id, rd.product_variant_id,
                        -rd.quantity as quantity, -({$retBaseQty}) as base_quantity, -rd.total as total,
                        sr.date, sr.warehouse_id, sr.client_id");
 

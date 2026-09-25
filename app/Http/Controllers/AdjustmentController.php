@@ -923,6 +923,14 @@ class AdjustmentController extends BaseController
 
         $batchesByDetail = app(BatchService::class)->batchesForAdjustmentDetails($adjustment_data['details']);
 
+        // Audit fix (Sale/Adjustment costing parity): same dual-mode cost ReportController::stockAdjustmentReport()
+        // already uses for these documents — Moving Average ledger cost when it's on, legacy master/variant cost
+        // when it's off. Without this the printed PDF kept showing the flat legacy cost even while Moving Average
+        // was active, disagreeing with the report screen for the identical document.
+        $costByDetailId = \App\Support\Reporting\AdjustmentLineCost::forDetails(
+            $adjustment_data['details']->pluck('id')->all()
+        );
+
         $adjustment['warehouse_name'] = $adjustment_data['warehouse']->name;
         $adjustment['Ref'] = $adjustment_data->Ref;
         $adjustment['date'] = $adjustment_data->date.' '.$adjustment_data->time;
@@ -960,7 +968,7 @@ class AdjustmentController extends BaseController
             }
 
             $qty = (float) $detail->quantity;
-            $data['purchase_cost'] = $unitCost * $qty;
+            $data['purchase_cost'] = $costByDetailId[$detail->id] ?? ($unitCost * $qty);
             $data['sale_price'] = $unitPrice * $qty;
 
             $data['type'] = $detail->type;

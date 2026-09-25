@@ -148,23 +148,27 @@ class CostingReader
      * Aliased so the report's own joins and dimensions keep working: sd (the line), p (product), pv (variant).
      *
      * @param  int[]|null  $allowed  warehouses the user may see (null = all)
+     * @param  bool  $viewRecords  when false, restrict to documents owned by $userId (own-records-only screens).
+     *                             Default true preserves every existing caller's behaviour unchanged.
+     * @param  int|null  $userId  required when $viewRecords is false.
      */
-    public static function profitLinesBase(string $from, string $to, $warehouseId, ?array $allowed)
+    public static function profitLinesBase(string $from, string $to, $warehouseId, ?array $allowed, bool $viewRecords = true, ?int $userId = null)
     {
         self::prepare();
         $scope = $allowed ?? DB::table('warehouses')->pluck('id')->map(fn ($v) => (int) $v)->all();
         self::ensureWindowCovered($from, $to, $warehouseId ? (int) $warehouseId : null, $scope, true, null);
 
         $wh = fn ($q, string $col) => $q->when($warehouseId, fn ($w) => $w->where($col, $warehouseId), fn ($w) => $w->whereIn($col, $scope));
+        $own = fn ($q) => $q->when(! $viewRecords && $userId !== null, fn ($w) => $w->where('h.user_id', $userId));
 
-        $sales = $wh(DB::table('sale_details as x')->join('sales as h', 'h.id', '=', 'x.sale_id')
+        $sales = $own($wh(DB::table('sale_details as x')->join('sales as h', 'h.id', '=', 'x.sale_id')
             ->leftJoin('inventory_cost_ledger as l', fn ($j) => $j->on('l.source_id', '=', 'x.id')->where('l.source_type', '=', 'sale'))
-            ->whereNull('h.deleted_at')->where('h.statut', 'completed')->whereBetween('h.date', [$from, $to]), 'h.warehouse_id')
+            ->whereNull('h.deleted_at')->where('h.statut', 'completed')->whereBetween('h.date', [$from, $to]), 'h.warehouse_id'))
             ->selectRaw('x.id as line_id, x.sale_unit_id, x.product_id, x.product_variant_id, x.quantity, x.total, COALESCE(-l.value_delta, 0) as line_cost, h.date, h.warehouse_id, h.client_id');
 
-        $returns = $wh(DB::table('sale_return_details as x')->join('sale_returns as h', 'h.id', '=', 'x.sale_return_id')
+        $returns = $own($wh(DB::table('sale_return_details as x')->join('sale_returns as h', 'h.id', '=', 'x.sale_return_id')
             ->leftJoin('inventory_cost_ledger as l', fn ($j) => $j->on('l.source_id', '=', 'x.id')->where('l.source_type', '=', 'sale_return'))
-            ->whereNull('h.deleted_at')->where('h.statut', 'received')->whereBetween('h.date', [$from, $to]), 'h.warehouse_id')
+            ->whereNull('h.deleted_at')->where('h.statut', 'received')->whereBetween('h.date', [$from, $to]), 'h.warehouse_id'))
             ->selectRaw('-x.id as line_id, x.sale_unit_id, x.product_id, x.product_variant_id, -x.quantity as quantity, -x.total as total, COALESCE(-l.value_delta, 0) as line_cost, h.date, h.warehouse_id, h.client_id');
 
         return DB::query()->fromSub($sales->unionAll($returns), 'sd')
@@ -182,11 +186,13 @@ class CostingReader
      * different window) to read stale.
      *
      * @param  int[]|null  $allowed
+     * @param  bool  $viewRecords  see profitLinesBase(); default true preserves existing behaviour.
+     * @param  int|null  $userId
      * @return string table name, already joined to products/variants — use as `CostingReader::profitLinesTemp(...) as sd` base
      */
-    public static function profitLinesTemp(string $from, string $to, $warehouseId, ?array $allowed): string
+    public static function profitLinesTemp(string $from, string $to, $warehouseId, ?array $allowed, bool $viewRecords = true, ?int $userId = null): string
     {
-        $base = self::profitLinesBase($from, $to, $warehouseId, $allowed)
+        $base = self::profitLinesBase($from, $to, $warehouseId, $allowed, $viewRecords, $userId)
             ->selectRaw('sd.line_id, sd.sale_unit_id, sd.product_id, sd.product_variant_id, sd.quantity, sd.total, sd.line_cost, sd.date, sd.warehouse_id, sd.client_id, p.category_id, p.name as product_name, COALESCE(sd.sale_unit_id, p.unit_sale_id, p.unit_id) as product_unit_id');
         $sql = $base->toSql();
         $bindings = $base->getBindings();
