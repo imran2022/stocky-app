@@ -29,13 +29,21 @@
         </a-select>
       </div>
 
+      <a-alert
+        v-if="method === 'legacy'"
+        type="warning"
+        show-icon
+        :message="$t('Costing_legacy_warning')"
+        style="margin-bottom: 16px"
+      />
+
       <div v-if="stats" class="setting-row">
         <div>
           <div class="setting-label">Status</div>
           <div class="setting-help">
             {{ stats.productsCosted }} / {{ stats.totalNonServiceProducts }} {{ $t('Costing_products_costed') }}
             <span v-if="active"> — Moving Average is live</span>
-            <span v-else> — Legacy (master cost) is live</span>
+            <span v-else> — Legacy / Estimated Cost is live</span>
           </div>
         </div>
       </div>
@@ -61,7 +69,7 @@
  * add any new costing logic — see App\Http\Controllers\Settings\CostingSettingsController.
  */
 import { ref, onMounted } from 'vue';
-import { message } from 'ant-design-vue';
+import { message, Modal } from 'ant-design-vue';
 import { useI18n } from 'vue-i18n';
 import { SaveOutlined } from '@ant-design/icons-vue';
 import http from '../../lib/http';
@@ -87,7 +95,7 @@ function applyState(data) {
   }
 }
 
-async function apply() {
+async function doApply() {
   saving.value = true;
   try {
     const data = await http.post('costing_settings', { method: method.value, resync: resync.value });
@@ -99,6 +107,22 @@ async function apply() {
   } finally {
     saving.value = false;
   }
+}
+
+function apply() {
+  // Switching AWAY from an already-live Moving Average, back to the estimated Legacy method, needs an explicit
+  // confirmation — the business owner should know detailed Profit Reports become approximate again.
+  if (appliedMethod.value === 'moving_average' && method.value === 'legacy') {
+    Modal.confirm({
+      title: t('Costing_switch_to_legacy_confirm_title'),
+      content: t('Costing_switch_to_legacy_confirm_body'),
+      okText: t('submit'),
+      cancelText: t('Cancel'),
+      onOk: doApply,
+    });
+    return;
+  }
+  doApply();
 }
 
 onMounted(async () => {
