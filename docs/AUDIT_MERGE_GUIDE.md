@@ -29,6 +29,8 @@ All hooks are marked with a comment containing `Audit Batch` / `Audit fix (Batch
 | `app/Http/Controllers/Settings/CostingSettingsController.php` | Costing Method settings endpoint (web wrapper around `costing:rebuild --apply --enable`, no new costing logic) |
 | `resources/src/pages/settings/CostingSettings.vue` | Costing Method System Settings UI (own GET/POST, same pattern as `FeatureToggles.vue`) |
 | `tests/Regression/build_costing_settings_ui.php` | Costing Method settings UI regression test |
+| `app/Support/Reporting/HistoricalCostAtDate.php` | date-anchored average cost per product/variant, purchases + adjustments up to a date (legacy Profit Report fix) |
+| `tests/Regression/audit_fix_profit_report_legacy_cost.php` | Profit Report legacy historical-cost regression test |
 
 ## Vendor files that carry hooks (re-check after taking a new vendor version)
 
@@ -53,13 +55,14 @@ Size = lines added / removed against the pre-audit version.
 | `Http/Controllers/DashboardController.php`, `TodaySummaryController.php` (Costing) | few lines each | stock value at cost through `CostingReader`, no-op while off |
 | `Support/Reporting/DashboardInsights.php` (Costing) | few lines | slow-stock value through `CostingReader`, no-op while off |
 | `Http/Controllers/ProfitReportController.php` (Costing) | ~+40 | base query, cost expression and dimensions swap to the ledger when on (via `CostingReader::profitLinesTemp`, one materialized temp table per request instead of re-joining per dimension query); legacy branch unchanged |
+| `Http/Controllers/ProfitReportController.php` (Inventory Costing update 4) | ~+10 | legacy branch's cost expression now prefers a date-anchored average cost (`App\Support\Reporting\HistoricalCostAtDate`, joined via one temp table) over today's master/variant cost, falling back to it only when a product/variant has no purchase/adjustment history; Moving Average branch untouched |
 | `Services/ReportQuestionService.php` (Costing) | few lines | by-product profit cost through the ledger when on |
 | `Http/Controllers/ReportController.php`, `DashboardController.php`, `TodaySummaryController.php` (Inventory write-off) | few lines each | Damage + Adjustment-decrease cost expensed in profit, via `App\Support\Reporting\InventoryWriteOffFigures` — NOT gated behind costing, applies always |
 | `resources/src/pages/reports/ProfitAndLossReport.vue`, `resources/src/pages/dashboard/modern/sections/InsightsSection.vue` (Inventory write-off) | small | new write-off row/segment (needs `npm run build:admin`) |
 | `database/seeders/translations/en.php` (Inventory write-off) | 1 line | new `Inventory_writeoff` key (needs re-seeding `TranslationSeeder`) |
 | `resources/src/pages/settings/SystemSettings.vue` (Costing Method) | few lines | new sidebar item + `embeddedPages`/`currentSection` entries for `CostingSettings.vue` |
 | `routes/api.php` (Costing Method) | 2 lines | `GET`/`POST costing_settings` |
-| `database/seeders/translations/en.php` (Costing Method) | 6 lines | new `Costing_*` keys (needs re-seeding `TranslationSeeder`) |
+| `database/seeders/translations/en.php` (Costing Method) | 6 lines | new `Costing_*` keys (needs re-seeding `TranslationSeeder`); wording reworded to plain shop-owner language in update 4 (same keys, values only) |
 | `Services/Custom/PurchaseOrderReceiptService.php`, `Support/UniqueRefGenerator.php` | small | GRN line checks, reference collision retry |
 | `routes/api.php` | -5 | dead routes and the public `products_clean_names` route removed |
 | `resources/src/pages/Dashboard.vue` (Batch 6) | ~+45 | hourly line/bars when `hourly` is present (needs `npm run build:admin`) |

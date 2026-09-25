@@ -5430,3 +5430,59 @@ end-to-end would be disproportionate for this size of catalog). Re-ran `unit_cos
 **Files touched:** `app/Http/Controllers/Settings/CostingSettingsController.php` (new), `routes/api.php`,
 `resources/src/pages/settings/CostingSettings.vue` (new), `resources/src/pages/settings/SystemSettings.vue`,
 `database/seeders/translations/en.php`, `tests/Regression/build_costing_settings_ui.php` (new).
+
+### Inventory Costing — update 4 (2026-09-25): Profit Report (legacy mode) valued COGS at today's cost, not history
+
+**Problem — found during the 4-5 year historical audit requested by the owner.** With Legacy costing active,
+`App\Http\Controllers\ProfitReportController::index()` valued every sale line as
+`quantity * COALESCE(product_variant.cost, product.cost, 0)` — the product's **current** master/variant cost, read
+fresh on every request. Every other report in this app that shows COGS in legacy mode (Profit & Loss, Dashboard,
+Today Summary — all via `App\Traits\CalculatesCogsAndAverageCost`) already anchors the cost to the date being
+reported on, precisely so that editing a product's cost today can never rewrite what already happened. The Profit
+Report alone was still doing it the old, wrong way: opening the Profit Report for January and then correcting a
+product's cost today silently changed January's reported cost and profit, with no sale, purchase or adjustment ever
+being touched. This was dormant on the live site (Moving Average has been active there since update 1), but the
+Costing Method Settings toggle shipped in update 3 makes switching back to Legacy a one-click action, which turned a
+theoretical bug into a live risk — the owner asked for it fixed as soon as it surfaced.
+
+**Root cause.** `averageCostBulk()` (in the shared trait) already computes exactly the right number — a weighted
+average of purchase and adjustment history up to a given date — but only for the Profit & Loss report's callers, and
+only for an explicit list of product/variant ids known in advance. The Profit Report groups by whichever
+product/variant ids happen to appear in the requested date range, so that method couldn't be called directly without
+either changing its signature (touching a trait shared by other controllers) or pre-computing an id list.
+
+**Fix.** New standalone `App\Support\Reporting\HistoricalCostAtDate` (does not touch `CalculatesCogsAndAverageCost`).
+Reimplements the same purchases-up-to-`$end` + adjustments-up-to-`$end`, weighted-average-per-key aggregation as a
+single set-based query, materialized ONCE per request into an indexed temp table (`product_id, product_variant_id,
+avg_cost`) — same pattern `CostingReader::profitLinesTemp()` already uses for the Moving Average branch of this same
+controller, so the legacy branch now costs no more queries than before. `ProfitReportController`'s legacy `$base()`
+query LEFT JOINs this temp table with a null-safe `product_variant_id <=> ` match (variant id is nullable), and the
+cost expression becomes `quantity * COALESCE(historical_avg_cost, variant.cost, product.cost, 0)` — historical cost
+first, current master/variant cost **only** when a product/variant has no purchase or adjustment history at all
+(e.g. an opening balance written straight into stock with no document — the same one case the trait's own
+`averageCostBulk()` falls back for). The Moving Average branch (`CostingReader::profitLinesTemp`) is untouched.
+
+**Verification.** New test `tests/Regression/audit_fix_profit_report_legacy_cost.php`: a product with real purchase
+history (10 @ 100, then 10 @ 120 — weighted average 110) sold for 5 units; a second product with no purchase/
+adjustment history at all (opening stock written directly, no document). Runs the Profit Report for the sale's
+month, then edits BOTH products' master cost (100 → 777, 60 → 999) and re-runs the same report for the same past
+month: the first product's reported cost/profit is byte-identical before and after (the bug this fixes); the second
+product's cost correctly follows the new master cost, because there is no history to anchor to (the documented,
+correct fallback — not a regression). Also checks the KPI total still equals the sum of the row costs (the new LEFT
+JOIN doesn't fan out any line) and that every other report dimension (warehouse/date/category/customer/unit) still
+reconciles rows-to-KPI. All 17 checks pass. Re-ran `audit_b4_profit_and_loss.php` and the full
+`build_full_audit_5yr.php` 5-year historical suite afterwards on a freshly migrated DB — no regression.
+
+**Explicitly out of scope:** this does not change the Moving Average branch, does not add a real FIFO/batch costing
+engine, and does not change what `CalculatesCogsAndAverageCost` does for the Profit & Loss report, Dashboard or
+Today Summary (those were already historically correct).
+
+**Files touched:** `app/Support/Reporting/HistoricalCostAtDate.php` (new),
+`app/Http/Controllers/ProfitReportController.php` (legacy `$costExpr` + one LEFT JOIN),
+`tests/Regression/audit_fix_profit_report_legacy_cost.php` (new). No migration, no frontend rebuild needed.
+
+**Also in this update:** the update-3 translation strings were reworded to read like plain shop-owner language
+instead of a technical spec (`Costing_method`, `Costing_method_help`, `Legacy_master_cost`, `Moving_average`,
+`Costing_tables_missing`, `Costing_products_costed` in `database/seeders/translations/en.php` — only the *values*
+changed, the keys are unchanged so nothing else needs updating). Reseed after deploying
+(`php artisan db:seed --class=Database\Seeders\TranslationSeeder --force`).

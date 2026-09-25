@@ -2513,3 +2513,18 @@ This supplements the in-depth Build O1–O9 record appended to
 - [ ] `php artisan db:seed --class=Database\Seeders\TranslationSeeder --force` after deploying (6 new
       `Costing_*` keys).
 - [ ] `npm run build:admin` after deploying (two Vue files changed).
+
+## 42. Profit Report legacy COGS is now historical (not today's cost) + friendlier Costing Method wording
+
+- [ ] With Legacy costing active, open the Profit Report for a PAST month, note its cost/profit, then edit any
+      product sold that month's master cost and reload the same past month — cost and profit must be unchanged.
+- [ ] A product with NO purchase/adjustment history at all (opening stock written directly, no document) still
+      follows its current master cost — that is the correct, documented fallback, not a bug.
+- [ ] Every Profit Report grouping (product/category/unit/customer/date/warehouse) still has its rows sum to the KPI
+      totals.
+- [ ] Moving Average mode is untouched — this only changes the Legacy branch.
+- [ ] No migration, no `npm run build:admin` needed for the report fix itself.
+- [ ] The Costing Method settings page wording (help text, dropdown labels, "not installed yet" message, products-
+      costed counter) now reads as plain shop-owner language — re-seed translations
+      (`php artisan db:seed --class=Database\Seeders\TranslationSeeder --force`) so the new wording shows up; the
+      translation KEYS did not change, so nothing else needs updating.

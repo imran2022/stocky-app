@@ -1,5 +1,18 @@
 # Latest Delivery Index
 
+## Current: Inventory Costing update 4 — Profit Report legacy COGS is now historical (2026-09-25)
+
+Legacy-mode Profit Report used to value every sale line at TODAY's master/variant cost instead of the cost that was
+actually in effect when the sale happened — so correcting a product's cost today silently rewrote past periods'
+reported profit. Found during the owner's 4-5 year historical audit. Fixed with a new
+`App\Support\Reporting\HistoricalCostAtDate` (does not touch the shared `CalculatesCogsAndAverageCost` trait) —
+mirrors that trait's own date-anchored average-cost math, joined into the Profit Report's legacy branch. Moving
+Average mode is untouched. Also: the update-3 "Costing Method" translation strings were reworded to read as plain
+shop-owner language instead of a technical spec (keys unchanged). No migration, no frontend rebuild for the report
+fix; **needs `php artisan db:seed --class=Database\Seeders\TranslationSeeder --force`** for the reworded strings.
+Description: `CUSTOMIZATIONS.md` "Inventory Costing — update 4", checklist section 42, test
+`audit_fix_profit_report_legacy_cost.php`.
+
 ## Current: Inventory Costing update 3 — Costing Method setting in System Settings (2026-09-26)
 
 A "Costing Method" item in System Settings lets the business owner switch Legacy/Moving Average from the UI instead
