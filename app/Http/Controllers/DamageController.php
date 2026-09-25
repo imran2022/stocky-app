@@ -13,6 +13,7 @@ use App\Models\Setting;
 use App\Models\UserWarehouse;
 use App\Models\Warehouse;
 use App\Services\BatchService;
+use App\Support\StockGuard;
 use App\Support\StockMutator;
 use App\utils\helpers;
 use ArPHP\I18N\Arabic;
@@ -31,9 +32,15 @@ class DamageController extends BaseController
      * stock row, creating one at qte=0 first if none existed yet, so a
      * damage record for a product never stocked in this warehouse before
      * can no longer silently do nothing. See app/Support/StockMutator.php.
-     * $clampFloor preserves this controller's existing "never go below
-     * zero" behavior (unlike Sales/Purchases/Adjustment, which allow
-     * negative qte).
+     *
+     * Audit fix (MF-03): $clampFloor used to silently clamp an over-large damage down to zero — the document kept
+     * the full submitted quantity (and every reader of that quantity: batch consumption, movement history, the
+     * write-off expense report) while only the actually-available stock left the warehouse, so a damage recorded
+     * as "10" could really only have removed 3. store()/update() now call assertDamageStockSufficient() BEFORE any
+     * mutation, using the same StockGuard::assertAvailable() every other module already uses (so it respects the
+     * global "Allow overselling" switch exactly like Sales/POS/Transfer do), and reject the whole request with a
+     * clean 422 instead of silently truncating it. $clampFloor is therefore no longer used by this controller
+     * (kept as a parameter, defaulted off, so nothing else calling this method changes behaviour).
      */
     private function applyStockDelta(int $warehouseId, int $productId, $variantId, $delta, bool $clampFloor = false): void
     {
@@ -43,6 +50,59 @@ class DamageController extends BaseController
             $product_warehouse->qte = 0;
         }
         $product_warehouse->save();
+    }
+
+    /**
+     * Audit fix (MF-03): every submitted damage line must be a finite, strictly-positive quantity. A negative
+     * quantity used to literally INCREASE stock (the delta below is `-$value['quantity']`, and a negative
+     * quantity flips that to a positive delta); zero was a silent no-op that still counted as "1 item" toward
+     * `items`/history. Called BEFORE the transaction so a rejected request makes no changes at all.
+     *
+     * @return string|null  an error message, or null when every line is valid
+     */
+    private function firstInvalidDamageQuantity(array $details): ?string
+    {
+        foreach ($details as $value) {
+            $qty = $value['quantity'] ?? null;
+            if (! is_numeric($qty) || ! is_finite((float) $qty) || (float) $qty <= 0) {
+                return 'Damage quantity must be a number greater than zero (product #'.($value['product_id'] ?? '?').').';
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Audit fix (MF-03): expand damage lines into App\Support\StockGuard::need() entries — one entry for a single
+     * product, or one for the combo's own row PLUS one for each of its components (mirrors the same dual
+     * accounting applyStockDelta() already performs for a combo, so the availability check matches exactly what
+     * actually gets deducted).
+     */
+    private function damageStockNeeds(iterable $lines): array
+    {
+        $out = [];
+        foreach ($lines as $l) {
+            $qty = (float) (is_array($l) ? ($l['quantity'] ?? 0) : $l->quantity);
+            if ($qty <= 0) {
+                continue;
+            }
+            $productId = is_array($l) ? ($l['product_id'] ?? null) : $l->product_id;
+            $variantId = is_array($l) ? ($l['product_variant_id'] ?? null) : $l->product_variant_id;
+            if (! empty($variantId)) {
+                $out[] = StockGuard::need($productId, $variantId, $qty);
+
+                continue;
+            }
+            $product = Product::where('deleted_at', '=', null)->where('id', $productId)->first();
+            if ($product && $product->type === 'is_combo') {
+                foreach (CombinedProduct::where('product_id', $productId)->get() as $combined) {
+                    $out[] = StockGuard::need($combined->combined_product_id, null, $combined->quantity * $qty);
+                }
+            }
+            $out[] = StockGuard::need($productId, null, $qty);
+        }
+
+        return $out;
     }
 
     // ------------ Show All Damages  -----------\\
@@ -140,7 +200,22 @@ class DamageController extends BaseController
             'warehouse_id.required' => 'Warehouse is required',
         ]);
 
+        // Audit fix (MF-03): reject before any write — a negative/zero/non-numeric quantity must never reach the
+        // stock-mutation code below.
+        if ($invalid = $this->firstInvalidDamageQuantity((array) $request['details'])) {
+            return response()->json(['success' => false, 'message' => $invalid], 422);
+        }
+
+        // Audit fix (MF-03 + MF-16 parity): a restricted user could previously submit any warehouse_id here — the
+        // create/update paths for every other stock-changing module already authorize the submitted warehouse.
+        $this->abortIfWarehouseDenied($request->warehouse_id);
+
         \DB::transaction(function () use ($request) {
+            // Audit fix (MF-03): the authoritative, locked availability check — respects the same "Allow
+            // overselling" switch every other module already honours, instead of silently clamping the mutation
+            // below to whatever was actually on hand.
+            StockGuard::assertAvailable($request->warehouse_id, $this->damageStockNeeds((array) $request['details']));
+
             $order = new Damage;
             $order->date = $request->date;
             $order->time = now()->toTimeString();
@@ -164,23 +239,23 @@ class DamageController extends BaseController
                 // Always subtract for damage. Security fix (Build N2 /
                 // audit C-02 + H-02): see class docblock above.
                 if (! empty($value['product_variant_id'])) {
-                    $this->applyStockDelta($order->warehouse_id, $value['product_id'], $value['product_variant_id'], -$value['quantity'], true);
+                    $this->applyStockDelta($order->warehouse_id, $value['product_id'], $value['product_variant_id'], -$value['quantity']);
                 } else {
                     $product_detail = Product::where('deleted_at', '=', null)
                         ->where('id', $value['product_id'])
                         ->first();
 
                     if ($product_detail && $product_detail->type == 'is_single') {
-                        $this->applyStockDelta($order->warehouse_id, $value['product_id'], null, -$value['quantity'], true);
+                        $this->applyStockDelta($order->warehouse_id, $value['product_id'], null, -$value['quantity']);
                     } elseif ($product_detail && $product_detail->type == 'is_combo') {
                         $combined_products = CombinedProduct::where('product_id', $value['product_id'])->with('product')->get();
 
                         foreach ($combined_products as $combined_product) {
                             $qty_combined = $combined_product->quantity * $value['quantity'];
-                            $this->applyStockDelta($order->warehouse_id, $combined_product->combined_product_id, null, -$qty_combined, true);
+                            $this->applyStockDelta($order->warehouse_id, $combined_product->combined_product_id, null, -$qty_combined);
                         }
 
-                        $this->applyStockDelta($order->warehouse_id, $value['product_id'], null, -$value['quantity'], true);
+                        $this->applyStockDelta($order->warehouse_id, $value['product_id'], null, -$value['quantity']);
                     }
                 }
             }
@@ -227,6 +302,14 @@ class DamageController extends BaseController
             'warehouse_id' => 'required',
         ]);
 
+        // Audit fix (MF-03): reject before any write.
+        if ($invalid = $this->firstInvalidDamageQuantity((array) $request['details'])) {
+            return response()->json(['success' => false, 'message' => $invalid], 422);
+        }
+
+        // Audit fix (MF-03 + MF-16 parity): authorize the (possibly new) target warehouse too.
+        $this->abortIfWarehouseDenied($request->warehouse_id);
+
         \DB::transaction(function () use ($request, $id, $current_damage) {
             $old_details = DamageDetail::where('damage_id', $id)->get();
             $new_details = $request['details'];
@@ -236,6 +319,16 @@ class DamageController extends BaseController
             foreach ($new_details as $new_detail) {
                 $new_ids[] = $new_detail['id'];
             }
+
+            // Audit fix (MF-03): the authoritative, locked availability check, run before any reversal/reapply
+            // below. The old lines are only a credit when the warehouse isn't changing — if it is, the old
+            // document's stock impact stays in the OLD warehouse and cannot offset a need in a different one.
+            $sameWarehouse = (int) $current_damage->warehouse_id === (int) $request->warehouse_id;
+            StockGuard::assertAvailable(
+                $request->warehouse_id,
+                $this->damageStockNeeds($new_details),
+                $sameWarehouse ? $this->damageStockNeeds($old_details) : []
+            );
 
             // Pharmacy: reverse old batch debits before warehouse-stock reversal so
             // the per-batch ledger mirrors the warehouse change.
@@ -281,22 +374,22 @@ class DamageController extends BaseController
                 // Apply new subtraction. Security fix (Build N2 / audit
                 // C-02 + H-02): see class docblock above.
                 if (! empty($product_detail['product_variant_id'])) {
-                    $this->applyStockDelta($request->warehouse_id, $product_detail['product_id'], $product_detail['product_variant_id'], -$product_detail['quantity'], true);
+                    $this->applyStockDelta($request->warehouse_id, $product_detail['product_id'], $product_detail['product_variant_id'], -$product_detail['quantity']);
                 } else {
                     $prod = Product::where('deleted_at', '=', null)
                         ->where('id', $product_detail['product_id'])
                         ->first();
 
                     if ($prod && $prod->type == 'is_single') {
-                        $this->applyStockDelta($request->warehouse_id, $product_detail['product_id'], null, -$product_detail['quantity'], true);
+                        $this->applyStockDelta($request->warehouse_id, $product_detail['product_id'], null, -$product_detail['quantity']);
                     } elseif ($prod && $prod->type == 'is_combo') {
                         $combined_products = CombinedProduct::where('product_id', $product_detail['product_id'])->with('product')->get();
                         foreach ($combined_products as $combined_product) {
                             $qty_combined = $combined_product->quantity * $product_detail['quantity'];
-                            $this->applyStockDelta($request->warehouse_id, $combined_product->combined_product_id, null, -$qty_combined, true);
+                            $this->applyStockDelta($request->warehouse_id, $combined_product->combined_product_id, null, -$qty_combined);
                         }
 
-                        $this->applyStockDelta($request->warehouse_id, $product_detail['product_id'], null, -$product_detail['quantity'], true);
+                        $this->applyStockDelta($request->warehouse_id, $product_detail['product_id'], null, -$product_detail['quantity']);
                     }
                 }
 
