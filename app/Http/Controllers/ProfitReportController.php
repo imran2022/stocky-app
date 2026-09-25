@@ -16,8 +16,12 @@ class ProfitReportController extends Controller
      * Profit analysis grouped by one dimension:
      *   GET report/profit/{dimension}  — product | category | unit | customer | date | warehouse
      *
-     * Line revenue = sale_details.total; line cost = quantity * COALESCE(variant
-     * cost, product cost). Returns {rows, totalRows, kpis, chart, warehouses}.
+     * Only completed sales and received sale returns (netted) are counted, in both costing modes — see
+     * App\Support\Reporting\LegacyProfitLines / App\Services\Costing\CostingReader::profitLinesTemp. Line revenue is
+     * signed `total` (negative for a return line); line cost is `App\Services\Costing\CostingReader`'s stored
+     * per-line ledger cost when Moving Average is on, or a warehouse-specific date-anchored average cost (falling
+     * back to today's master/variant cost only when a key has no purchase/adjustment history — see
+     * App\Support\Reporting\HistoricalCostAtDate) when it's off. Returns {rows, totalRows, kpis, chart, warehouses}.
      * KPIs and chart cover the WHOLE filtered set; rows are paginated.
      */
     public function index(Request $request, $dimension)
@@ -54,58 +58,56 @@ class ProfitReportController extends Controller
         }
 
         // Moving-average costing ON: cost is the per-line cost stored in the ledger, only completed sales count and
-        // received returns net off (revenue, quantity and cost), exactly like the Profit & Loss report. OFF: cost is
-        // valued at a date-anchored average cost (purchases/adjustments up to $to — see HistoricalCostAtDate), not
-        // today's master/variant cost, so a cost edit made today never rewrites a past period's reported profit
-        // (Inventory Costing — update 4: Profit Report legacy cost is now historical); only a key with no
-        // purchase/adjustment history at all falls back to the current master/variant cost.
+        // received returns net off (revenue, quantity and cost), exactly like the Profit & Loss report — see
+        // CostingReader::profitLinesTemp(). OFF ("Legacy"): a separate normalized line source (see
+        // LegacyProfitLines) applies the SAME rules — only completed sales, received returns netted off — and cost
+        // is valued at a WAREHOUSE-SPECIFIC, date-anchored average cost (purchases/adjustments up to $to — see
+        // HistoricalCostAtDate) rather than today's master/variant cost, so a cost edit made today never rewrites a
+        // past period's reported profit; only a key with no purchase/adjustment history at all in that warehouse
+        // falls back to the current master/variant cost. Legacy remains an ESTIMATE, not exact transaction-time
+        // COGS: one flat average is applied across the whole report window (a purchase recorded after a sale but
+        // before the report's end date still moves that sale's reported cost), and old adjustment history (unlike
+        // purchase history) has no stamped cost of its own, so it can still shift with a later master-cost edit.
+        // Moving Average is the authoritative source for exact COGS/inventory value — see CUSTOMIZATIONS.md.
         $costing = \App\Services\Costing\CostingReader::active();
-        $s = $costing ? 'sd' : 's';   // alias that carries date / warehouse_id / client_id
-        $costExpr = $costing ? 'sd.line_cost' : 'sd.quantity * COALESCE(hc.avg_cost, pv.cost, p.cost, 0)';
+        $costExpr = $costing ? 'sd.line_cost' : 'sd.base_quantity * COALESCE(hc.avg_cost, pv.cost, p.cost, 0)';
 
-        // Costing ON: materialize the (union + ledger-join) rows ONCE into an indexed temp table instead of
-        // re-running that join for each of the count/rows/kpi/chart queries below — see CostingReader::profitLinesTemp.
-        // Costing OFF: materialize the date-anchored average-cost-per-product/variant temp table once instead of
-        // recomputing the purchase/adjustment aggregation for each of those same queries — see HistoricalCostAtDate.
-        // Both temp tables are uniquely named per request and die with the connection, so nothing here is reused
-        // across requests or across a different [from,to]/warehouse scope.
-        $tmpTable = $costing ? \App\Services\Costing\CostingReader::profitLinesTemp($from, $to, $warehouseId, $allowed) : null;
-        $histCostTable = $costing ? null : \App\Support\Reporting\HistoricalCostAtDate::temp($to, $warehouseId, $allowed);
+        // Both branches materialize their normalized rows ONCE into an indexed temp table instead of re-running the
+        // underlying joins for each of the count/rows/kpi/chart queries below. Both temp tables are uniquely named
+        // per request and die with the connection, so nothing here is reused across requests or across a different
+        // [from,to]/warehouse scope.
+        $tmpTable = $costing
+            ? \App\Services\Costing\CostingReader::profitLinesTemp($from, $to, $warehouseId, $allowed)
+            : \App\Support\Reporting\LegacyProfitLines::temp($from, $to, $warehouseId, $allowed);
+        $histCostTable = null;
+        if (! $costing) {
+            // Performance (P2-3): only aggregate purchase/adjustment history for products that actually appear in
+            // this window's sales/returns, not the whole catalog.
+            $soldProductIds = DB::table($tmpTable)->distinct()->pluck('product_id')->all();
+            $histCostTable = \App\Support\Reporting\HistoricalCostAtDate::temp($to, $warehouseId, $allowed, $soldProductIds);
+        }
 
         $base = fn () => $costing
             ? DB::table("{$tmpTable} as sd")
-            : DB::table('sale_details as sd')
-                ->join('sales as s', 's.id', '=', 'sd.sale_id')
+            : DB::table("{$tmpTable} as sd")
                 ->join('products as p', 'p.id', '=', 'sd.product_id')
                 ->leftJoin('product_variants as pv', 'pv.id', '=', 'sd.product_variant_id')
                 ->leftJoin("{$histCostTable} as hc", function ($j) {
                     $j->on('hc.product_id', '=', 'sd.product_id')
+                        ->on('hc.warehouse_id', '=', 'sd.warehouse_id')
                         ->whereRaw('hc.product_variant_id <=> sd.product_variant_id');
-                })
-                ->whereNull('s.deleted_at')
-                ->whereBetween('s.date', [$from, $to])
-                ->when($allowed !== null, fn ($q) => $q->whereIn('s.warehouse_id', $allowed))
-                ->when($warehouseId, fn ($q) => $q->where('s.warehouse_id', $warehouseId));
+                });
 
         // ---- Dimension: label expression, joins and group key
-        // (the costing branch reads product name/category/unit straight off the temp table — profitLinesTemp()
-        // already carried them over from `products` — instead of joining products/product_variants again here)
-        $dim = $costing ? [
+        // Both branches read product name/category/unit straight off their own normalized temp table (each
+        // materialization already carries those over from `products`) instead of joining products again here.
+        $dim = [
             'product' => ['label' => 'sd.product_name', 'group' => 'sd.product_id', 'join' => null, 'search' => 'sd.product_name'],
             'category' => ['label' => "COALESCE(c.name, '—')", 'group' => 'sd.category_id', 'join' => fn ($q) => $q->leftJoin('categories as c', 'c.id', '=', 'sd.category_id'), 'search' => 'c.name'],
             'unit' => ['label' => "COALESCE(u.ShortName, '—')", 'group' => 'sd.product_unit_id', 'join' => fn ($q) => $q->leftJoin('units as u', 'u.id', '=', 'sd.product_unit_id'), 'search' => 'u.ShortName'],
             'customer' => ['label' => 'cl.name', 'group' => 'sd.client_id', 'join' => fn ($q) => $q->join('clients as cl', 'cl.id', '=', 'sd.client_id'), 'search' => 'cl.name'],
             'date' => ['label' => 'sd.date', 'group' => 'sd.date', 'join' => null, 'search' => 'sd.date'],
             'warehouse' => ['label' => 'w.name', 'group' => 'sd.warehouse_id', 'join' => fn ($q) => $q->join('warehouses as w', 'w.id', '=', 'sd.warehouse_id'), 'search' => 'w.name'],
-        ][$dimension] : [
-            'product' => ['label' => 'p.name', 'group' => 'p.id', 'join' => null, 'search' => 'p.name'],
-            'category' => ['label' => "COALESCE(c.name, '—')", 'group' => 'p.category_id', 'join' => fn ($q) => $q->leftJoin('categories as c', 'c.id', '=', 'p.category_id'), 'search' => 'c.name'],
-            'unit' => ['label' => "COALESCE(u.ShortName, '—')", 'group' => 'u.id', 'join' => fn ($q) => $q->leftJoin('units as u', function ($j) {
-                $j->on(DB::raw('u.id'), '=', DB::raw('COALESCE(sd.sale_unit_id, p.unit_sale_id, p.unit_id)'));
-            }), 'search' => 'u.ShortName'],
-            'customer' => ['label' => 'cl.name', 'group' => "{$s}.client_id", 'join' => fn ($q) => $q->join('clients as cl', 'cl.id', '=', "{$s}.client_id"), 'search' => 'cl.name'],
-            'date' => ['label' => "{$s}.date", 'group' => "{$s}.date", 'join' => null, 'search' => "{$s}.date"],
-            'warehouse' => ['label' => 'w.name', 'group' => "{$s}.warehouse_id", 'join' => fn ($q) => $q->join('warehouses as w', 'w.id', '=', "{$s}.warehouse_id"), 'search' => 'w.name'],
         ][$dimension];
 
         $grouped = fn () => tap($base(), function ($q) use ($dim, $request, $costExpr) {
