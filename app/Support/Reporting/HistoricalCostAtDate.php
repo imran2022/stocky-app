@@ -47,10 +47,18 @@ class HistoricalCostAtDate
      *                                  product ids (performance: the caller already knows which products were
      *                                  actually sold/returned in the report window — there is no need to aggregate
      *                                  history for the rest of a large catalog). Null scans every product.
+     * @param  bool  $includeAdjustments  Audit fix (MF-14): pass false to build a PURCHASES-ONLY average — needed
+     *                                    by any caller that is itself pricing an Adjustment (e.g. write-off
+     *                                    expense: an Adjustment "decrease" being costed) — including adjustments in
+     *                                    the same average that is used to price one of those adjustments is
+     *                                    self-referential and, because a 'sub' adjustment here is valued at TODAY's
+     *                                    master cost rather than a stamped historical one, can badly distort the
+     *                                    blended average (confirmed by a live repro). Default true preserves every
+     *                                    existing caller (ProfitReportController's legacy COGS) unchanged.
      * @return string temp table name — join it on product_id, warehouse_id AND a null-safe `<=>` on
      *                 product_variant_id (product_variant_id is nullable).
      */
-    public static function temp(string $end, ?int $warehouseId, ?array $warehouseIds, ?array $productIds = null): string
+    public static function temp(string $end, ?int $warehouseId, ?array $warehouseIds, ?array $productIds = null, bool $includeAdjustments = true): string
     {
         $factor = UnitQuantityResolver::baseQuantityExpression('1', '1', 'pu');
 
@@ -66,19 +74,24 @@ class HistoricalCostAtDate
                          SUM(purchase_details.quantity * purchase_details.cost) as cost")
             ->groupBy('purchase_details.product_id', 'purchase_details.product_variant_id', 'p.warehouse_id');
 
-        $adjustments = AdjustmentDetail::join('adjustments as a', 'a.id', '=', 'adjustment_details.adjustment_id')
-            ->leftJoin('products as pr', 'pr.id', '=', 'adjustment_details.product_id')
-            ->leftJoin('product_variants as pv', 'pv.id', '=', 'adjustment_details.product_variant_id')
-            ->when($warehouseId, fn ($q) => $q->where('a.warehouse_id', $warehouseId),
-                fn ($q) => $warehouseIds === null ? $q : $q->whereIn('a.warehouse_id', $warehouseIds))
-            ->when($productIds !== null, fn ($q) => $q->whereIn('adjustment_details.product_id', $productIds))
-            ->where('a.date', '<=', $end)
-            ->selectRaw("adjustment_details.product_id, adjustment_details.product_variant_id, a.warehouse_id,
-                         SUM(CASE WHEN adjustment_details.type='add' THEN adjustment_details.quantity ELSE -adjustment_details.quantity END) as qty,
-                         SUM(CASE WHEN adjustment_details.type='add' THEN adjustment_details.quantity ELSE -adjustment_details.quantity END) * COALESCE(NULLIF(pv.cost,0), pr.cost, 0) as cost")
-            ->groupBy('adjustment_details.product_id', 'adjustment_details.product_variant_id', 'a.warehouse_id');
+        $union = $purchases->toBase();
 
-        $union = $purchases->toBase()->unionAll($adjustments->toBase());
+        if ($includeAdjustments) {
+            $adjustments = AdjustmentDetail::join('adjustments as a', 'a.id', '=', 'adjustment_details.adjustment_id')
+                ->leftJoin('products as pr', 'pr.id', '=', 'adjustment_details.product_id')
+                ->leftJoin('product_variants as pv', 'pv.id', '=', 'adjustment_details.product_variant_id')
+                ->when($warehouseId, fn ($q) => $q->where('a.warehouse_id', $warehouseId),
+                    fn ($q) => $warehouseIds === null ? $q : $q->whereIn('a.warehouse_id', $warehouseIds))
+                ->when($productIds !== null, fn ($q) => $q->whereIn('adjustment_details.product_id', $productIds))
+                ->where('a.date', '<=', $end)
+                ->selectRaw("adjustment_details.product_id, adjustment_details.product_variant_id, a.warehouse_id,
+                             SUM(CASE WHEN adjustment_details.type='add' THEN adjustment_details.quantity ELSE -adjustment_details.quantity END) as qty,
+                             SUM(CASE WHEN adjustment_details.type='add' THEN adjustment_details.quantity ELSE -adjustment_details.quantity END) * COALESCE(NULLIF(pv.cost,0), pr.cost, 0) as cost")
+                ->groupBy('adjustment_details.product_id', 'adjustment_details.product_variant_id', 'a.warehouse_id');
+
+            $union = $union->unionAll($adjustments->toBase());
+        }
+
         $grouped = DB::table(DB::raw("({$union->toSql()}) as u"))
             ->mergeBindings($union)
             ->selectRaw('u.product_id, u.product_variant_id, u.warehouse_id, SUM(u.qty) as qty, SUM(u.cost) as cost')

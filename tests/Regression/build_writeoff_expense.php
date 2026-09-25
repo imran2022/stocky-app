@@ -61,8 +61,14 @@ $mkReq = fn ($extra = []) => tap(Illuminate\Http\Request::create('/api/x', 'GET'
 // ---------------------------------------------------------------- LEGACY (costing off) -----------------------------
 check('costing is off to start', ! CostingReader::active());
 $pl = json_decode(app(RC::class)->ProfitAndLoss($mkReq(['from' => $today, 'to' => $today]))->getContent(), true)['data'];
-$expectedLegacy = 100 * (10 + 5);   // damage 10 + adjustment-decrease 5, at master cost 100 — the +8 increase is excluded
-check("legacy write-off = damage(10)+adj-out(5) at master cost 100 = $expectedLegacy", $near($pl['inventory_writeoff_sum'], $expectedLegacy), (string) $pl['inventory_writeoff_sum']);
+// Audit fix (MF-14, external "Must-Fix" audit 2026-09-25): the legacy write-off figure no longer values every loss
+// at TODAY's live master cost (100) -- it uses a date-anchored, purchases-only historical average as of the
+// report's `to` date instead (see App\Support\Reporting\HistoricalCostAtDate / InventoryWriteOffFigures). The only
+// purchase on record for this product is the 100-unit GRN @ 120 above (dated today, so it counts as history "as of
+// today"); the 200-unit opening stock was seeded directly into product_warehouse, never through a Purchase, so it
+// leaves no purchase-history trace and does not enter this average. Historical average = 120, not master cost 100.
+$expectedLegacy = 120 * (10 + 5);   // damage 10 + adjustment-decrease 5, at the purchase-history cost 120 — the +8 increase is excluded
+check("legacy write-off = damage(10)+adj-out(5) at historical (purchase) cost 120 = $expectedLegacy", $near($pl['inventory_writeoff_sum'], $expectedLegacy), (string) $pl['inventory_writeoff_sum']);
 check('legacy profit already has the write-off subtracted', $near($pl['profit_fifo'], $pl['total_revenue'] - $pl['product_cost_fifo'] - $pl['expenses_sum'] - $pl['inventory_writeoff_sum'] + $pl['service_profit']));
 
 $allWh = DB::table('warehouses')->pluck('id')->all();
