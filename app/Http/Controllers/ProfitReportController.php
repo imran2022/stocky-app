@@ -135,9 +135,11 @@ class ProfitReportController extends Controller
                     });
                 });
 
-            $totalRows = DB::table(DB::raw('('.$withMeta()->toSql().') as x'))
-                ->mergeBindings($withMeta())
-                ->count();
+            // No GROUP BY on withMeta() (that already happened one level down, in
+            // $saleLines), so a plain count() is correct and safe here — no need to
+            // wrap it as a derived "select *" subquery, which used to trip MySQL's
+            // "Duplicate column name" check (several joined tables each have an `id`).
+            $totalRows = $withMeta()->count();
 
             $selectCols = "s.Ref as reference, s.date as date, cl.name as customer, w.name as warehouse,
                 s.statut as status, COALESCE(sz.name, '\xe2\x80\x94') as zone_area, COALESCE(bd.name, '\xe2\x80\x94') as division,
