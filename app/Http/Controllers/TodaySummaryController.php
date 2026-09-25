@@ -242,8 +242,12 @@ class TodaySummaryController extends Controller
             DB::table('expenses')->whereNull('deleted_at')->whereDate('date', $today)
         ))->sum('amount');
 
+        // A real cost of doing business (Damage + Adjustment decreases), expensed the moment it happens — see
+        // App\Support\Reporting\InventoryWriteOffFigures. Adjustment increases are excluded (not income until sold).
+        $inventoryWriteOff = (float) \App\Support\Reporting\InventoryWriteOffFigures::cost($today, $today, null, $cogsWarehouses);
+
         $grossProfit = $profitBase - $cogs;
-        $netProfit = $grossProfit - $expenses;
+        $netProfit = $grossProfit - $expenses - $inventoryWriteOff;
         $profit = [
             'cogs' => round($cogs, 2),
             'gross' => round($grossProfit, 2),
@@ -253,6 +257,7 @@ class TodaySummaryController extends Controller
             'tax_collected' => $sales['tax'],
             'tax_paid' => $purchases['tax'],
             'expenses' => round($expenses, 2),
+            'inventory_writeoff' => round($inventoryWriteOff, 2),
         ];
 
         /* ------------------------------------------------------------ tiles */

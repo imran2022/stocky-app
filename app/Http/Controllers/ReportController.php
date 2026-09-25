@@ -2997,6 +2997,11 @@ class ReportController extends BaseController
         $cogsFIFO = $cogsPack['fifo'];
         $avgCostTotal = $cogsPack['avg'];
 
+        // -------------------- Inventory write-off (Damage + Adjustment decreases) --------------------
+        // A real cost of doing business, expensed the moment it happens — see InventoryWriteOffFigures for why
+        // Adjustment increases are excluded (found stock is not income until it is sold).
+        $inventoryWriteOff = \App\Support\Reporting\InventoryWriteOffFigures::cost($start, $end, $warehouseId ?: null, $warehouseIds);
+
         // -------------------- Service / repair jobs --------------------
         // Repair work does not pass through sales, so its revenue and parts cost have to
         // be added here or the whole module stays invisible to profit.
@@ -3100,6 +3105,7 @@ class ReportController extends BaseController
 
             'product_cost_fifo' => (float) $cogsFIFO,
             'averagecost' => (float) $avgCostTotal,
+            'inventory_writeoff_sum' => (float) $inventoryWriteOff,
 
             'service_revenue_sum' => (float) $service['revenue'],
             'service_parts_cost' => (float) $service['parts_cost'],
@@ -3107,9 +3113,9 @@ class ReportController extends BaseController
             'service_jobs_count' => (int) $service['count'],
             'paiement_service_jobs' => (float) $payService,
 
-            // Profit = net sales (no tax, no delivery charge) - net returns - COGS - expenses + service profit.
-            'profit_fifo' => $netRevenueGoods - $cogsFIFO - $expenses + $service['profit'],
-            'profit_average_cost' => $netRevenueGoods - $avgCostTotal - $expenses + $service['profit'],
+            // Profit = net sales (no tax, no delivery charge) - net returns - COGS - expenses - inventory write-off + service profit.
+            'profit_fifo' => $netRevenueGoods - $cogsFIFO - $expenses - $inventoryWriteOff + $service['profit'],
+            'profit_average_cost' => $netRevenueGoods - $avgCostTotal - $expenses - $inventoryWriteOff + $service['profit'],
 
             'payment_received' => (float) ($paySales + $payPurchRet + $payService + $payClientOpening),
             'payment_sent' => (float) ($payPurch + $paySaleRet + $expenses + $payProviderOpening),

@@ -745,13 +745,18 @@ class DashboardController extends Controller
         $netSales = \App\Support\Reporting\SalesFigures::sales($figureScope)['net'];
         $netReturns = \App\Support\Reporting\SalesFigures::saleReturns($figureScope)['net'];
 
-        $today_profit_numeric = ($netSales - $netReturns) - $cogsFIFO - $expenses_total + $service['profit'];
+        // A real cost of doing business (Damage + Adjustment decreases), expensed the moment it happens — see
+        // App\Support\Reporting\InventoryWriteOffFigures. Adjustment increases are excluded (not income until sold).
+        $inventoryWriteOff = (float) \App\Support\Reporting\InventoryWriteOffFigures::cost($request->from, $request->to, $warehouse_id ?: null, $array_warehouses_id);
+
+        $today_profit_numeric = ($netSales - $netReturns) - $cogsFIFO - $expenses_total - $inventoryWriteOff + $service['profit'];
         // Return raw numeric value for frontend price formatting
         $data['today_profit'] = $today_profit_numeric;
         // Modern Dashboard: the parts of the profit above, exposed as plain numbers so the Modern page never re-computes them.
         $data['today_net_revenue'] = (float) ($netSales - $netReturns);
         $data['today_cogs'] = $cogsFIFO;
         $data['today_expenses'] = (float) $expenses_total;
+        $data['today_inventory_writeoff'] = $inventoryWriteOff;
         $data['return_purchases_amount'] = (float) $return_purchases_total;
         $data['today_service_revenue'] = (float) $service['revenue'];
         $data['today_service_parts_cost'] = (float) $service['parts_cost'];

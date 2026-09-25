@@ -300,6 +300,24 @@ class CostingReader
     }
 
     /**
+     * Cost of stock that left without being sold: every Damage line, plus the DECREASE side only of Adjustments
+     * (a count found less than expected). The INCREASE side is deliberately excluded — found stock corrects
+     * inventory value but is never recognised as income (see App\Support\Reporting\InventoryWriteOffFigures, the
+     * legacy-mode twin of this method).
+     */
+    public static function writeOffCost(string $from, string $to, ?int $warehouseId, array $warehouseIds): float
+    {
+        self::prepare();
+
+        return (float) DB::table('inventory_cost_ledger')
+            ->where(fn ($q) => $q->where('source_type', 'damage')
+                ->orWhere(fn ($w) => $w->where('source_type', 'adjustment')->where('qty_delta', '<', 0)))
+            ->where('occurred_at', '>=', $from.' 00:00:00')->where('occurred_at', '<=', $to.' 23:59:59')
+            ->when($warehouseId, fn ($w) => $w->where('warehouse_id', $warehouseId), fn ($w) => $w->whereIn('warehouse_id', $warehouseIds))
+            ->selectRaw('COALESCE(SUM(-value_delta), 0) as v')->value('v');
+    }
+
+    /**
      * Inventory value at the END of $date (ledger balance of the last movement on/before it), per warehouse scope.
      * Movements are stored in replay order per product, so MAX(id) is the last chronological row of a key.
      */
