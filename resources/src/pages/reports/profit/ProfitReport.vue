@@ -59,12 +59,26 @@
         <template v-if="column.key === 'label'">
           <span style="font-weight: 500">{{ dimension === 'date' ? date(record.label) : record.label }}</span>
         </template>
+        <template v-else-if="column.key === 'date'">{{ date(record.date) }}</template>
+        <template v-else-if="column.key === 'reference'"><span style="font-weight: 500">{{ record.reference }}</span></template>
+        <template v-else-if="['total', 'discount', 'paid', 'cogs'].includes(column.key)">{{ money(record[column.key]) }}</template>
+        <template v-else-if="column.key === 'due'">
+          <span :style="{ color: Number(record.due) > 0 ? '#f59e0b' : 'inherit' }">{{ money(record.due) }}</span>
+        </template>
         <template v-else-if="column.key === 'revenue'">{{ money(record.revenue) }}</template>
         <template v-else-if="column.key === 'cost'">{{ money(record.cost) }}</template>
         <template v-else-if="column.key === 'profit'">
           <strong :style="{ color: Number(record.profit) >= 0 ? '#10b981' : '#f43f5e' }">
             {{ money(record.profit) }}
           </strong>
+        </template>
+        <template v-else-if="column.key === 'percentage' || column.key === 'markup'">
+          <span :style="{ color: Number(record[column.key]) >= 0 ? '#10b981' : '#f43f5e' }">{{ record[column.key] }}%</span>
+        </template>
+        <template v-else-if="column.key === 'payment_status'">
+          <a-tag :color="{ Paid: 'green', Partial: 'orange', Unpaid: 'red' }[record.payment_status] || 'default'">
+            {{ record.payment_status }}
+          </a-tag>
         </template>
         <template v-else-if="column.key === 'margin'">
           <div class="margin-cell">
@@ -119,6 +133,7 @@ const CONFIG = {
   customer: { title: t('Profit by Customer'), labelHeader: t('Customer'), chart: 'bar', chartTitle: t('Top_10_Customers_By_Profit') },
   date: { title: t('Profit by Date'), labelHeader: t('date'), chart: 'area', chartTitle: t('Profit_Over_Time') },
   warehouse: { title: t('Profit by Warehouse'), labelHeader: t('warehouse'), chart: 'bar', chartTitle: t('Warehouses_By_Profit') },
+  invoice: { title: t('Profit by Invoice'), labelHeader: t('Reference'), chart: 'bar', chartTitle: t('Top_10_Invoices_By_Profit') },
 };
 const cfg = CONFIG[dimension] || CONFIG.product;
 
@@ -147,7 +162,7 @@ const warehouseOptions = computed(() =>
 const kpiTiles = computed(() => {
   const k = crud.payload.value?.kpis || {};
   const n = key => Number(k[key]) || 0;
-  return [
+  const tiles = [
     { label: t('Revenue'), value: money(n('revenue')), icon: DollarOutlined, color: '#1677ff', tint: 'rgba(22, 119, 255, 0.12)' },
     { label: t('Cost'), value: money(n('cost')), icon: WalletOutlined, color: '#f59e0b', tint: 'rgba(245, 158, 11, 0.14)' },
     {
@@ -155,8 +170,13 @@ const kpiTiles = computed(() => {
       color: '#10b981', tint: 'rgba(16, 185, 129, 0.12)',
       style: { color: n('profit') >= 0 ? '#10b981' : '#f43f5e' },
     },
-    { label: t('Margin'), value: `${n('margin')}%`, icon: PercentageOutlined, color: '#6d28d9', tint: 'rgba(109, 40, 217, 0.12)' },
   ];
+  if (dimension === 'invoice') {
+    tiles.push({ label: t('Invoices'), value: String(k.invoices ?? 0), icon: PercentageOutlined, color: '#6d28d9', tint: 'rgba(109, 40, 217, 0.12)' });
+  } else {
+    tiles.push({ label: t('Margin'), value: `${n('margin')}%`, icon: PercentageOutlined, color: '#6d28d9', tint: 'rgba(109, 40, 217, 0.12)' });
+  }
+  return tiles;
 });
 
 /* -------------------------------------------------------------- chart */
@@ -170,14 +190,42 @@ const chartFields = computed(() => [
 ]);
 
 /* -------------------------------------------------------------- table */
-const columns = computed(() => [
-  { title: cfg.labelHeader, dataIndex: 'label', key: 'label', sorter: true },
-  { title: t('Quantity'), dataIndex: 'qty', key: 'qty', sorter: true, align: 'right', sum: true },
-  { title: t('Revenue'), key: 'revenue', dataIndex: 'revenue', sorter: true, align: 'right', sum: 'money', exportValue: r => money(r.revenue) },
-  { title: t('Cost'), key: 'cost', dataIndex: 'cost', sorter: true, align: 'right', sum: 'money', exportValue: r => money(r.cost) },
-  { title: t('Profit'), key: 'profit', dataIndex: 'profit', sorter: true, align: 'right', sum: 'money', exportValue: r => money(r.profit) },
-  { title: t('Margin'), key: 'margin', dataIndex: 'margin', align: 'right', width: 160, exportValue: r => `${r.margin}%` },
-]);
+// Invoice-wise Profit Report (Build — 2026-09-25): one row per sale, far
+// more columns than the other five (uniform label/qty/revenue/cost/
+// profit/margin) dimensions, so it gets its own column set entirely.
+const INVOICE_COLUMNS = [
+  { title: t('date'), dataIndex: 'date', key: 'date', sorter: true, exportValue: r => date(r.date) },
+  { title: t('Reference'), dataIndex: 'reference', key: 'reference' },
+  { title: t('Customer'), dataIndex: 'customer', key: 'customer' },
+  { title: t('warehouse'), dataIndex: 'warehouse', key: 'warehouse' },
+  { title: t('Zone_Area'), dataIndex: 'zone_area', key: 'zone_area' },
+  { title: t('Division'), dataIndex: 'division', key: 'division' },
+  { title: t('Quantity'), dataIndex: 'qty', key: 'qty', align: 'right', sum: true },
+  { title: t('Total'), dataIndex: 'total', key: 'total', sorter: true, align: 'right', sum: 'money', exportValue: r => money(r.total) },
+  { title: t('Discount'), dataIndex: 'discount', key: 'discount', align: 'right', sum: 'money', exportValue: r => money(r.discount) },
+  { title: t('Paid'), dataIndex: 'paid', key: 'paid', align: 'right', sum: 'money', exportValue: r => money(r.paid) },
+  { title: t('Due'), dataIndex: 'due', key: 'due', sorter: true, align: 'right', sum: 'money', exportValue: r => money(r.due) },
+  { title: t('COGS'), dataIndex: 'cogs', key: 'cogs', sorter: true, align: 'right', sum: 'money', exportValue: r => money(r.cogs) },
+  { title: t('Profit'), dataIndex: 'profit', key: 'profit', sorter: true, align: 'right', sum: 'money', exportValue: r => money(r.profit) },
+  { title: t('Percentage'), dataIndex: 'percentage', key: 'percentage', align: 'right', exportValue: r => `${r.percentage}%` },
+  { title: t('Markup'), dataIndex: 'markup', key: 'markup', align: 'right', exportValue: r => `${r.markup}%` },
+  { title: t('Payment_Status'), dataIndex: 'payment_status', key: 'payment_status' },
+  { title: t('Seller'), dataIndex: 'seller', key: 'seller' },
+  { title: t('Added_By'), dataIndex: 'added_by', key: 'added_by' },
+  { title: t('Status'), dataIndex: 'status', key: 'status' },
+];
+
+const columns = computed(() => {
+  if (dimension === 'invoice') return INVOICE_COLUMNS;
+  return [
+    { title: cfg.labelHeader, dataIndex: 'label', key: 'label', sorter: true },
+    { title: t('Quantity'), dataIndex: 'qty', key: 'qty', sorter: true, align: 'right', sum: true },
+    { title: t('Revenue'), key: 'revenue', dataIndex: 'revenue', sorter: true, align: 'right', sum: 'money', exportValue: r => money(r.revenue) },
+    { title: t('Cost'), key: 'cost', dataIndex: 'cost', sorter: true, align: 'right', sum: 'money', exportValue: r => money(r.cost) },
+    { title: t('Profit'), key: 'profit', dataIndex: 'profit', sorter: true, align: 'right', sum: 'money', exportValue: r => money(r.profit) },
+    { title: t('Margin'), key: 'margin', dataIndex: 'margin', align: 'right', width: 160, exportValue: r => `${r.margin}%` },
+  ];
+});
 
 onMounted(crud.fetchRows);
 </script>

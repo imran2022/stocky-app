@@ -29,7 +29,7 @@ class ProfitReportController extends Controller
         // Reports_profit lives on ClientPolicy (same as the Profit & Loss report).
         $this->authorizeForUser($request->user('api'), 'Reports_profit', Client::class);
 
-        $dimensions = ['product', 'category', 'unit', 'customer', 'date', 'warehouse'];
+        $dimensions = ['product', 'category', 'unit', 'customer', 'date', 'warehouse', 'invoice'];
         abort_unless(in_array($dimension, $dimensions, true), 404);
 
         // ---- Inputs
@@ -97,6 +97,105 @@ class ProfitReportController extends Controller
                         ->on('hc.warehouse_id', '=', 'sd.warehouse_id')
                         ->whereRaw('hc.product_variant_id <=> sd.product_variant_id');
                 });
+
+        // ---- Invoice-wise Profit Report (Build — 2026-09-25) ----------
+        // One row per sale (not per product/line): the same per-line cost
+        // math every other dimension already uses (moving-average ledger,
+        // or the historical-cost-at-date fallback), just grouped by
+        // sale_id instead of product/category/etc. Only ORIGINAL sale
+        // lines are counted here (never returns, netted or otherwise) —
+        // `line_id` is negative for a return line by construction in both
+        // temp-table builders (`-x.id`/`-rd.id`), so `line_id > 0` isolates
+        // completed-sale lines only, then joins straight back to
+        // `sale_details.id` (which is exactly what a positive line_id is)
+        // to recover which sale each line belongs to.
+        if ($dimension === 'invoice') {
+            $saleLines = fn () => $base()
+                ->where('sd.line_id', '>', 0)
+                ->join('sale_details as sdet', 'sdet.id', '=', 'sd.line_id')
+                ->groupBy('sdet.sale_id')
+                ->selectRaw("sdet.sale_id as sale_id,
+                             COALESCE(SUM(sd.quantity),0) as qty,
+                             COALESCE(SUM(sd.total),0) as revenue,
+                             COALESCE(SUM({$costExpr}),0) as cost");
+
+            $withMeta = fn () => DB::table(DB::raw('('.$saleLines()->toSql().') as la'))
+                ->mergeBindings($saleLines())
+                ->join('sales as s', 's.id', '=', 'la.sale_id')
+                ->join('clients as cl', 'cl.id', '=', 's.client_id')
+                ->join('warehouses as w', 'w.id', '=', 's.warehouse_id')
+                ->leftJoin('sale_zones as sz', 'sz.id', '=', 's.zone_id')
+                ->leftJoin('bd_divisions as bd', 'bd.id', '=', 'sz.division_id')
+                ->leftJoin('users as au', 'au.id', '=', 's.user_id')
+                ->leftJoin('users as se', 'se.id', '=', 's.seller_id')
+                ->when($request->filled('search'), function ($q) use ($request) {
+                    $s = $request->search;
+                    $q->where(function ($qq) use ($s) {
+                        $qq->where('s.Ref', 'LIKE', "%{$s}%")->orWhere('cl.name', 'LIKE', "%{$s}%");
+                    });
+                });
+
+            $totalRows = DB::table(DB::raw('('.$withMeta()->toSql().') as x'))
+                ->mergeBindings($withMeta())
+                ->count();
+
+            $selectCols = "s.Ref as reference, s.date as date, cl.name as customer, w.name as warehouse,
+                s.statut as status, COALESCE(sz.name, '\xe2\x80\x94') as zone_area, COALESCE(bd.name, '\xe2\x80\x94') as division,
+                la.qty as qty, s.GrandTotal as total, s.discount as discount, s.paid_amount as paid,
+                (s.GrandTotal - s.paid_amount) as due, la.cost as cogs, (la.revenue - la.cost) as profit,
+                s.payment_statut as payment_status,
+                TRIM(CONCAT(COALESCE(au.firstname,''),' ',COALESCE(au.lastname,''))) as added_by,
+                TRIM(CONCAT(COALESCE(se.firstname,''),' ',COALESCE(se.lastname,''))) as seller";
+
+            $sortable = ['date', 'total', 'cogs', 'profit', 'due'];
+            $sortCol = in_array($order, $sortable, true) ? $order : 'date';
+
+            $rowsQ = $withMeta()->selectRaw($selectCols)->orderBy($sortCol, $dir);
+            if ($perPage !== -1) {
+                $rowsQ->offset($offset)->limit($perPage);
+            }
+            $rows = $rowsQ->get()->map(function ($r) {
+                $r->qty = round((float) $r->qty, 2);
+                $r->total = round((float) $r->total, 2);
+                $r->discount = round((float) $r->discount, 2);
+                $r->paid = round((float) $r->paid, 2);
+                $r->due = round((float) $r->due, 2);
+                $r->cogs = round((float) $r->cogs, 2);
+                $r->profit = round((float) $r->profit, 2);
+                $r->percentage = $r->total > 0 ? round($r->profit / $r->total * 100, 1) : 0;
+                $r->markup = $r->cogs > 0 ? round($r->profit / $r->cogs * 100, 1) : 0;
+
+                return $r;
+            });
+
+            $k = $withMeta()->selectRaw('COALESCE(SUM(s.GrandTotal),0) as revenue, COALESCE(SUM(la.cost),0) as cost, COUNT(*) as invoices')->first();
+            $kpis = [
+                'revenue' => round((float) $k->revenue, 2),
+                'cost' => round((float) $k->cost, 2),
+                'profit' => round(((float) $k->revenue) - ((float) $k->cost), 2),
+                'margin' => $k->revenue > 0 ? round((($k->revenue - $k->cost) / $k->revenue) * 100, 1) : 0,
+                'invoices' => (int) ($k->invoices ?? 0),
+            ];
+
+            $chart = $withMeta()
+                ->selectRaw('s.Ref as label, s.GrandTotal as revenue, (la.revenue - la.cost) as profit')
+                ->orderByDesc('profit')->limit(10)->get()
+                ->map(fn ($r) => ['label' => $r->label, 'revenue' => round((float) $r->revenue, 2), 'profit' => round((float) $r->profit, 2)]);
+
+            $warehouses = Warehouse::whereNull('deleted_at')
+                ->when($allowed !== null, fn ($q) => $q->whereIn('id', $allowed))
+                ->get(['id', 'name']);
+
+            return response()->json([
+                'rows' => $rows,
+                'totalRows' => $totalRows,
+                'kpis' => $kpis,
+                'chart' => $chart,
+                'warehouses' => $warehouses,
+                'from' => $from,
+                'to' => $to,
+            ]);
+        }
 
         // ---- Dimension: label expression, joins and group key
         // Both branches read product name/category/unit straight off their own normalized temp table (each

@@ -94,6 +94,9 @@ const InternalLocationReport = lazy('InternalLocationReport', () => import('../p
 const SalesByGroupReport = lazy('SalesByGroupReport', () => import('../pages/reports/SalesByGroupReport.vue'));
 const ProfitAndLossReport = lazy('ProfitAndLossReport', () => import('../pages/reports/ProfitAndLossReport.vue'));
 const ProfitReport = lazy('ProfitReport', () => import('../pages/reports/profit/ProfitReport.vue'));
+const StockTurnoverReport = lazy('StockTurnoverReport', () => import('../pages/reports/StockTurnoverReport.vue'));
+const SalesTrendReport = lazy('SalesTrendReport', () => import('../pages/reports/SalesTrendReport.vue'));
+const CustomerRfmReport = lazy('CustomerRfmReport', () => import('../pages/reports/CustomerRfmReport.vue'));
 const AnalyticsReport = lazy('AnalyticsReport', () => import('../pages/reports/AnalyticsReport.vue'));
 const Sales = lazy('Sales', () => import('../pages/sales/Sales.vue'));
 const PosSales = lazy('PosSales', () => import('../pages/sales/PosSales.vue'));
@@ -487,6 +490,10 @@ const routes = [
             { path: 'reports/profit/customer', name: 'profit-by-customer', component: ProfitReport, meta: { title: 'Profit by Customer', permission: 'Reports_profit', dimension: 'customer' } },
             { path: 'reports/profit/date', name: 'profit-by-date', component: ProfitReport, meta: { title: 'Profit by Date', permission: 'Reports_profit', dimension: 'date' } },
             { path: 'reports/profit/warehouse', name: 'profit-by-warehouse', component: ProfitReport, meta: { title: 'Profit by Warehouse', permission: 'Reports_profit', dimension: 'warehouse' } },
+            { path: 'reports/profit/invoice', name: 'profit-by-invoice', component: ProfitReport, meta: { title: 'Profit by Invoice', permission: 'Reports_profit', dimension: 'invoice' } },
+            { path: 'reports/stock-turnover', name: 'stock-turnover-report', component: StockTurnoverReport, meta: { title: 'Stock Turnover Report', permission: 'inventory_valuation' } },
+            { path: 'reports/sales-trend', name: 'sales-trend-report', component: SalesTrendReport, meta: { title: 'Sales Trend Report', permission: 'Reports_sales' } },
+            { path: 'reports/customer-rfm', name: 'customer-rfm-report', component: CustomerRfmReport, meta: { title: 'Customer RFM Report', permission: 'Top_customers' } },
             { path: 'reports/analytics', name: 'analytics-report', component: AnalyticsReport, meta: { title: 'Analytics Report', permission: 'analytics_report' } },
             { path: 'reports/cash-flow', name: 'cash-flow-report', component: CashFlowReport, meta: { title: 'Cash Flow', permission: 'cash_flow_report' } },
             { path: 'reports/stock-transfer', name: 'stock-transfer-report', component: StockTransferReport, meta: { title: 'Stock Transfer', permission: 'Stock_Transfer_Report' } },

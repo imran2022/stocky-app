@@ -7340,6 +7340,357 @@ class ReportController extends BaseController
         ]);
     }
 
+    // ----------------- stock_turnover_report (Build — 2026-09-25) -------\\
+    /**
+     * Turnover ratio = period COGS ÷ current stock value, per product. Reuses the exact same costing-mode-aware
+     * COGS math ProfitReportController's dimension views already use (moving-average ledger, or the
+     * historical-cost-at-date fallback for Legacy) — grouped by product here instead of any other dimension.
+     * Current stock value: on-hand qty (product_warehouse) valued at the moving-average balance when Moving
+     * Average costing is on, else at today's master/variant cost (same accepted simplification
+     * inventory_valuation_summary already documents for Legacy mode — an exact historical average isn't kept
+     * per-warehouse outside the costing ledger).
+     *
+     * "Turnover" here is period COGS over CURRENT stock value, not a true period-average inventory value (that
+     * would need a stock snapshot at the window's start, which this app does not keep) — an accepted estimate,
+     * same spirit as inventory_valuation_summary's own documented simplifications.
+     */
+    public function stock_turnover_report(Request $request)
+    {
+        $this->authorizeForUser($request->user('api'), 'inventory_valuation', Product::class);
+
+        $perPage = (int) ($request->limit ?? 10);
+        $page = max(1, (int) ($request->page ?? 1));
+        $order = $request->SortField ?: 'turnover';
+        $dir = strtolower($request->SortType ?: 'desc') === 'asc' ? 'asc' : 'desc';
+
+        $today = Carbon::today();
+        $from = $request->filled('from') ? Carbon::parse($request->from)->toDateString() : $today->copy()->subDays(29)->toDateString();
+        $to = $request->filled('to') ? Carbon::parse($request->to)->toDateString() : $today->toDateString();
+        if ($from > $to) {
+            $from = $to;
+        }
+        $periodDays = max(1, Carbon::parse($from)->diffInDays(Carbon::parse($to)) + 1);
+
+        $scopeIds = $this->warehouseScopeIds();
+        $warehouseId = $this->filterWarehouseId($request->warehouse_id) ?: null;
+        if ($scopeIds !== null && $warehouseId && ! in_array($warehouseId, $scopeIds, true)) {
+            $warehouseId = null;
+        }
+        $warehouseIds = $warehouseId ? [$warehouseId] : ($scopeIds ?? Warehouse::whereNull('deleted_at')->pluck('id')->all());
+
+        // ---- period COGS by product — same dual-mode source as ProfitReportController.
+        $costing = \App\Services\Costing\CostingReader::active();
+        $costExpr = $costing ? 'sd.line_cost' : 'sd.base_quantity * COALESCE(hc.avg_cost, pv.cost, p.cost, 0)';
+        $tmpTable = $costing
+            ? \App\Services\Costing\CostingReader::profitLinesTemp($from, $to, $warehouseId, $warehouseIds)
+            : \App\Support\Reporting\LegacyProfitLines::temp($from, $to, $warehouseId, $warehouseIds);
+        $histCostTable = null;
+        if (! $costing) {
+            $soldProductIds = DB::table($tmpTable)->distinct()->pluck('product_id')->all();
+            $histCostTable = \App\Support\Reporting\HistoricalCostAtDate::temp($to, $warehouseId, $warehouseIds, $soldProductIds);
+        }
+        $cogsQ = DB::table("{$tmpTable} as sd")
+            ->when(! $costing, function ($q) use ($histCostTable) {
+                $q->leftJoin('products as p', 'p.id', '=', 'sd.product_id')
+                    ->leftJoin('product_variants as pv', 'pv.id', '=', 'sd.product_variant_id')
+                    ->leftJoin("{$histCostTable} as hc", function ($j) {
+                        $j->on('hc.product_id', '=', 'sd.product_id')
+                            ->on('hc.warehouse_id', '=', 'sd.warehouse_id')
+                            ->whereRaw('hc.product_variant_id <=> sd.product_variant_id');
+                    });
+            })
+            ->groupBy('sd.product_id')
+            ->selectRaw("sd.product_id, COALESCE(SUM(sd.quantity),0) as qty_sold, COALESCE(SUM({$costExpr}),0) as cogs");
+        $cogsByProduct = [];
+        foreach ($cogsQ->get() as $r) {
+            $cogsByProduct[(int) $r->product_id] = ['qty_sold' => (float) $r->qty_sold, 'cogs' => (float) $r->cogs];
+        }
+
+        // ---- current on-hand stock, by product (summed across the scoped warehouses/variants)
+        $stockQ = DB::table('product_warehouse as pw')
+            ->join('products as p', 'p.id', '=', 'pw.product_id')
+            ->whereNull('p.deleted_at')->where('p.type', '!=', 'is_service')
+            ->whereIn('pw.warehouse_id', $warehouseIds)
+            ->when($request->filled('search'), function ($q) use ($request) {
+                $s = $request->search;
+                $q->where(function ($qq) use ($s) {
+                    $qq->where('p.name', 'LIKE', "%{$s}%")->orWhere('p.code', 'LIKE', "%{$s}%");
+                });
+            })
+            ->when($request->filled('category_id'), fn ($q) => $q->where('p.category_id', $request->category_id))
+            ->groupBy('pw.product_id', 'p.name', 'p.code', 'p.category_id', 'p.cost')
+            ->selectRaw('pw.product_id, p.name, p.code, p.category_id, p.cost as master_cost, COALESCE(SUM(pw.qte),0) as qty');
+        $productIds = (clone $stockQ)->pluck('pw.product_id')->all();
+
+        $valueMap = $costing ? \App\Services\Costing\CostingReader::valueMap($warehouseIds, $productIds) : [];
+        $categoryNames = Category::whereIn('id', array_unique((clone $stockQ)->pluck('p.category_id')->filter()->all()))->pluck('name', 'id');
+
+        $rows = collect($stockQ->get())->map(function ($p) use ($cogsByProduct, $valueMap, $categoryNames, $periodDays, $costing) {
+            $qty = (float) $p->qty;
+            if ($costing) {
+                // Sum every variant_key bucket for this product across the scoped warehouses.
+                $value = 0.0;
+                foreach ($valueMap as $key => $v) {
+                    if ((int) explode(':', $key)[0] === (int) $p->product_id) {
+                        $value += $v['value'];
+                    }
+                }
+            } else {
+                $value = $qty * (float) $p->master_cost;
+            }
+            $c = $cogsByProduct[(int) $p->product_id] ?? ['qty_sold' => 0.0, 'cogs' => 0.0];
+            $turnover = $value > 0 ? round($c['cogs'] / $value, 2) : 0.0;
+            $daysOfInventory = ($value > 0 && $c['cogs'] > 0) ? round(($value / $c['cogs']) * $periodDays, 1) : null;
+
+            if ($value <= 0) {
+                $movement = 'Out of stock';
+            } elseif ($c['cogs'] <= 0) {
+                $movement = 'Dead';
+            } elseif ($daysOfInventory !== null && $daysOfInventory <= 30) {
+                $movement = 'Fast';
+            } elseif ($daysOfInventory !== null && $daysOfInventory <= 90) {
+                $movement = 'Normal';
+            } else {
+                $movement = 'Slow';
+            }
+
+            return [
+                'product_id' => (int) $p->product_id,
+                'name' => $p->name,
+                'code' => $p->code,
+                'category' => $categoryNames[$p->category_id] ?? '—',
+                'qty' => round($qty, 2),
+                'stock_value' => round($value, 2),
+                'qty_sold' => round($c['qty_sold'], 2),
+                'cogs' => round($c['cogs'], 2),
+                'turnover' => $turnover,
+                'days_of_inventory' => $daysOfInventory,
+                'movement' => $movement,
+            ];
+        });
+
+        if ($request->filled('movement')) {
+            $rows = $rows->where('movement', $request->movement)->values();
+        }
+
+        $totalRows = $rows->count();
+        $sortable = ['name', 'qty', 'stock_value', 'qty_sold', 'cogs', 'turnover', 'days_of_inventory'];
+        $sortCol = in_array($order, $sortable, true) ? $order : 'turnover';
+        $rows = $rows->sortBy($sortCol, SORT_REGULAR, $dir === 'desc')->values();
+        if ($perPage !== -1) {
+            $rows = $rows->slice(($page - 1) * $perPage, $perPage)->values();
+        }
+
+        $kpis = [
+            'products' => $totalRows,
+            'stock_value' => round((float) $rows->sum('stock_value'), 2),
+            'dead' => (int) collect($rows)->where('movement', 'Dead')->count(),
+            'fast' => (int) collect($rows)->where('movement', 'Fast')->count(),
+        ];
+
+        return response()->json([
+            'rows' => $rows,
+            'totalRows' => $totalRows,
+            'kpis' => $kpis,
+            'warehouses' => Warehouse::whereNull('deleted_at')->when($scopeIds !== null, fn ($q) => $q->whereIn('id', $scopeIds))->get(['id', 'name']),
+            'categories' => Category::whereNull('deleted_at')->get(['id', 'name']),
+            'from' => $from,
+            'to' => $to,
+        ]);
+    }
+
+    // ----------------- sales_trend_report (Build — 2026-09-25) ----------\\
+    /**
+     * Period trend (day/week/month, server-bucketed) + a weekday × hour heatmap — both over the SAME completed-
+     * sales scope Report_Sales/zoneWiseReport already use (no returns involved; a trend/heatmap is about when
+     * revenue lands, not net profit).
+     */
+    public function sales_trend_report(Request $request)
+    {
+        $this->authorizeForUser($request->user('api'), 'Reports_sales', Sale::class);
+
+        $today = Carbon::today();
+        $from = $request->filled('from') ? Carbon::parse($request->from)->toDateString() : $today->copy()->subDays(29)->toDateString();
+        $to = $request->filled('to') ? Carbon::parse($request->to)->toDateString() : $today->toDateString();
+        if ($from > $to) {
+            $from = $to;
+        }
+        $granularity = in_array($request->granularity, ['day', 'week', 'month'], true) ? $request->granularity : 'day';
+
+        $scopeIds = $this->warehouseScopeIds();
+        $warehouseId = $this->filterWarehouseId($request->warehouse_id) ?: null;
+        if ($scopeIds !== null && $warehouseId && ! in_array($warehouseId, $scopeIds, true)) {
+            $warehouseId = null;
+        }
+
+        $base = fn () => Sale::whereNull('deleted_at')
+            ->where('statut', 'completed')
+            ->whereBetween('date', [$from, $to])
+            ->when($warehouseId, fn ($q) => $q->where('warehouse_id', $warehouseId),
+                fn ($q) => $scopeIds !== null ? $q->whereIn('warehouse_id', $scopeIds) : $q);
+
+        $periodExpr = [
+            'day' => 'date',
+            'week' => "DATE_SUB(date, INTERVAL WEEKDAY(date) DAY)",
+            'month' => "DATE_FORMAT(date, '%Y-%m-01')",
+        ][$granularity];
+
+        $trend = $base()
+            ->selectRaw("{$periodExpr} as period, COUNT(*) as invoices,
+                COALESCE(SUM(GrandTotal),0) as net_sales, COALESCE(SUM(discount),0) as discount")
+            ->groupBy('period')->orderBy('period')->get()
+            ->map(function ($r, $i) {
+                return (object) ['period' => $r->period, 'invoices' => (int) $r->invoices,
+                    'net_sales' => round((float) $r->net_sales, 2), 'discount' => round((float) $r->discount, 2), ];
+            })->values();
+        // Growth % vs the previous row in the series (first row has none).
+        $trendOut = [];
+        $prev = null;
+        foreach ($trend as $r) {
+            $growth = $prev && $prev->net_sales > 0 ? round((($r->net_sales - $prev->net_sales) / $prev->net_sales) * 100, 1) : null;
+            $trendOut[] = ['period' => $r->period, 'invoices' => $r->invoices, 'net_sales' => $r->net_sales, 'discount' => $r->discount, 'avg_ticket' => $r->invoices > 0 ? round($r->net_sales / $r->invoices, 2) : 0, 'growth' => $growth];
+            $prev = $r;
+        }
+
+        // ---- Heatmap: weekday (0=Sun..6=Sat) x 2-hour block, over the SAME window.
+        // `time` is a separate HH:MM:SS column on sales (see Report_Sales' own start_time/end_time handling).
+        $heat = $base()
+            ->selectRaw("DAYOFWEEK(date) - 1 as weekday, FLOOR(HOUR(COALESCE(time, '12:00:00')) / 2) * 2 as hour_block,
+                COUNT(*) as invoices, COALESCE(SUM(GrandTotal),0) as net_sales")
+            ->groupBy('weekday', 'hour_block')->get();
+        $heatmap = [];
+        foreach ($heat as $r) {
+            $heatmap[] = ['weekday' => (int) $r->weekday, 'hour_block' => (int) $r->hour_block, 'invoices' => (int) $r->invoices, 'net_sales' => round((float) $r->net_sales, 2)];
+        }
+
+        $k = $base()->selectRaw('COUNT(*) as invoices, COALESCE(SUM(GrandTotal),0) as net_sales, COALESCE(SUM(discount),0) as discount')->first();
+        $kpis = [
+            'invoices' => (int) ($k->invoices ?? 0),
+            'net_sales' => round((float) ($k->net_sales ?? 0), 2),
+            'discount' => round((float) ($k->discount ?? 0), 2),
+            'avg_ticket' => ($k->invoices ?? 0) > 0 ? round($k->net_sales / $k->invoices, 2) : 0,
+        ];
+
+        return response()->json([
+            'trend' => $trendOut,
+            'heatmap' => $heatmap,
+            'kpis' => $kpis,
+            'warehouses' => Warehouse::whereNull('deleted_at')->when($scopeIds !== null, fn ($q) => $q->whereIn('id', $scopeIds))->get(['id', 'name']),
+            'from' => $from,
+            'to' => $to,
+        ]);
+    }
+
+    // ----------------- customer_rfm_report (Build — 2026-09-25) ---------\\
+    /**
+     * Recency (days since last completed sale, ALL time), Frequency + Monetary (within the lookback window only),
+     * segmented into New / Champion / Loyal / At Risk / Lost by simple, explainable thresholds — not a 1-5 quantile
+     * RFM score matrix, which would need tuning per merchant and isn't asked for.
+     */
+    public function customer_rfm_report(Request $request)
+    {
+        $this->authorizeForUser($request->user('api'), 'Top_customers', Client::class);
+
+        $perPage = (int) ($request->limit ?? 10);
+        $page = max(1, (int) ($request->page ?? 1));
+        $order = $request->SortField ?: 'monetary';
+        $dir = strtolower($request->SortType ?: 'desc') === 'asc' ? 'asc' : 'desc';
+
+        $lookbackDays = (int) ($request->lookback_days ?: 90);
+        $today = Carbon::today();
+        $to = $today->toDateString();
+        $windowStart = $today->copy()->subDays($lookbackDays - 1)->toDateString();
+
+        $scopeIds = $this->warehouseScopeIds();
+        $warehouseId = $this->filterWarehouseId($request->warehouse_id) ?: null;
+        if ($scopeIds !== null && $warehouseId && ! in_array($warehouseId, $scopeIds, true)) {
+            $warehouseId = null;
+        }
+        $whApply = fn ($q) => $warehouseId
+            ? $q->where('warehouse_id', $warehouseId)
+            : ($scopeIds !== null ? $q->whereIn('warehouse_id', $scopeIds) : $q);
+
+        $allTime = $whApply(DB::table('sales')->whereNull('deleted_at')->where('statut', 'completed'))
+            ->select('client_id')->selectRaw('MAX(date) as last_date, COUNT(*) as all_orders')->groupBy('client_id');
+
+        $windowed = $whApply(DB::table('sales')->whereNull('deleted_at')->where('statut', 'completed')
+            ->whereBetween('date', [$windowStart, $to]))
+            ->select('client_id')->selectRaw('COUNT(*) as frequency, COALESCE(SUM(GrandTotal),0) as monetary')->groupBy('client_id');
+
+        $dueAgg = $whApply(DB::table('sales')->whereNull('deleted_at')->where('statut', 'completed'))
+            ->select('client_id')->selectRaw('COALESCE(SUM(GrandTotal - paid_amount),0) as due')->groupBy('client_id');
+
+        $rowsQ = DB::table('clients as c')
+            ->joinSub($allTime, 'a', 'a.client_id', '=', 'c.id')
+            ->leftJoinSub($windowed, 'w', 'w.client_id', '=', 'c.id')
+            ->leftJoinSub($dueAgg, 'd', 'd.client_id', '=', 'c.id')
+            ->whereNull('c.deleted_at')
+            ->when($request->filled('search'), function ($q) use ($request) {
+                $s = $request->search;
+                $q->where(function ($qq) use ($s) {
+                    $qq->where('c.name', 'LIKE', "%{$s}%")->orWhere('c.phone', 'LIKE', "%{$s}%");
+                });
+            })
+            ->selectRaw('c.id, c.name, c.phone, a.last_date, a.all_orders,
+                COALESCE(w.frequency, 0) as frequency, COALESCE(w.monetary, 0) as monetary, COALESCE(d.due, 0) as due,
+                DATEDIFF(?, a.last_date) as recency_days', [$to]);
+
+        $rows = collect($rowsQ->get())->map(function ($r) use ($lookbackDays) {
+            $recency = (int) $r->recency_days;
+            $freq = (int) $r->frequency;
+            if ((int) $r->all_orders <= 1 && $recency <= $lookbackDays) {
+                $segment = 'New';
+            } elseif ($recency > $lookbackDays * 2) {
+                $segment = 'Lost';
+            } elseif ($recency > $lookbackDays) {
+                $segment = 'At Risk';
+            } elseif ($freq >= 3) {
+                $segment = 'Champion';
+            } else {
+                $segment = 'Loyal';
+            }
+
+            return [
+                'id' => (int) $r->id,
+                'name' => $r->name,
+                'phone' => $r->phone,
+                'last_date' => $r->last_date,
+                'recency_days' => $recency,
+                'frequency' => $freq,
+                'monetary' => round((float) $r->monetary, 2),
+                'avg_order' => $freq > 0 ? round($r->monetary / $freq, 2) : 0,
+                'due' => round((float) $r->due, 2),
+                'segment' => $segment,
+            ];
+        });
+
+        if ($request->filled('segment')) {
+            $rows = $rows->where('segment', $request->segment)->values();
+        }
+
+        $totalRows = $rows->count();
+        $segmentCounts = $rows->countBy('segment');
+        $sortable = ['name', 'recency_days', 'frequency', 'monetary', 'due'];
+        $sortCol = in_array($order, $sortable, true) ? $order : 'monetary';
+        $rows = $rows->sortBy($sortCol, SORT_REGULAR, $dir === 'desc')->values();
+        $page1Rows = $perPage === -1 ? $rows : $rows->slice(($page - 1) * $perPage, $perPage)->values();
+
+        return response()->json([
+            'rows' => $page1Rows,
+            'totalRows' => $totalRows,
+            'kpis' => [
+                'customers' => $totalRows,
+                'monetary' => round((float) $rows->sum('monetary'), 2),
+                'champions' => (int) ($segmentCounts['Champion'] ?? 0),
+                'at_risk' => (int) ($segmentCounts['At Risk'] ?? 0),
+            ],
+            'chart' => collect(['New', 'Champion', 'Loyal', 'At Risk', 'Lost'])
+                ->map(fn ($s) => ['label' => $s, 'value' => (int) ($segmentCounts[$s] ?? 0)])->values(),
+            'lookback_days' => $lookbackDays,
+            'warehouses' => Warehouse::whereNull('deleted_at')->when($scopeIds !== null, fn ($q) => $q->whereIn('id', $scopeIds))->get(['id', 'name']),
+        ]);
+    }
+
     // ----------------- stock_inventory_valuation -----------------------\\
 
     public function stock_inventory_valuation(Request $request)

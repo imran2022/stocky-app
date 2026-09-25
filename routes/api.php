@@ -373,6 +373,9 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     Route::get('report/profit_and_loss', 'ReportController@ProfitAndLoss');
     Route::get('report/top_products', 'ReportController@report_top_products');
     Route::get('report/top_customers', 'ReportController@report_top_customers');
+    Route::get('report/stock_turnover', 'ReportController@stock_turnover_report');
+    Route::get('report/sales_trend', 'ReportController@sales_trend_report');
+    Route::get('report/customer_rfm', 'ReportController@customer_rfm_report');
     Route::get('report/product_report', 'ReportController@product_report');
     Route::get('report/sale_products_details', 'ReportController@sale_products_details');
     Route::get('report/product_sales_report', 'ReportController@product_sales_report');
