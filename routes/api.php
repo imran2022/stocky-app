@@ -1476,6 +1476,10 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     Route::get('feature_settings', 'SettingsController@getFeatureSettings');
     Route::put('feature_settings', 'SettingsController@updateFeatureSettings');
 
+    // Costing Method (System Settings → System): switch between legacy (master cost) and Moving Average
+    Route::get('costing_settings', 'Settings\CostingSettingsController@show');
+    Route::post('costing_settings', 'Settings\CostingSettingsController@update');
+
     // Barcode label print defaults (Print Barcode page)
     Route::get('barcode_label_settings', 'SettingsController@getBarcodeLabelSettings');
     Route::put('barcode_label_settings', 'SettingsController@updateBarcodeLabelSettings');
