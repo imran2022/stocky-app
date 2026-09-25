@@ -72,7 +72,12 @@ class StockGuard
     {
         $out = [];
         foreach ($lines as $l) {
-            if (($l['product_type'] ?? null) === 'is_service') {
+            // Audit fix (MF-05): product_type used to come straight from the request line — a physical product
+            // described as a service would never even enter the "needs" list, so assertAvailable() (which DOES
+            // resolve type from the database) never got a chance to check it at all. The database is the only
+            // authority on a product's type now.
+            $product = isset($l['product_id']) ? Product::find($l['product_id']) : null;
+            if ($product && $product->type === 'is_service') {
                 continue;
             }
             $out[] = self::need(

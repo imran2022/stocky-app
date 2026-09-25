@@ -5188,12 +5188,14 @@ class SalesController extends BaseController
             if ($mult <= 1) {
                 continue;
             }
-            if (isset($value['product_type']) && $value['product_type'] === 'is_service') {
-                continue;
-            }
 
             $product = Product::find($value['product_id']);
             if (! $product) {
+                continue;
+            }
+            // Audit fix (MF-05 parity): product_type used to come straight from the client payload here too — a
+            // physical pack line described as a service would skip this oversell guard entirely.
+            if ($product->type === 'is_service') {
                 continue;
             }
 

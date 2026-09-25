@@ -470,7 +470,11 @@ class PosController extends BaseController
 
                 foreach ($data as $key => $value) {
                     $product = Product::find($value['product_id']);
-                    $isService = isset($value['product_type']) && $value['product_type'] === 'is_service';
+                    // Audit fix (MF-05, POS stock-guard bypass): product_type used to come straight from the
+                    // client payload — a request could describe a physical product as a service and skip stock
+                    // validation/deduction entirely. The product's real type in the database is the only
+                    // authority now.
+                    $isService = $product && $product->type === 'is_service';
 
                     // Resolve sale unit:
                     //  - Prefer explicit sale_unit_id from payload
@@ -524,28 +528,25 @@ class PosController extends BaseController
                     ], $warrantyGuarantee);
 
                     // Stock deduction only applies to non-service items.
-                    // If unit or product_warehouse cannot be resolved, we skip stock adjustment
-                    // but still create the sale; this prevents hard failures for legacy/offline data.
+                    // Audit fix (MF-05 / C-02 parity): this was still the old raw lookup that silently skipped
+                    // the deduction whenever no product_warehouse row existed yet for this product/warehouse (a
+                    // product never stocked here before), and matched ANY row for a non-variant product instead
+                    // of specifically the non-variant one when variant rows also existed. StockMutator::lockOrCreate
+                    // always returns (creating if needed) the correct row, locked for the transaction, exactly like
+                    // every other stock-mutating controller already does.
                     if (! $isService && $unit) {
-                        if ($value['product_variant_id'] !== null) {
-                            $product_warehouse = product_warehouse::where('warehouse_id', $order->warehouse_id)
-                                ->where('product_id', $value['product_id'])
-                                ->where('product_variant_id', $value['product_variant_id'])
-                                ->first();
-                        } else {
-                            $product_warehouse = product_warehouse::where('warehouse_id', $order->warehouse_id)
-                                ->where('product_id', $value['product_id'])
-                                ->first();
-                        }
+                        $product_warehouse = \App\Support\StockMutator::lockOrCreate(
+                            $order->warehouse_id,
+                            $value['product_id'],
+                            $value['product_variant_id'] !== null ? $value['product_variant_id'] : null
+                        );
 
-                        if ($product_warehouse) {
-                            if ($unit->operator == '/') {
-                                $product_warehouse->qte -= $packQty / $unit->operator_value;
-                            } else {
-                                $product_warehouse->qte -= $packQty * $unit->operator_value;
-                            }
-                            $product_warehouse->save();
+                        if ($unit->operator == '/') {
+                            $product_warehouse->qte -= $packQty / $unit->operator_value;
+                        } else {
+                            $product_warehouse->qte -= $packQty * $unit->operator_value;
                         }
+                        $product_warehouse->save();
                     }
                 }
 
@@ -2643,12 +2644,14 @@ class PosController extends BaseController
             if ($mult <= 1) {
                 continue; // only validate real packs
             }
-            if (isset($value['product_type']) && $value['product_type'] === 'is_service') {
-                continue;
-            }
 
             $product = Product::find($value['product_id']);
             if (! $product) {
+                continue;
+            }
+            // Audit fix (MF-05 parity): product_type used to come straight from the client payload here too — a
+            // physical pack line described as a service would skip this oversell guard entirely.
+            if ($product->type === 'is_service') {
                 continue;
             }
 
