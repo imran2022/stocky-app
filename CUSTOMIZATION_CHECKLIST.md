@@ -2482,3 +2482,20 @@ This supplements the in-depth Build O1–O9 record appended to
       accounting-policy gap, not a bug (see `CUSTOMIZATIONS.md`).
 - [ ] Batch/expiry/GRN-trace (FIFO by batch) is out of scope for this phase — every GRN blends into one average;
       confirm this matches what the business needs before promoting Moving Average to the only supported method.
+
+## 40. Inventory write-off (Damage + Adjustment decreases) expensed in profit
+
+- [ ] Create a Damage document — Profit & Loss, Dashboard and Today Summary profit all drop by the damaged quantity's
+      cost; a new `inventory_writeoff_sum` / `today_inventory_writeoff` / `profit.inventory_writeoff` figure appears.
+- [ ] Create a stock Adjustment DECREASE (count found less than expected) — same expensing as Damage.
+- [ ] Create a stock Adjustment INCREASE (count found more than expected) — inventory value goes up, but profit and
+      every write-off figure are UNCHANGED (never shown as income).
+- [ ] This applies whether Moving Average costing is on or off — off uses master cost, on uses the ledger's actual
+      cost at the moment of the loss (so the two can show different numbers for the same documents).
+- [ ] Classic P&L report shows a new "Inventory write-off" row (only when non-zero) above ProfitNet, and it appears
+      as a component in the "build your own profit formula" tool, on by default.
+- [ ] Modern Dashboard's cost/expense/profit split shows a 4th "Inventory write-off" segment when non-zero; the
+      segments still add up to 100% of the bar.
+- [ ] `php artisan db:seed --class=Database\Seeders\TranslationSeeder --force` after deploying (new
+      `Inventory_writeoff` key) — otherwise the Classic report shows the raw key instead of "Inventory write-off".
+- [ ] `npm run build:admin` after deploying (two Vue files changed).

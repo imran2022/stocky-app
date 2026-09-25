@@ -24,6 +24,8 @@ All hooks are marked with a comment containing `Audit Batch` / `Audit fix (Batch
 | `app/Console/Commands/CostingRebuild.php` | `php artisan costing:rebuild` — dry-run compare, apply, enable, verify |
 | `database/migrations/2026_09_26_000001_create_inventory_costing_tables.php` | `inventory_cost_*` tables (additive, idempotent) |
 | `tests/Regression/unit_costing_engine.php`, `build_costing_scenario.php`, `build_costing_realworld.php`, `build_costing_stress.php`, `build_costing_large.php` | costing regression + large-data tests |
+| `app/Support/Reporting/InventoryWriteOffFigures.php` | Damage + Adjustment-decrease cost expensed in profit (master cost / legacy, or ledger cost when costing is on) |
+| `tests/Regression/build_writeoff_expense.php` | write-off regression test (both costing modes) |
 
 ## Vendor files that carry hooks (re-check after taking a new vendor version)
 
@@ -49,6 +51,9 @@ Size = lines added / removed against the pre-audit version.
 | `Support/Reporting/DashboardInsights.php` (Costing) | few lines | slow-stock value through `CostingReader`, no-op while off |
 | `Http/Controllers/ProfitReportController.php` (Costing) | ~+40 | base query, cost expression and dimensions swap to the ledger when on (via `CostingReader::profitLinesTemp`, one materialized temp table per request instead of re-joining per dimension query); legacy branch unchanged |
 | `Services/ReportQuestionService.php` (Costing) | few lines | by-product profit cost through the ledger when on |
+| `Http/Controllers/ReportController.php`, `DashboardController.php`, `TodaySummaryController.php` (Inventory write-off) | few lines each | Damage + Adjustment-decrease cost expensed in profit, via `App\Support\Reporting\InventoryWriteOffFigures` — NOT gated behind costing, applies always |
+| `resources/src/pages/reports/ProfitAndLossReport.vue`, `resources/src/pages/dashboard/modern/sections/InsightsSection.vue` (Inventory write-off) | small | new write-off row/segment (needs `npm run build:admin`) |
+| `database/seeders/translations/en.php` (Inventory write-off) | 1 line | new `Inventory_writeoff` key (needs re-seeding `TranslationSeeder`) |
 | `Services/Custom/PurchaseOrderReceiptService.php`, `Support/UniqueRefGenerator.php` | small | GRN line checks, reference collision retry |
 | `routes/api.php` | -5 | dead routes and the public `products_clean_names` route removed |
 | `resources/src/pages/Dashboard.vue` (Batch 6) | ~+45 | hourly line/bars when `hourly` is present (needs `npm run build:admin`) |

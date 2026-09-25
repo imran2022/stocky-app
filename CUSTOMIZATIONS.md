@@ -5290,3 +5290,100 @@ per request and dies with the connection, so nothing is cached or reused across 
 (by-product profit cost).
 
 **Enabling procedure (deploy -> migrate -> compare -> switch on):**
+```
+php artisan migrate --path=database/migrations/2026_09_26_000001_create_inventory_costing_tables.php
+php artisan costing:rebuild --dry-run          # costs every product, prints legacy vs Moving Average COGS/stock
+                                                # value side by side; nothing is switched on
+php artisan costing:rebuild --apply --enable   # (re-)cost everything, then flip costing_method to moving_average
+```
+`--apply` is idempotent (safe to re-run any time, e.g. after a bulk import); `--verify` runs a full fingerprint check
+on demand instead of waiting for the 30 s TTL. A daily `costing:rebuild --verify` is scheduled
+(`app/Console/Kernel.php`) as a no-op safety net while costing is off, and a real nightly catch-all once it's on.
+
+**Tests (all new, `tests/Regression/`):**
+- `unit_costing_engine.php` — 34 pure-engine checks (no DB): blending, conservation, sale return at original cost,
+  purchase return, transfer, negative stock, the estimated flag, determinism.
+- `build_costing_scenario.php` — a small scenario through the real controllers (opening via adjustment; an
+  import-style unexplained seed), checked against a hand-computed answer.
+- `build_costing_realworld.php` — two warehouses, box/piece units, an approved transfer, a sale return, a purchase
+  return, adjustments, damage — checked against an independent oracle across every report this phase touches (P&L,
+  Profit report by every dimension, both stock-valuation reports, Dashboard/Today Summary stock value, analytics
+  opening/closing), plus: editing a product's master cost moves nothing, editing an old GRN behind the app gets
+  detected and logged as a correction, and a full rebuild from the documents matches the incrementally maintained
+  ledger exactly.
+- `build_costing_stress.php` — random operations (seed-controlled) against the same independent oracle; invariants:
+  no dirty fingerprints after a settle, on-hand qty matches the ledger, no unexplained seed beyond the legitimate
+  opening one, value conservation, and rebuild == incremental. `php tests/Regression/build_costing_stress.php <seed>
+  <steps>`.
+- `build_costing_large.php` — the "test with large data" pass: two warehouses' worth of independent bookkeeping
+  across 200 products x 730 days (~287k movement lines), checking every sale line's stored COGS, every balance, the
+  P&L and Profit report (by every dimension) against the independent books, both stock-valuation reports, and
+  analytics opening/closing — plus first-time costing time, an idle refresh, a same-day new-sale refresh, a full
+  verify, and the P&L/Profit-report response time, each asserted against a budget (all passed on a
+  200-product/730-day/287k-line run: first-time costing ~37 s one-off, idle refresh ~5 ms, new-sale refresh ~0.3 s,
+  full verify ~1.4 s, P&L legacy/active ~5.7 s/6.2 s, Profit report by-dimension legacy/active ~5.9 s/8.8 s).
+  `php tests/Regression/build_costing_large.php [products] [days] [seed]`.
+
+Run any of these with `DB_DATABASE=stk_v1 AUDIT_FK_OFF=1 php tests/Regression/<file>.php` against a scratch database
+that has run the costing migration.
+
+### Inventory Costing — update 2 (2026-09-26): Damage + Adjustment losses expensed in Profit & Loss / Dashboard / Today Summary
+
+**Problem.** Standard accounting practice — and every professional inventory system (QuickBooks, Zoho Inventory,
+Odoo) — expenses stock that is lost to damage or a shrinkage adjustment the moment it happens, the same way a sale's
+COGS is expensed. This app's Profit & Loss, Dashboard and Today Summary never did: Damage documents and Adjustment
+decreases silently reduced stock on hand with no effect on reported profit, so profit was systematically overstated
+by whatever had been damaged or written down.
+
+**Design decision (confirmed with the business):** an Adjustment **increase** (a stock count found MORE than the
+system expected) is never counted as income — accounting conservatism: found stock corrects inventory value, but is
+not recognised as a gain until it is actually sold. Only the **decrease** side of an Adjustment, and every Damage
+line, are expensed. This mirrors how losses and gains are treated asymmetrically in every mainstream accounting
+system.
+
+**Implementation.** A new class, `App\Support\Reporting\InventoryWriteOffFigures::cost($from, $to, $warehouseId,
+$warehouseIds)`, is the one place this is computed — mirroring `SalesFigures` / `CashFlowFigures`. It reads through
+`CostingReader::writeOffCost()` (new method) when Moving Average costing is on — valuing the loss at the cost the
+stock actually carried at the moment it was lost, from the ledger — and falls back to a direct master-cost query
+(damage_details + adjustment_details `type = 'sub'`) when costing is off, exactly like every other legacy figure.
+This is a general correctness fix, **not gated behind the costing switch** — every store gets accurate write-off
+expensing whether or not Moving Average is enabled; only the cost *basis* changes with the switch.
+
+Wired into:
+- `ReportController::ProfitAndLoss` — new field `inventory_writeoff_sum`; both `profit_fifo` and `profit_average_cost`
+  now subtract it.
+- `DashboardController` — new field `today_inventory_writeoff`; `today_profit` subtracts it. Exposed to the Modern
+  Dashboard's cost/expense/profit split (`InsightsSection.vue`) as its own row so the split still adds up to revenue
+  exactly, rather than folding it into Expenses.
+- `TodaySummaryController` — new field `profit.inventory_writeoff`; `profit.net` subtracts it.
+- Classic `ProfitAndLossReport.vue` — new income-statement row (shown only when non-zero) and a new component in the
+  "build your own profit formula" tool, enabled by default.
+
+**What did NOT change:** the Profit report (`ProfitReportController`, per-product/category/date/customer/warehouse
+profitability) — that report is specifically about sold products' profitability and has no natural place for a loss
+that was never sold; Damage/Adjustment continue to show only in the stock/adjustment reports, as before.
+
+**Translation:** `Inventory_writeoff` added to `database/seeders/translations/en.php` — run
+`php artisan db:seed --class=Database\Seeders\TranslationSeeder --force` after deploying, or the label will show its
+raw key on the Classic report (the Modern Dashboard's own `tt()` helper always falls back to English regardless).
+
+**Tests:** `tests/Regression/build_writeoff_expense.php` — a Damage of 10, an Adjustment decrease of 5, and an
+Adjustment increase of 8 on the same product, in BOTH costing modes: legacy write-off = master-cost × (damage +
+decrease) exactly, matching in P&L/Dashboard/Today Summary; Moving-Average write-off = the ledger's actual cost at
+the moment of loss (checked to differ from the master-cost figure, and to equal the ledger's own damage +
+adjustment-decrease rows); the +8 increase is confirmed present in the ledger (it still corrects inventory value) but
+absent from every write-off/profit figure. `build_costing_large.php` (the 287k-line large-data test) was extended
+with an independent running tally of expected write-off cost through its whole 2-year simulation, checked against the
+served figure. `audit_b4_profit_and_loss.php`'s profit-formula assertions now include the write-off term (0 in that
+fixture, so the check is unchanged in effect, but the formula it encodes is now the current one).
+
+**Frontend:** `resources/src/pages/reports/ProfitAndLossReport.vue` and
+`resources/src/pages/dashboard/modern/sections/InsightsSection.vue` changed — rebuild required (`npm run
+build:admin`).
+
+**Files touched:** `app/Support/Reporting/InventoryWriteOffFigures.php` (new), `app/Services/Costing/CostingReader.php`
+(`writeOffCost()`), `app/Http/Controllers/ReportController.php`, `app/Http/Controllers/DashboardController.php`,
+`app/Http/Controllers/TodaySummaryController.php`, `database/seeders/translations/en.php`,
+`resources/src/pages/reports/ProfitAndLossReport.vue`, `resources/src/pages/dashboard/modern/sections/InsightsSection.vue`,
+`tests/Regression/build_writeoff_expense.php` (new), `tests/Regression/build_costing_large.php`,
+`tests/Regression/audit_b4_profit_and_loss.php`.

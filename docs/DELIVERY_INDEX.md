@@ -1,5 +1,15 @@
 # Latest Delivery Index
 
+## Current: Inventory Costing update 2 — Damage/Adjustment losses expensed (2026-09-26)
+
+Damage documents and Adjustment DECREASES now reduce reported profit (Profit & Loss, Dashboard, Today Summary) —
+valued at master cost when costing is off, at the Moving Average ledger cost when it's on. Adjustment INCREASES are
+deliberately never counted (accounting conservatism — not income until sold). Not gated behind the costing switch —
+every store gets this correctness fix. No migration. **Needs `npm run build:admin`** (2 Vue files changed) and
+`php artisan db:seed --class=Database\Seeders\TranslationSeeder --force` (1 new translation key).
+Description: `CUSTOMIZATIONS.md` "Inventory Costing — update 2", checklist section 40, test
+`build_writeoff_expense.php`.
+
 ## Current: Inventory Costing — Moving Average (2026-09-26)
 
 Per-sale-line COGS and historically-correct stock value, replacing the old master-cost-at-report-time math. OFF by
