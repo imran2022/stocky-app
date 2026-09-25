@@ -2,8 +2,10 @@
 
 namespace App\Services;
 
+use App\Models\BdDivision;
 use App\Models\SaleCourier;
 use App\Models\SaleZone;
+use App\Support\BdDistrictMatcher;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\QueryException;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -20,7 +22,7 @@ class SaleLookupService
 {
     public function zones(array $filters = []): LengthAwarePaginator
     {
-        return $this->paginate(SaleZone::query(), $filters);
+        return $this->paginate(SaleZone::query()->with('division'), $filters);
     }
 
     public function couriers(array $filters = []): LengthAwarePaginator
@@ -28,9 +30,29 @@ class SaleLookupService
         return $this->paginate(SaleCourier::query(), $filters);
     }
 
-    public function createZone(string $name): SaleZone
+    /** The 8 Bangladesh Divisions, for the Zone/Area form's Division dropdown. */
+    public function divisions()
     {
-        return $this->createOrRestore(SaleZone::class, $this->normalizeName($name));
+        return BdDivision::orderBy('sort_order')->get(['id', 'name']);
+    }
+
+    /** Live suggestion while typing a Zone/Area name — never authoritative, always overridable. */
+    public function suggestDivisionId(string $name): ?int
+    {
+        return BdDistrictMatcher::matchDivisionId($name);
+    }
+
+    /**
+     * @param  bool  $divisionProvided  true when the caller explicitly chose (or explicitly cleared) a Division —
+     *                                  that choice always wins. False means auto-resolve from the name (used by
+     *                                  the quick "+ add new" picker on the Sale form, which only ever sends a name).
+     */
+    public function createZone(string $name, bool $divisionProvided = false, ?int $divisionId = null): SaleZone
+    {
+        $name = $this->normalizeName($name);
+        $resolvedDivisionId = $divisionProvided ? $divisionId : BdDistrictMatcher::matchDivisionId($name);
+
+        return $this->createOrRestore(SaleZone::class, $name, ['division_id' => $resolvedDivisionId]);
     }
 
     public function createCourier(string $name): SaleCourier
@@ -38,14 +60,34 @@ class SaleLookupService
         return $this->createOrRestore(SaleCourier::class, $this->normalizeName($name));
     }
 
-    public function updateZone(SaleZone $zone, string $name): SaleZone
+    public function updateZone(SaleZone $zone, string $name, bool $divisionProvided = false, ?int $divisionId = null): SaleZone
     {
-        return $this->update($zone, $this->normalizeName($name));
+        $name = $this->normalizeName($name);
+        // Symmetric with createZone(): an explicit choice (even an explicit clear) always wins; otherwise
+        // re-resolve from the (possibly just-edited) name rather than silently leaving the old division_id in
+        // place, so a rename that now matches a district still gets linked.
+        $resolvedDivisionId = $divisionProvided ? $divisionId : BdDistrictMatcher::matchDivisionId($name);
+
+        return $this->update($zone, $name, ['division_id' => $resolvedDivisionId]);
     }
 
     public function updateCourier(SaleCourier $courier, string $name): SaleCourier
     {
         return $this->update($courier, $this->normalizeName($name));
+    }
+
+    /**
+     * @throws ValidationException when the zone still has sales linked to it.
+     */
+    public function destroyZone(SaleZone $zone): void
+    {
+        if ($zone->sales()->count() > 0) {
+            throw ValidationException::withMessages([
+                'zone' => 'This Zone/Area still has sales linked to it and cannot be deleted.',
+            ]);
+        }
+
+        $zone->delete();
     }
 
     private function paginate(Builder $query, array $filters): LengthAwarePaginator
@@ -90,19 +132,22 @@ class SaleLookupService
             ->first();
     }
 
-    private function createOrRestore(string $modelClass, string $name)
+    private function createOrRestore(string $modelClass, string $name, array $extra = [])
     {
         $lookup = $this->findLookup($modelClass, $name);
         if ($lookup) {
             if ($lookup->trashed()) {
                 $lookup->restore();
             }
+            if ($extra !== []) {
+                $lookup->update($extra);
+            }
 
             return $lookup;
         }
 
         try {
-            return $modelClass::create(['name' => $name]);
+            return $modelClass::create(['name' => $name] + $extra);
         } catch (QueryException $e) {
             if (! in_array((string) $e->getCode(), ['23000', '23505'], true)) {
                 throw $e;
@@ -113,6 +158,9 @@ class SaleLookupService
                 if ($lookup->trashed()) {
                     $lookup->restore();
                 }
+                if ($extra !== []) {
+                    $lookup->update($extra);
+                }
 
                 return $lookup;
             }
@@ -121,7 +169,7 @@ class SaleLookupService
         }
     }
 
-    private function update($lookup, string $name)
+    private function update($lookup, string $name, array $extra = [])
     {
         $duplicate = $this->findLookup(get_class($lookup), $name);
         if ($duplicate && (int) $duplicate->id !== (int) $lookup->id) {
@@ -131,7 +179,7 @@ class SaleLookupService
         }
 
         try {
-            $lookup->update(['name' => $name]);
+            $lookup->update(['name' => $name] + $extra);
         } catch (QueryException $e) {
             if (in_array((string) $e->getCode(), ['23000', '23505'], true)) {
                 throw ValidationException::withMessages([

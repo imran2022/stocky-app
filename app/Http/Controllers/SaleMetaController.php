@@ -8,6 +8,7 @@ use App\Models\SaleZone;
 use App\Models\Shipment;
 use App\Services\SaleLookupService;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Small lookup endpoints for the Sale "Zone" and "Courier" dropdowns
@@ -89,12 +90,36 @@ class SaleMetaController extends Controller
         ]);
     }
 
+    /** The 8 Bangladesh Divisions, for the Zone/Area create/edit form's Division dropdown. */
+    public function divisions(Request $request)
+    {
+        $this->authorizeReadAccess($request);
+
+        return response()->json(['divisions' => $this->lookups->divisions()]);
+    }
+
+    /**
+     * Live suggestion while typing a Zone/Area name (matches known districts/aliases) — the frontend prefills the
+     * Division dropdown with this, but the user can always change or clear it before saving.
+     */
+    public function suggestDivision(Request $request)
+    {
+        $this->authorizeReadAccess($request);
+        $divisionId = $this->lookups->suggestDivisionId((string) $request->input('name', ''));
+
+        return response()->json(['division_id' => $divisionId]);
+    }
+
     public function storeZone(Request $request)
     {
         $this->authorizeCreateAccess($request);
-        $zone = $this->lookups->createZone((string) $request->input('name', ''));
+        $zone = $this->lookups->createZone(
+            (string) $request->input('name', ''),
+            $request->has('division_id'),
+            $request->filled('division_id') ? (int) $request->input('division_id') : null
+        );
 
-        return response()->json(['zone' => $zone->only(['id', 'name'])]);
+        return response()->json(['zone' => $zone->load('division')->only(['id', 'name', 'division_id', 'division'])]);
     }
 
     public function storeCourier(Request $request)
@@ -140,9 +165,34 @@ class SaleMetaController extends Controller
     public function updateZone(Request $request, SaleZone $zone)
     {
         $this->authorizeUpdateAccess($request);
-        $zone = $this->lookups->updateZone($zone, (string) $request->input('name', ''));
+        $zone = $this->lookups->updateZone(
+            $zone,
+            (string) $request->input('name', ''),
+            $request->has('division_id'),
+            $request->filled('division_id') ? (int) $request->input('division_id') : null
+        );
 
-        return response()->json(['zone' => $zone->only(['id', 'name'])]);
+        return response()->json(['zone' => $zone->load('division')->only(['id', 'name', 'division_id', 'division'])]);
+    }
+
+    /**
+     * Audit-style guard: a Zone/Area still linked to a Sale can never be deleted (matches every other module's
+     * "no deleting a document/lookup that's still in use" rule) — 422, never a silent no-op or a hidden FK error.
+     */
+    public function destroyZone(Request $request, SaleZone $zone)
+    {
+        $this->authorizeUpdateAccess($request);
+
+        try {
+            $this->lookups->destroyZone($zone);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->errors()['zone'][0] ?? 'This Zone/Area cannot be deleted.',
+            ], 422);
+        }
+
+        return response()->json(['success' => true]);
     }
 
     public function updateCourier(Request $request, SaleCourier $courier)
