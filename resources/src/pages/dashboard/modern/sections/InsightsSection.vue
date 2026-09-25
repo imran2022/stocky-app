@@ -97,15 +97,20 @@ const ins = computed(() => props.ctx.insights);
 const profit = computed(() => num(r.value.today_profit));
 const cogs = computed(() => num(r.value.today_cogs));
 const exp = computed(() => num(r.value.today_expenses));
+// Damage + Adjustment stock losses, expensed the same way COGS is (see App\Support\Reporting\InventoryWriteOffFigures).
+// Kept as its own row (rather than folded into Expenses) so the split below still adds up to revenue exactly.
+const writeoff = computed(() => num(r.value.today_inventory_writeoff));
 const margin = computed(() => (num(r.value.today_net_revenue) > 0.005 ? (profit.value / num(r.value.today_net_revenue)) * 100 : null));
 const rows = computed(() => [
   { label: tt('Cost_of_goods', 'Cost of goods sold'), value: cogs.value, color: 'var(--dm-s2)' },
   { label: tt('Expenses', 'Expenses'), value: exp.value, color: 'var(--dm-s1)' },
+  { label: tt('Inventory_writeoff', 'Inventory write-off'), value: writeoff.value, color: 'var(--dm-warn)' },
   { label: profit.value < 0 ? tt('Loss', 'Loss') : tt('Net_profit', 'Net profit'), value: profit.value, color: profit.value < 0 ? 'var(--dm-bad)' : 'var(--dm-s3)', cls: profit.value < 0 ? 'dm-bad' : '' },
 ]);
-// The bar compares the three parts to each other; a loss is shown in the number, not as a negative bar.
+// The bar compares the parts to each other; a loss is shown in the number, not as a negative bar. Write-off is
+// dropped from the bar (not the rows list) when zero, which is the common case for most businesses most days.
 const parts = computed(() => {
-  const v = [Math.max(0, cogs.value), Math.max(0, exp.value), Math.max(0, profit.value)];
+  const v = [Math.max(0, cogs.value), Math.max(0, exp.value), Math.max(0, writeoff.value), Math.max(0, profit.value)];
   const sum = v.reduce((a, b) => a + b, 0);
   if (sum <= 0) return [];
   return rows.value.map((s, i) => ({ ...s, w: (v[i] / sum) * 100 })).filter(s => s.w > 0);

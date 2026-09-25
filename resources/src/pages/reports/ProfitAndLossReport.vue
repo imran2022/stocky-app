@@ -148,6 +148,9 @@
           </div>
           <div class="st-row st-total"><span>{{ $t('Expenses') }}</span><span class="neg">− {{ money(stmt.expenses) }}</span></div>
 
+          <!-- Inventory write-off: Damage + Adjustment decreases, expensed like COGS -->
+          <div v-if="stmt.writeoff" class="st-row st-total"><span>{{ $t('Inventory_writeoff') }}</span><span class="neg">− {{ money(stmt.writeoff) }}</span></div>
+
           <div class="st-row st-grand" :class="stmt.netProfit >= 0 ? 'st-grand--pos' : 'st-grand--neg'">
             <span>{{ $t('ProfitNet') }} <span class="pct">{{ pct(stmt.netMargin) }}</span></span>
             <span>{{ money(stmt.netProfit) }}</span>
@@ -315,7 +318,7 @@ async function load() {
 /* --------------------------- profit customizer ---------------------------- */
 // v2: profit is now net of tax, delivery charges and returns, so the default set changed (old saved sets are dropped).
 const STORAGE_KEY = 'pl_profit_builder_v2';
-const DEFAULT_ENABLED = ['sales', 'service', 'cogs', 'expenses', 'sale_returns', 'sales_tax', 'sales_shipping'];
+const DEFAULT_ENABLED = ['sales', 'service', 'cogs', 'expenses', 'inventory_writeoff', 'sale_returns', 'sales_tax', 'sales_shipping'];
 
 const enabled = ref([...DEFAULT_ENABLED]);
 const cogsMethod = ref('fifo');
@@ -347,6 +350,7 @@ const components = computed(() => [
   { id: 'service', sign: 1, label: t('Service_Profit'), value: n(infos.value.service_profit) },
   { id: 'cogs', sign: -1, label: t('COGS'), value: cogsMethod.value === 'fifo' ? n(infos.value.product_cost_fifo) : n(infos.value.averagecost) },
   { id: 'expenses', sign: -1, label: t('Expenses'), value: n(infos.value.expenses_sum) },
+  { id: 'inventory_writeoff', sign: -1, label: t('Inventory_writeoff'), value: n(infos.value.inventory_writeoff_sum) },
   { id: 'sale_returns', sign: -1, label: t('SalesReturn'), value: n(infos.value.returns_sales_sum) },
   { id: 'purchase_returns', sign: 1, label: t('PurchasesReturn'), value: n(infos.value.returns_purchases_sum) },
   { id: 'sales_tax', sign: -1, label: t('Taxes_Collected'), value: n(infos.value.tax_net_of_returns) },
@@ -376,9 +380,11 @@ const stmt = computed(() => {
   const parts = n(s.service_parts_cost);
   const grossProfit = netRevenue - cogs - parts;
   const expenses = n(s.expenses_sum);
-  const netProfit = grossProfit - expenses;
+  // Damage + Adjustment stock losses, expensed like COGS (App\Support\Reporting\InventoryWriteOffFigures).
+  const writeoff = n(s.inventory_writeoff_sum);
+  const netProfit = grossProfit - expenses - writeoff;
   return {
-    grossSales, serviceRev, saleRet, taxNet, shipNet, netRevenue, cogs, parts, grossProfit, expenses, netProfit,
+    grossSales, serviceRev, saleRet, taxNet, shipNet, netRevenue, cogs, parts, grossProfit, expenses, writeoff, netProfit,
     grossMargin: netRevenue > 0 ? (grossProfit / netRevenue) * 100 : 0,
     netMargin: netRevenue > 0 ? (netProfit / netRevenue) * 100 : 0,
   };

@@ -221,6 +221,7 @@ return [
 'All_Warehouses' => 'All Warehouses',
 'Expense_List' => 'All Expenses',
 'Expenses' => 'Expenses',
+'Inventory_writeoff' => 'Inventory write-off',
 'This_Week_Sales_Purchases' => 'This Week Sales & Purchases',
 'Top_Selling_Products' => 'Top Selling Products',
 'View_all' => 'View all',
