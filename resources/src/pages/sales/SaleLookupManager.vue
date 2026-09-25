@@ -85,16 +85,63 @@
             @change="onNameChange"
           />
         </a-form-item>
-        <a-form-item v-if="isZone" label="Division / State" name="division_id" extra="Auto-detected from the name when it matches a known district — you can change or clear it.">
-          <a-select
-            v-model:value="form.division_id"
-            :options="divisionOptions"
-            allow-clear
-            placeholder="— Not linked —"
-            @change="userTouchedDivision = true"
-          />
+        <a-form-item
+          v-if="isZone"
+          label="Division / State"
+          name="division_id"
+          extra="Auto-detected from the name when it matches a known district. Type a name that doesn't exist yet to create a new Division; use the icons to rename or delete the selected one."
+        >
+          <div style="display: flex; gap: 6px">
+            <CreatableSelect
+              v-model:value="form.division_id"
+              v-model:options="divisionOptions"
+              create-endpoint="bd_divisions"
+              response-key="division"
+              placeholder="— Not linked —"
+              add-placeholder="Type a new Division name and press Enter"
+              style="flex: 1"
+              @update:value="userTouchedDivision = true"
+            />
+            <a-tooltip title="Rename this Division">
+              <a-button size="small" :disabled="!form.division_id" @click="openRenameDivision">
+                <template #icon><EditOutlined /></template>
+              </a-button>
+            </a-tooltip>
+            <a-popconfirm
+              v-if="form.division_id"
+              title="Delete this Division? It must not have any Zone/Area still linked to it."
+              ok-text="Delete"
+              cancel-text="Cancel"
+              @confirm="deleteDivision"
+            >
+              <a-tooltip title="Delete this Division">
+                <a-button size="small" danger>
+                  <template #icon><DeleteOutlined /></template>
+                </a-button>
+              </a-tooltip>
+            </a-popconfirm>
+            <a-button v-else size="small" danger disabled>
+              <template #icon><DeleteOutlined /></template>
+            </a-button>
+          </div>
         </a-form-item>
       </a-form>
+    </a-modal>
+
+    <a-modal
+      v-model:open="renameDivisionOpen"
+      title="Rename Division"
+      :confirm-loading="renamingDivision"
+      ok-text="Update"
+      @ok="submitRenameDivision"
+    >
+      <a-input
+        v-model:value="renameDivisionName"
+        :maxlength="191"
+        show-count
+        autofocus
+        @pressEnter="submitRenameDivision"
+      />
     </a-modal>
   </div>
 </template>
@@ -104,6 +151,12 @@
  * Shared management screen for the two small Sale metadata lists. Route meta
  * selects Zone/Area or Courier; both use the same backend normalization as the
  * inline CreatableSelect, so there is one source of truth.
+ *
+ * Divisions have no management page of their own -- they're managed right here,
+ * inline in the Zone/Area modal: the Division field is itself a CreatableSelect
+ * (type an existing name to select it, type a new one to create it, same
+ * behavior the Zone/Area name field already has), plus a small rename/delete
+ * pair of icons next to it for the currently-selected Division.
  */
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
@@ -112,6 +165,7 @@ import { useI18n } from 'vue-i18n';
 import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons-vue';
 import PageHeader from '../../components/PageHeader.vue';
 import DataTable from '../../components/DataTable.vue';
+import CreatableSelect from '../../components/CreatableSelect.vue';
 import { useCrudTable } from '../../composables/useCrudTable';
 import { useFormat } from '../../composables/useFormat';
 import { useAuthStore } from '../../stores/auth';
@@ -169,20 +223,67 @@ const rules = computed(() => ({
   ],
 }));
 
-// Zone/Area Division dropdown: auto-suggested from the name while typing, but a manual pick always wins and stops
-// further auto-suggestions from overwriting it (until the form is reset for a fresh create/edit).
-const divisions = ref([]);
-const divisionOptions = computed(() => divisions.value.map(d => ({ label: d.name, value: d.id })));
+// Zone/Area Division field: auto-suggested from the name while typing, but a manual pick always wins and stops
+// further auto-suggestions from overwriting it (until the form is reset for a fresh create/edit). It's also a
+// CreatableSelect (see template) so a Division can be created inline the same way a Zone/Area name can; the
+// rename/delete icons next to it operate on whichever Division is currently selected.
+const divisionOptions = ref([]); // [{value, label}] -- shape CreatableSelect expects/maintains
 const userTouchedDivision = ref(false);
 let suggestTimer = null;
 
 async function loadDivisions() {
-  if (divisions.value.length || !isZone.value) return;
+  if (divisionOptions.value.length || !isZone.value) return;
   try {
     const data = await http.get('sale_divisions');
-    divisions.value = data?.divisions || [];
+    divisionOptions.value = (data?.divisions || []).map(d => ({ value: d.id, label: d.name }));
   } catch (e) {
-    // Non-fatal: the Division dropdown just stays empty; the rest of the page still works.
+    // Non-fatal: the Division field just stays empty; the rest of the page still works.
+  }
+}
+
+const renameDivisionOpen = ref(false);
+const renamingDivision = ref(false);
+const renameDivisionName = ref('');
+
+function openRenameDivision() {
+  if (!form.division_id) return;
+  const current = divisionOptions.value.find(o => o.value === form.division_id);
+  renameDivisionName.value = current?.label || '';
+  renameDivisionOpen.value = true;
+}
+
+async function submitRenameDivision() {
+  const name = renameDivisionName.value.trim();
+  if (!name || !form.division_id || renamingDivision.value) return;
+
+  renamingDivision.value = true;
+  try {
+    const data = await http.put(`bd_divisions/${form.division_id}`, { name });
+    const updated = data?.division;
+    const entry = divisionOptions.value.find(o => o.value === form.division_id);
+    if (entry && updated) entry.label = updated.name;
+    renameDivisionOpen.value = false;
+    message.success(t('Successfully_Updated'));
+    await crud.fetchRows(); // other rows' Division column may show this same, now-renamed, Division
+  } catch (e) {
+    message.error(firstError(e));
+  } finally {
+    renamingDivision.value = false;
+  }
+}
+
+async function deleteDivision() {
+  if (!form.division_id) return;
+  const divisionId = form.division_id;
+  try {
+    await http.delete(`bd_divisions/${divisionId}`);
+    divisionOptions.value = divisionOptions.value.filter(o => o.value !== divisionId);
+    form.division_id = null;
+    userTouchedDivision.value = true;
+    message.success(t('Successfully_Deleted') || 'Deleted successfully.');
+    await crud.fetchRows();
+  } catch (e) {
+    message.error(firstError(e));
   }
 }
 

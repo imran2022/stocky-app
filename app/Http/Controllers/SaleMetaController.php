@@ -111,26 +111,12 @@ class SaleMetaController extends Controller
         return response()->json(['division_id' => $divisionId]);
     }
 
-    /** Paginated list for the Divisions management page (Divisions are no longer hardcoded/fixed). */
-    public function bdDivisions(Request $request)
-    {
-        $this->authorizeReadAccess($request);
-        $rows = $this->lookups->divisionsPaginated([
-            'search' => $request->input('search'),
-            'sort_field' => $request->input('SortField'),
-            'sort_type' => $request->input('SortType'),
-            'limit' => $request->input('limit'),
-        ]);
-
-        return response()->json([
-            'divisions' => $rows->items(),
-            'totalRows' => $rows->total(),
-        ]);
-    }
-
     public function storeDivision(Request $request)
     {
-        $this->authorizeUpdateAccess($request);
+        // Same permission scope as storeZone(): this is reached from the same inline CreatableSelect, now
+        // embedded in the Zone/Area modal (no separate Divisions page), so whoever can quick-add a Zone/Area
+        // can quick-add a Division the same way.
+        $this->authorizeCreateAccess($request);
         $division = $this->lookups->createDivision((string) $request->input('name', ''));
 
         return response()->json(['division' => $division->only(['id', 'name'])]);

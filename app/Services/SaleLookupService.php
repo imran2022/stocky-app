@@ -36,24 +36,6 @@ class SaleLookupService
         return BdDivision::orderBy('sort_order')->get(['id', 'name']);
     }
 
-    /** Paginated Division list for the Divisions management page (district/zone counts, search, sort). */
-    public function divisionsPaginated(array $filters = []): LengthAwarePaginator
-    {
-        $query = BdDivision::query()->withCount(['districts', 'zones']);
-
-        $search = trim((string) ($filters['search'] ?? ''));
-        if ($search !== '') {
-            $query->where('name', 'like', '%'.$search.'%');
-        }
-
-        $allowedSorts = ['id', 'name', 'sort_order', 'districts_count', 'zones_count', 'created_at', 'updated_at'];
-        $sortField = in_array($filters['sort_field'] ?? '', $allowedSorts, true) ? $filters['sort_field'] : 'sort_order';
-        $sortType = strtolower((string) ($filters['sort_type'] ?? 'asc')) === 'desc' ? 'desc' : 'asc';
-        $limit = max(1, min(100000, (int) ($filters['limit'] ?? 10)));
-
-        return $query->orderBy($sortField, $sortType)->orderBy('id')->paginate($limit);
-    }
-
     /** Divisions are plain reference data (no soft delete), unlike Zone/Courier -- a simple unique-name create. */
     public function createDivision(string $name): BdDivision
     {

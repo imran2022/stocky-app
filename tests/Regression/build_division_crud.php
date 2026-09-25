@@ -20,13 +20,13 @@ check('storeDivision: name saved as given', ($div['name'] ?? null) === $name, $b
 [$c, $b] = call(SaleMetaController::class, 'storeDivision', ['name' => $name], 'POST');
 check('storeDivision: duplicate name rejected (422)', $c == 422, "$c $b");
 
-// ---------------------------------------------------------------- list ----------------------------------------
-[$c, $b] = call(SaleMetaController::class, 'bdDivisions', ['limit' => 1000], 'GET');
-check('bdDivisions: 200', $c == 200, "$c $b");
+// ---------------------------------------------------------------- appears on the plain dropdown list -----------
+// GET sale_divisions is the one list endpoint that matters now -- it feeds the Zone/Area form's CreatableSelect
+// (create/rename/delete all happen inline there; there is no separate Divisions management page/list anymore).
+[$c, $b] = call(SaleMetaController::class, 'divisions', [], 'GET');
+check('sale_divisions (dropdown source): 200', $c == 200, "$c $b");
 $listed = json_decode($b, true)['divisions'] ?? [];
-check('bdDivisions: includes the new custom Division', in_array($name, array_column($listed, 'name'), true), $b);
-$seeded = array_filter($listed, fn ($d) => $d['name'] === 'Dhaka');
-check('bdDivisions: a seeded Division (Dhaka) reports its district count', (reset($seeded)['districts_count'] ?? 0) == 13, $b);
+check('sale_divisions: includes the new custom Division', in_array($name, array_column($listed, 'name'), true), $b);
 
 // ---------------------------------------------------------------- update --------------------------------------
 $division = BdDivision::where('name', $name)->firstOrFail();
