@@ -1,6 +1,29 @@
 # Latest Delivery Index
 
-## Current: Inventory Costing update 5 — Legacy Profit Report: completed-only, returns netted, base units, per-warehouse cost (2026-09-25)
+## Current: Sale Return pack/unit integrity (2026-09-25)
+
+A follow-up external review of update 5 found the Sale Return flow itself had two further,
+pre-existing bugs (not caused by update 5): `create_sell_return()` (the return-form prefill
+endpoint) never sent back a sale line's `product_pack_id`/`pack_multiplier`/`pack_name`, so the
+frontend's own `?? 1` fallback silently turned a multi-pack sale into a "return of 1 base unit" the
+moment it was returned — understating both the restocked quantity and (in Legacy mode) the reported
+COGS reversal by a full pack's worth every time; separately, a sale line with no explicit
+`sale_unit_id` had its resolved default unit discarded by an unconditional `$unit = null;`, repeated
+identically in `store()`/`update()`/`destroy()`/`delete_by_selection()` — the real failure mode was
+an uncaught FK `QueryException` (HTTP 500), not a silent skip. Both reproduced live and fixed with
+one new `App\Support\SaleReturnStock`: `resolveUnit()` keeps a resolved fallback instead of
+discarding it; `deriveSnapshot()` re-derives a return line's pack/unit **server-side** from the
+original sale detail (a browser-submitted `pack_multiplier`/`sale_unit_id` is never trusted for a
+return line again) and throws a clean, caught 422 when nothing resolvable exists; `baseQuantity()`/
+`applyStock()` (through the existing `StockMutator::lockOrCreate`) are the one stock-mutation
+implementation now used identically by all four call sites. Moving Average's own reversal
+(`MovementSource::saleReturns()`) reads the same persisted `sale_return_details` row, so it is fixed
+for free by the corrected data — no Costing-engine change was needed. No migration, no frontend
+change (the existing Vue form already round-trips whatever the prefill sends; the fix is entirely in
+what the backend sends/derives/trusts). Description: `CUSTOMIZATIONS.md` "Sale Return pack/unit
+integrity", checklist section 44, test `audit_fix_sale_return_pack_unit.php`.
+
+## Earlier: Inventory Costing update 5 — Legacy Profit Report: completed-only, returns netted, base units, per-warehouse cost (2026-09-25)
 
 An external code review of update 4 found the Legacy Profit Report had several further, pre-existing bugs (not
 caused by update 4): pending/draft sales counted as revenue, received sale returns never netted off, box/pack sales

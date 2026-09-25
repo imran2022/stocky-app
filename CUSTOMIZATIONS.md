@@ -5556,3 +5556,75 @@ automatically, accurate)"; new keys `Costing_legacy_warning`, `Costing_switch_to
 array), `resources/src/pages/settings/CostingSettings.vue`, `database/seeders/translations/en.php`,
 `tests/Regression/audit_fix_profit_report_legacy_correctness.php` (new),
 `tests/Regression/build_full_audit_5yr.php` (stale comment corrected). No migration.
+
+### Sale Return pack/unit integrity (2026-09-25)
+
+**Problem — found by a follow-up external review of update 5.** Two further, PRE-EXISTING defects in the Sale
+Return flow itself (neither caused by update 5), both confirmed live against a throw-away database:
+
+1. **Pack snapshot lost on return.** `SalesReturnController::create_sell_return()` — the endpoint that pre-fills
+   the return form — never sent back a sale line's `product_pack_id`/`pack_multiplier`/`pack_name` at all.
+   `resources/src/pages/sale_return/SaleReturnForm.vue` defaults the missing field (`pack_multiplier: d.pack_multiplier
+   ?? 1`), so a "2 packs of 6" sale silently became a "return of 1 base unit" the moment it was returned —
+   understating the restocked quantity AND (in Legacy mode) the reported COGS reversal by a full pack's worth.
+   Reproduced: sell 2 packs of 6 (12 base units) at cost 10, receive a return of 1 pack — stock was only credited
+   +1 (not +6) and the Legacy Profit Report showed a net cost of 110 instead of the correct 60.
+2. **Fallback sale unit discarded, then a hard crash instead of a clean rejection.** When a sale line had no
+   explicit `sale_unit_id`, the code resolved the product's default sale unit into `$unit` and then immediately
+   discarded it with an unconditional `$unit = null;` — repeated identically in `store()`, `update()`, `destroy()`
+   and `delete_by_selection()`. The prefill response then sent back `sale_unit_id: ''` (empty string, not null).
+   Submitting a return with that value did not silently skip stock restoration as expected — it threw an
+   **uncaught FK `QueryException` (HTTP 500)**, rolled back by the transaction (no partial data), but with a raw
+   SQL error reaching the client instead of a clean validation message.
+
+**Fix.** One new class, `App\Support\SaleReturnStock`, is now the single implementation of pack/unit resolution and
+stock mutation for every Sale Return code path:
+
+- `resolveUnit($saleUnitId, $productId)` — resolves the effective unit, keeping a resolved default-unit fallback
+  instead of discarding it (fixes defect 2's root cause).
+- `deriveSnapshot($saleId, $productId, $variantId)` — re-derives `sale_unit_id`/`product_pack_id`/`pack_multiplier`/
+  `pack_name` **server-side**, from the ORIGINAL sale detail (looked up by sale_id + product_id + product_variant_id,
+  the same key `edit_sell_return()` already used) — a browser-submitted value for any of these fields is never
+  trusted for a return line again (fixes defect 1: a resubmitted wrong `pack_multiplier` is simply ignored). Throws
+  `\InvalidArgumentException` (caught into a clean 422, the same pattern `SaleReturnLimits` already used) when the
+  product/variant isn't on the referenced sale, or when a non-service product has no unit that can be resolved for
+  it — never an uncaught `QueryException`/500 reaching the database (fixes defect 2's failure mode). A service
+  product (`type = 'is_service'`) legitimately has no unit; that is not an error.
+- `baseQuantity()` / `applyStock()` — one signed base-unit-quantity computation and one locked stock mutation
+  (`StockMutator::lockOrCreate`, replacing an unlocked `product_warehouse::first()` + conditional `save()` that
+  could silently no-op when no stock row existed yet for that product/warehouse), used identically by `store()`,
+  `update()`, `destroy()` and `delete_by_selection()`.
+- `store()`/`update()` now correct every submitted return line's pack/unit fields BEFORE calling
+  `SaleReturnLimits::assertValid()` — so that check's own base-quantity/charged-amount math (which reads
+  `sale_unit_id`/`pack_multiplier` straight off the `$details` it is given) becomes correct too, with **no change
+  needed inside `SaleReturnLimits` itself**.
+- `update()`'s old `no_unit !== 0 || is_service` gate is removed — it used to silently DROP an entire return line
+  (not just its stock mutation) whenever the line had no explicit `sale_unit_id`, even a perfectly valid return with
+  a resolvable default unit. Every line is now resolved-or-rejected upfront, so nothing is left to gate on.
+- `destroy()`/`update()`'s reversal loop no longer gates stock-reversal-and-removal on `sale_unit_id !== null`
+  either — a line with no explicit unit previously could never have its stock reversed NOR be removed from the
+  return via `update()` at all.
+
+**Moving Average is fixed for free.** `App\Services\Costing\MovementSource::saleReturns()` computes its own
+base-unit quantity for the ledger reversal directly from the persisted `sale_return_details` row
+(`sale_unit_id`/`pack_multiplier`), independent of the Legacy report. Once `store()`/`update()` persist the
+CORRECT values, the Moving Average ledger reversal is correct too — no Costing-engine code was touched.
+
+**Verification.** New `tests/Regression/audit_fix_sale_return_pack_unit.php` (9 scenarios: pack sale → partial pack
+return with exact stock/pack-snapshot/Legacy-COGS assertions; variant + pack return; null `sale_unit_id` with a
+valid product default resolving correctly; a completely unresolvable unit rejected with a clean 422 and NO
+header/detail/stock mutation left behind; a Moving Average control proving the ledger reversal is exact after the
+same fix) — all PASS. Re-ran the full existing battery afterwards with no regressions: both Profit Report
+correctness tests, the whole Costing suite (`unit_costing_engine`, `build_costing_scenario`,
+`build_costing_realworld`, `build_costing_stress`, `build_writeoff_expense`, `build_costing_settings_ui`,
+`audit_b4_profit_and_loss`), and — because `SalesReturnController` was rewritten — every existing regression test
+that exercises Sale Returns: `audit_b1_sale_return`, `audit_b2_stock_documents`, `audit_b5_money_stress`,
+`audit_b5_stock_stress`, `audit_b5_unit_conversion`, `audit_b5_variant_stress`, `build_d2_product_analytics`,
+`build_n1_product_variant_display_name`, and the full 5-year/800k-line `build_full_audit_5yr.php`.
+
+**Files touched:** `app/Support/SaleReturnStock.php` (new),
+`app/Http/Controllers/SalesReturnController.php` (`create_sell_return()`/`edit_sell_return()` prefill now carry the
+pack snapshot and a resolved unit; `store()`/`update()`/`destroy()`/`delete_by_selection()` rebuilt on
+`SaleReturnStock`), `tests/Regression/audit_fix_sale_return_pack_unit.php` (new). No migration, no frontend change
+(the existing Vue form already round-trips whatever the prefill sends — the fix is entirely in what the backend
+sends/derives/trusts).

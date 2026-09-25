@@ -2551,3 +2551,24 @@ This supplements the in-depth Build O1–O9 record appended to
       the report's end date can still move that sale's reported cost within the same report; a product/variant with
       adjustment history (not just purchases) can still shift with a later master-cost edit. Moving Average has
       neither limitation.
+
+## 44. Sale Return pack/unit integrity
+
+- [ ] Returning a "pack of N" sale (Multi-Pack Selling — `pack_multiplier`, independent of a unit's own
+      operator/pack conversion) restocks and reverses COGS at the FULL pack size, not 1 base unit — even when the
+      browser submits a wrong/default `pack_multiplier`.
+- [ ] The return-form prefill (`create_sell_return()`) now carries `product_pack_id`/`pack_multiplier`/`pack_name`
+      and a resolved (never blank) `sale_unit_id` for every line.
+- [ ] A sale line with no explicit `sale_unit_id` but a valid product default sale unit resolves and restocks
+      correctly on return — the unit is no longer discarded.
+- [ ] A return line whose unit truly cannot be resolved (no explicit unit AND no product default, non-service) is
+      rejected with a clean 422 — never an uncaught SQL error/500 — and leaves NO sale_return header, detail row or
+      stock mutation behind.
+- [ ] `store()`/`update()` never trust a browser-submitted `pack_multiplier`/`sale_unit_id`/`product_pack_id`/
+      `pack_name` for a return line — always re-derived from the original sale detail server-side.
+- [ ] Variant + pack return: the correct variant AND the correct pack multiplier apply together (checked
+      independently).
+- [ ] Moving Average's own ledger reversal (unaffected code) is now also correct, because it reads the same
+      corrected persisted `sale_return_details` row.
+- [ ] No migration, no frontend rebuild needed (backend-only fix; the existing form already round-trips whatever
+      the prefill sends).

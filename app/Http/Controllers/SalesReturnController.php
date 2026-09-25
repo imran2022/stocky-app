@@ -191,9 +191,33 @@ class SalesReturnController extends BaseController
 
         try {
         $createdReturn = \DB::transaction(function () use ($request) {
+            // Audit fix (Sale Return pack/unit integrity, commit 5): re-derive each line's
+            // sale_unit_id/product_pack_id/pack_multiplier/pack_name from the ORIGINAL sale detail
+            // (App\Support\SaleReturnStock::deriveSnapshot) BEFORE validating or persisting anything
+            // — a browser-submitted pack_multiplier is never trusted for a return line again. This
+            // also fixes SaleReturnLimits::assertValid()'s own base-quantity/charged-amount check
+            // below, since it reads sale_unit_id/pack_multiplier straight off the $details it is
+            // given; feeding it the corrected array makes that check correct too, with no change
+            // needed inside SaleReturnLimits itself. Throws \InvalidArgumentException (-> 422,
+            // already caught below) when a line's product/variant isn't on the sale, or when a
+            // non-service product has no unit that can be resolved for it — never an uncaught
+            // QueryException/500 from an invalid sale_unit_id reaching the database.
+            $details = (array) $request['details'];
+            $resolvedUnits = [];
+            foreach ($details as $i => $line) {
+                $snapshot = \App\Support\SaleReturnStock::deriveSnapshot(
+                    (int) $request->sale_id, (int) ($line['product_id'] ?? 0), $line['product_variant_id'] ?? null
+                );
+                $details[$i]['sale_unit_id'] = $snapshot['sale_unit_id'];
+                $details[$i]['product_pack_id'] = $snapshot['product_pack_id'];
+                $details[$i]['pack_multiplier'] = $snapshot['pack_multiplier'];
+                $details[$i]['pack_name'] = $snapshot['pack_name'];
+                $resolvedUnits[$i] = $snapshot['unit'];
+            }
+
             // Audit Batch 1 (S1): return must fit the original sale (qty, product, price, totals).
             \App\Support\SaleReturnLimits::assertValid(
-                $request->sale_id, $request->client_id, (array) $request['details'],
+                $request->sale_id, $request->client_id, $details,
                 $request->shipping ?? 0, $request->discount ?? 0, $request->GrandTotal ?? 0,
                 $request->TaxNet ?? 0, $request->tax_rate ?? 0
             );
@@ -225,16 +249,10 @@ class SalesReturnController extends BaseController
 
             $order->save();
 
-            $data = $request['details'];
             $persistedDetails = [];
-            foreach ($data as $key => $value) {
-                $unit = Unit::where('id', $value['sale_unit_id'])->first();
-
-                // Multi-Pack Selling: a selected pack multiplies the base-unit
-                // restock. Defaults to 1 so non-pack returns are unchanged.
-                $packMultiplier = isset($value['pack_multiplier']) && (float) $value['pack_multiplier'] > 0
-                    ? (float) $value['pack_multiplier'] : 1;
-                $packQty = $value['quantity'] * $packMultiplier;
+            foreach ($details as $key => $value) {
+                $unit = $resolvedUnits[$key];
+                $packMultiplier = (float) $value['pack_multiplier'];
 
                 $persistedDetails[$key] = SaleReturnDetails::create([
                     'sale_return_id' => $order->id,
@@ -249,47 +267,21 @@ class SalesReturnController extends BaseController
                     'product_variant_id' => $value['product_variant_id'],
                     'total' => $value['subtotal'],
                     'imei_number' => $value['imei_number'],
-                    'product_pack_id' => isset($value['product_pack_id']) && $value['product_pack_id'] ? (int) $value['product_pack_id'] : null,
+                    'product_pack_id' => $value['product_pack_id'],
                     'pack_multiplier' => $packMultiplier,
-                    'pack_name' => $value['pack_name'] ?? null,
+                    'pack_name' => $value['pack_name'],
                 ]);
 
+                // Audit fix (Sale Return pack/unit integrity, commit 5): one shared, locked
+                // stock mutation (App\Support\SaleReturnStock + StockMutator::lockOrCreate)
+                // instead of an unlocked product_warehouse::first() + conditional save that
+                // silently no-op'd whenever no row existed yet for this product/warehouse.
                 if ($order->statut == 'received') {
-                    if ($value['product_variant_id'] !== null) {
-                        $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $order->warehouse_id)
-                            ->where('product_id', $value['product_id'])
-                            ->where('product_variant_id', $value['product_variant_id'])
-                            ->first();
-
-                        if ($unit && $product_warehouse) {
-                            if ($unit->operator == '/') {
-                                $product_warehouse->qte += $packQty / $unit->operator_value;
-                            } else {
-                                $product_warehouse->qte += $packQty * $unit->operator_value;
-                            }
-
-                            $product_warehouse->save();
-                        }
-
-                    } else {
-                        $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                            ->where('warehouse_id', $order->warehouse_id)
-                            ->where('product_id', $value['product_id'])
-                            ->first();
-
-                        if ($unit && $product_warehouse) {
-                            if ($unit->operator == '/') {
-                                $product_warehouse->qte += $packQty / $unit->operator_value;
-                            } else {
-                                $product_warehouse->qte += $packQty * $unit->operator_value;
-                            }
-
-                            $product_warehouse->save();
-                        }
-                    }
+                    $baseQty = \App\Support\SaleReturnStock::baseQuantity($value['quantity'], $packMultiplier, $unit);
+                    \App\Support\SaleReturnStock::applyStock(
+                        $order->warehouse_id, $value['product_id'], $value['product_variant_id'], $baseQty
+                    );
                 }
-
             }
 
             // Pharmacy: credit batches when the return is received (mirror sale flow inversely).
@@ -298,7 +290,7 @@ class SalesReturnController extends BaseController
                 if ($batchService->isSupported()) {
                     $batchService->applyForSaleReturnWithAutoFallback(
                         $order,
-                        array_values($data),
+                        array_values($details),
                         $persistedDetails
                     );
                 }
@@ -308,7 +300,7 @@ class SalesReturnController extends BaseController
             if ($order->statut == 'received') {
                 $serialService = app(SerialNumberService::class);
                 if ($serialService->isSupported()) {
-                    $serialService->applyForSaleReturn($order, $data, $persistedDetails);
+                    $serialService->applyForSaleReturn($order, $details, $persistedDetails);
                 }
             }
 
@@ -346,9 +338,26 @@ class SalesReturnController extends BaseController
             if ($current_SaleReturn->deleted_at !== null) {
                 throw new \InvalidArgumentException('This sale return was deleted and can no longer be edited.');
             }
+            // Audit fix (Sale Return pack/unit integrity, commit 5): re-derive each line's
+            // sale_unit_id/product_pack_id/pack_multiplier/pack_name from the ORIGINAL sale detail
+            // (App\Support\SaleReturnStock::deriveSnapshot) before validating or persisting — same
+            // reasoning as store() above. Throws -> caught below -> 422.
+            $new_return_details = (array) $request['details'];
+            $resolvedUnits = [];
+            foreach ($new_return_details as $i => $line) {
+                $snapshot = \App\Support\SaleReturnStock::deriveSnapshot(
+                    (int) $current_SaleReturn->sale_id, (int) ($line['product_id'] ?? 0), $line['product_variant_id'] ?? null
+                );
+                $new_return_details[$i]['sale_unit_id'] = $snapshot['sale_unit_id'];
+                $new_return_details[$i]['product_pack_id'] = $snapshot['product_pack_id'];
+                $new_return_details[$i]['pack_multiplier'] = $snapshot['pack_multiplier'];
+                $new_return_details[$i]['pack_name'] = $snapshot['pack_name'];
+                $resolvedUnits[$i] = $snapshot['unit'];
+            }
+
             // Audit Batch 1 (S1): edited return must still fit the original sale.
             \App\Support\SaleReturnLimits::assertValid(
-                $current_SaleReturn->sale_id, $request->client_id ?? $current_SaleReturn->client_id, (array) $request['details'],
+                $current_SaleReturn->sale_id, $request->client_id ?? $current_SaleReturn->client_id, $new_return_details,
                 $request->shipping ?? 0, $request->discount ?? 0, $request->GrandTotal ?? 0,
                 $request->TaxNet ?? 0, $request->tax_rate ?? 0, (int) $current_SaleReturn->id
             );
@@ -384,7 +393,6 @@ class SalesReturnController extends BaseController
                 $this->authorizeForUser($request->user('api'), 'check_record', $current_SaleReturn);
             }
             $old_return_details = SaleReturnDetails::where('sale_return_id', $id)->get();
-            $new_return_details = $request['details'];
             $length = count($new_return_details);
 
             // Get Ids details
@@ -401,152 +409,80 @@ class SalesReturnController extends BaseController
             }
 
             // Init Data with old Parametre
+            //
+            // Audit fix (Sale Return pack/unit integrity, commit 5): the old code only reversed
+            // stock and only deleted a removed line when `sale_unit_id !== null` — a line with no
+            // explicit unit (a resolvable default, or a service) could never have its stock
+            // reversed NOR be removed from the return at all. Reversal/removal are now unconditional;
+            // App\Support\SaleReturnStock::resolveUnit() + baseQuantity() decide the actual stock
+            // delta (0 for a service), so there is nothing left to gate on sale_unit_id for.
             $old_products_id = [];
             foreach ($old_return_details as $key => $value) {
                 $old_products_id[] = $value->id;
 
-                // check if detail has sale_unit_id Or Null
-                if ($value['sale_unit_id'] !== null) {
-                    $unit = Unit::where('id', $value['sale_unit_id'])->first();
-                } else {
-                    $product_unit_sale_id = Product::with('unitSale')
-                        ->where('id', $value['product_id'])
-                        ->first();
+                $unit = \App\Support\SaleReturnStock::resolveUnit($value['sale_unit_id'], $value['product_id']);
+                $oldPackMultiplier = (float) ($value['pack_multiplier'] ?? 0) > 0 ? (float) $value['pack_multiplier'] : 1.0;
 
-                    if ($product_unit_sale_id['unitSale']) {
-                        $unit = Unit::where('id', $product_unit_sale_id['unitSale']->id)->first();
-                    }
-                    $unit = null;
-
+                if ($current_SaleReturn->statut == 'received') {
+                    $baseQty = \App\Support\SaleReturnStock::baseQuantity($value['quantity'], $oldPackMultiplier, $unit);
+                    \App\Support\SaleReturnStock::applyStock(
+                        $current_SaleReturn->warehouse_id, $value['product_id'], $value['product_variant_id'], -$baseQty
+                    );
                 }
 
-                // Multi-Pack Selling: reverse using the pack multiplier snapshot
-                // stored on the original return line (defaults to 1 for legacy rows).
-                $oldPackMultiplier = (float) ($value['pack_multiplier'] ?? 0) > 0 ? (float) $value['pack_multiplier'] : 1;
-                $oldPackQty = $value['quantity'] * $oldPackMultiplier;
-
-                if ($value['sale_unit_id'] !== null) {
-                    if ($current_SaleReturn->statut == 'received') {
-                        if ($value['product_variant_id'] !== null) {
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)->where('warehouse_id', $current_SaleReturn->warehouse_id)
-                                ->where('product_id', $value['product_id'])->where('product_variant_id', $value['product_variant_id'])
-                                ->first();
-
-                            if ($unit && $product_warehouse) {
-                                if ($unit->operator == '/') {
-                                    $product_warehouse->qte -= $oldPackQty / $unit->operator_value;
-                                } else {
-                                    $product_warehouse->qte -= $oldPackQty * $unit->operator_value;
-                                }
-                                $product_warehouse->save();
-                            }
-
-                        } else {
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)->where('warehouse_id', $current_SaleReturn->warehouse_id)
-                                ->where('product_id', $value['product_id'])
-                                ->first();
-
-                            if ($unit && $product_warehouse) {
-                                if ($unit->operator == '/') {
-                                    $product_warehouse->qte -= $oldPackQty / $unit->operator_value;
-                                } else {
-                                    $product_warehouse->qte -= $oldPackQty * $unit->operator_value;
-                                }
-                                $product_warehouse->save();
-                            }
-                        }
-                    }
-
-                    // Delete Detail
-                    if (! in_array($old_products_id[$key], $new_products_id)) {
-                        $SaleReturnDetails = SaleReturnDetails::findOrFail($value->id);
-                        $SaleReturnDetails->delete();
-                    }
+                // Delete Detail
+                if (! in_array($old_products_id[$key], $new_products_id)) {
+                    $SaleReturnDetails = SaleReturnDetails::findOrFail($value->id);
+                    $SaleReturnDetails->delete();
                 }
-
             }
 
             // Update Data with New request
+            //
+            // Audit fix (Sale Return pack/unit integrity, commit 5): the old `no_unit !== 0 ||
+            // is_service` gate silently DROPPED the entire detail row (not just its stock
+            // mutation) whenever a line had no explicit sale_unit_id — even a perfectly valid
+            // product return with a resolvable default unit. Every line is now resolved-or-rejected
+            // upfront (deriveSnapshot, above), so every line here is guaranteed to be either a
+            // real, resolvable product unit or a service — nothing left to gate on.
             $newPersistedDetails = [];
             foreach ($new_return_details as $key => $product_detail) {
+                $unit_prod = $resolvedUnits[$key];
+                $newPackMultiplier = (float) $product_detail['pack_multiplier'];
 
-                $get_type_product = Product::where('id', $product_detail['product_id'])->first()->type;
-
-                if ($product_detail['no_unit'] !== 0 || $get_type_product == 'is_service') {
-
-                    $unit_prod = Unit::where('id', $product_detail['sale_unit_id'])->first();
-
-                    // Multi-Pack Selling: apply the pack multiplier to the restock
-                    $newPackMultiplier = isset($product_detail['pack_multiplier']) && (float) $product_detail['pack_multiplier'] > 0
-                        ? (float) $product_detail['pack_multiplier'] : 1;
-                    $newPackQty = $product_detail['quantity'] * $newPackMultiplier;
-
-                    if ($request['statut'] == 'received') {
-
-                        if ($product_detail['product_variant_id'] !== null) {
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $request->warehouse_id)
-                                ->where('product_id', $product_detail['product_id'])
-                                ->where('product_variant_id', $product_detail['product_variant_id'])
-                                ->first();
-
-                            if ($unit_prod && $product_warehouse) {
-                                if ($unit_prod->operator == '/') {
-                                    $product_warehouse->qte += $newPackQty / $unit_prod->operator_value;
-                                } else {
-                                    $product_warehouse->qte += $newPackQty * $unit_prod->operator_value;
-                                }
-                                $product_warehouse->save();
-                            }
-
-                        } else {
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)
-                                ->where('warehouse_id', $request->warehouse_id)
-                                ->where('product_id', $product_detail['product_id'])
-                                ->first();
-
-                            if ($unit_prod && $product_warehouse) {
-                                if ($unit_prod->operator == '/') {
-                                    $product_warehouse->qte += $newPackQty / $unit_prod->operator_value;
-                                } else {
-                                    $product_warehouse->qte += $newPackQty * $unit_prod->operator_value;
-                                }
-                                $product_warehouse->save();
-                            }
-                        }
-                    }
-
-                    $orderDetails['sale_return_id'] = $id;
-                    $orderDetails['sale_unit_id'] = $product_detail['sale_unit_id'];
-                    $orderDetails['quantity'] = $product_detail['quantity'];
-                    $orderDetails['price'] = $product_detail['Unit_price'];
-                    $orderDetails['TaxNet'] = $product_detail['tax_percent'];
-                    $orderDetails['tax_method'] = $product_detail['tax_method'];
-                    $orderDetails['discount'] = $product_detail['discount'];
-                    $orderDetails['discount_method'] = $product_detail['discount_Method'];
-                    $orderDetails['product_id'] = $product_detail['product_id'];
-                    $orderDetails['product_variant_id'] = $product_detail['product_variant_id'];
-                    $orderDetails['total'] = $product_detail['subtotal'];
-                    $orderDetails['imei_number'] = $product_detail['imei_number'];
-                    $orderDetails['product_pack_id'] = isset($product_detail['product_pack_id']) && $product_detail['product_pack_id'] ? (int) $product_detail['product_pack_id'] : null;
-                    $orderDetails['pack_multiplier'] = $newPackMultiplier;
-                    $orderDetails['pack_name'] = $product_detail['pack_name'] ?? null;
-
-                    if (! in_array($product_detail['id'], $old_products_id)) {
-                        $persistedDetail = SaleReturnDetails::Create($orderDetails);
-                    } else {
-                        SaleReturnDetails::where('id', $product_detail['id'])->update($orderDetails);
-                        $persistedDetail = SaleReturnDetails::find($product_detail['id']);
-                    }
-                    $newPersistedDetails[$key] = $persistedDetail;
+                if ($request['statut'] == 'received') {
+                    $baseQty = \App\Support\SaleReturnStock::baseQuantity($product_detail['quantity'], $newPackMultiplier, $unit_prod);
+                    \App\Support\SaleReturnStock::applyStock(
+                        (int) $request->warehouse_id, $product_detail['product_id'], $product_detail['product_variant_id'], $baseQty
+                    );
                 }
 
+                $orderDetails['sale_return_id'] = $id;
+                $orderDetails['sale_unit_id'] = $product_detail['sale_unit_id'];
+                $orderDetails['quantity'] = $product_detail['quantity'];
+                $orderDetails['price'] = $product_detail['Unit_price'];
+                $orderDetails['TaxNet'] = $product_detail['tax_percent'];
+                $orderDetails['tax_method'] = $product_detail['tax_method'];
+                $orderDetails['discount'] = $product_detail['discount'];
+                $orderDetails['discount_method'] = $product_detail['discount_Method'];
+                $orderDetails['product_id'] = $product_detail['product_id'];
+                $orderDetails['product_variant_id'] = $product_detail['product_variant_id'];
+                $orderDetails['total'] = $product_detail['subtotal'];
+                $orderDetails['imei_number'] = $product_detail['imei_number'];
+                $orderDetails['product_pack_id'] = $product_detail['product_pack_id'];
+                $orderDetails['pack_multiplier'] = $newPackMultiplier;
+                $orderDetails['pack_name'] = $product_detail['pack_name'];
+
+                if (! in_array($product_detail['id'], $old_products_id)) {
+                    $persistedDetail = SaleReturnDetails::Create($orderDetails);
+                } else {
+                    SaleReturnDetails::where('id', $product_detail['id'])->update($orderDetails);
+                    $persistedDetail = SaleReturnDetails::find($product_detail['id']);
+                }
+                $newPersistedDetails[$key] = $persistedDetail;
             }
 
             // Pharmacy: re-apply batch credits now that SaleReturnDetails rows exist.
-            // Pair input rows with persisted details lockstep; rows skipped above (no_unit==0
-            // and not a service) leave gaps that would otherwise misalign indices when
-            // BatchService re-keys via collect()->values().
             if ($batchService->isSupported() && $request['statut'] == 'received') {
                 $alignedInput = [];
                 $alignedPersisted = [];
@@ -655,58 +591,18 @@ class SalesReturnController extends BaseController
                 }
             }
 
+            // Audit fix (Sale Return pack/unit integrity, commit 5): same resolver fix + shared
+            // locked stock mutation as store()/update() — see App\Support\SaleReturnStock.
             foreach ($old_return_details as $key => $value) {
-
-                // check if detail has sale_unit_id Or Null
-                if ($value['sale_unit_id'] !== null) {
-                    $unit = Unit::where('id', $value['sale_unit_id'])->first();
-                } else {
-                    $product_unit_sale_id = Product::with('unitSale')
-                        ->where('id', $value['product_id'])
-                        ->first();
-
-                    if ($product_unit_sale_id['unitSale']) {
-                        $unit = Unit::where('id', $product_unit_sale_id['unitSale']->id)->first();
-                    }
-                    $unit = null;
-
-                }
-
-                // Multi-Pack Selling: reverse using the pack multiplier snapshot.
-                $packMul = (float) ($value['pack_multiplier'] ?? 0) > 0 ? (float) $value['pack_multiplier'] : 1;
-                $packQty = $value['quantity'] * $packMul;
+                $unit = \App\Support\SaleReturnStock::resolveUnit($value['sale_unit_id'], $value['product_id']);
+                $packMul = (float) ($value['pack_multiplier'] ?? 0) > 0 ? (float) $value['pack_multiplier'] : 1.0;
 
                 if ($current_SaleReturn->statut == 'received') {
-                    if ($value['product_variant_id'] !== null) {
-                        $product_warehouse = product_warehouse::where('deleted_at', '=', null)->where('warehouse_id', $current_SaleReturn->warehouse_id)
-                            ->where('product_id', $value['product_id'])->where('product_variant_id', $value['product_variant_id'])
-                            ->first();
-
-                        if ($unit && $product_warehouse) {
-                            if ($unit->operator == '/') {
-                                $product_warehouse->qte -= $packQty / $unit->operator_value;
-                            } else {
-                                $product_warehouse->qte -= $packQty * $unit->operator_value;
-                            }
-                            $product_warehouse->save();
-                        }
-
-                    } else {
-                        $product_warehouse = product_warehouse::where('deleted_at', '=', null)->where('warehouse_id', $current_SaleReturn->warehouse_id)
-                            ->where('product_id', $value['product_id'])
-                            ->first();
-
-                        if ($unit && $product_warehouse) {
-                            if ($unit->operator == '/') {
-                                $product_warehouse->qte -= $packQty / $unit->operator_value;
-                            } else {
-                                $product_warehouse->qte -= $packQty * $unit->operator_value;
-                            }
-                            $product_warehouse->save();
-                        }
-                    }
+                    $baseQty = \App\Support\SaleReturnStock::baseQuantity($value['quantity'], $packMul, $unit);
+                    \App\Support\SaleReturnStock::applyStock(
+                        $current_SaleReturn->warehouse_id, $value['product_id'], $value['product_variant_id'], -$baseQty
+                    );
                 }
-
             }
 
             $current_SaleReturn->details()->delete();
@@ -794,58 +690,18 @@ class SalesReturnController extends BaseController
                     $batchService->reverseForSaleReturnDetails($old_return_details);
                 }
 
+                // Audit fix (Sale Return pack/unit integrity, commit 5): same resolver fix +
+                // shared locked stock mutation as store()/update()/destroy().
                 foreach ($old_return_details as $key => $value) {
-
-                    // check if detail has sale_unit_id Or Null
-                    if ($value['sale_unit_id'] !== null) {
-                        $unit = Unit::where('id', $value['sale_unit_id'])->first();
-                    } else {
-                        $product_unit_sale_id = Product::with('unitSale')
-                            ->where('id', $value['product_id'])
-                            ->first();
-
-                        if ($product_unit_sale_id['unitSale']) {
-                            $unit = Unit::where('id', $product_unit_sale_id['unitSale']->id)->first();
-                        }
-                        $unit = null;
-
-                    }
-
-                    // Multi-Pack Selling: reverse using the pack multiplier snapshot.
-                    $selPackMul = (float) ($value['pack_multiplier'] ?? 0) > 0 ? (float) $value['pack_multiplier'] : 1;
-                    $selPackQty = $value['quantity'] * $selPackMul;
+                    $unit = \App\Support\SaleReturnStock::resolveUnit($value['sale_unit_id'], $value['product_id']);
+                    $selPackMul = (float) ($value['pack_multiplier'] ?? 0) > 0 ? (float) $value['pack_multiplier'] : 1.0;
 
                     if ($current_SaleReturn->statut == 'received') {
-                        if ($value['product_variant_id'] !== null) {
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)->where('warehouse_id', $current_SaleReturn->warehouse_id)
-                                ->where('product_id', $value['product_id'])->where('product_variant_id', $value['product_variant_id'])
-                                ->first();
-
-                            if ($unit && $product_warehouse) {
-                                if ($unit->operator == '/') {
-                                    $product_warehouse->qte -= $selPackQty / $unit->operator_value;
-                                } else {
-                                    $product_warehouse->qte -= $selPackQty * $unit->operator_value;
-                                }
-                                $product_warehouse->save();
-                            }
-
-                        } else {
-                            $product_warehouse = product_warehouse::where('deleted_at', '=', null)->where('warehouse_id', $current_SaleReturn->warehouse_id)
-                                ->where('product_id', $value['product_id'])
-                                ->first();
-
-                            if ($unit && $product_warehouse) {
-                                if ($unit->operator == '/') {
-                                    $product_warehouse->qte -= $selPackQty / $unit->operator_value;
-                                } else {
-                                    $product_warehouse->qte -= $selPackQty * $unit->operator_value;
-                                }
-                                $product_warehouse->save();
-                            }
-                        }
+                        $baseQty = \App\Support\SaleReturnStock::baseQuantity($value['quantity'], $selPackMul, $unit);
+                        \App\Support\SaleReturnStock::applyStock(
+                            $current_SaleReturn->warehouse_id, $value['product_id'], $value['product_variant_id'], -$baseQty
+                        );
                     }
-
                 }
 
                 $current_SaleReturn->details()->delete();
@@ -1210,22 +1066,24 @@ class SalesReturnController extends BaseController
         $detail_id = 0;
         foreach ($SaleReturn['details'] as $detail) {
 
-            // check if detail has sale_unit_id Or Null
-            if ($detail->sale_unit_id !== null) {
-                $unit = Unit::where('id', $detail->sale_unit_id)->first();
-                $data['no_unit'] = 1;
-            } else {
-                $product_unit_sale_id = Product::with('unitSale')
-                    ->where('id', $detail->product_id)
-                    ->first();
+            // Audit fix (Sale Return pack/unit integrity, commit 5): the old code resolved the
+            // product's default sale unit into $unit for a null sale_unit_id line, then
+            // immediately discarded it with an unconditional `$unit = null;` — this always sent
+            // an empty sale_unit_id/unit label back to the form, even when a perfectly good
+            // default unit existed. \App\Support\SaleReturnStock::resolveUnit() keeps the
+            // fallback instead of throwing it away.
+            $unit = \App\Support\SaleReturnStock::resolveUnit($detail->sale_unit_id, $detail->product_id);
+            $data['no_unit'] = $detail->sale_unit_id !== null ? 1 : 0;
 
-                if ($product_unit_sale_id['unitSale']) {
-                    $unit = Unit::where('id', $product_unit_sale_id['unitSale']->id)->first();
-                }
-                $unit = null;
-
-                $data['no_unit'] = 0;
-            }
+            // Audit fix (Sale Return pack/unit integrity, commit 5): the pack snapshot
+            // (product_pack_id/pack_multiplier/pack_name) was never sent back here at all, so the
+            // frontend's `pack_multiplier ?? 1` fallback silently turned a multi-pack sale into a
+            // "return of 1 base unit" the moment it was returned. store()/update() no longer trust
+            // these fields anyway (they re-derive server-side — see SaleReturnStock), but sending
+            // them back lets the form DISPLAY the real pack the customer is returning.
+            $data['product_pack_id'] = $detail->product_pack_id;
+            $data['pack_multiplier'] = $detail->pack_multiplier !== null ? (float) $detail->pack_multiplier : 1.0;
+            $data['pack_name'] = $detail->pack_name;
 
             if ($detail->product_variant_id) {
                 $item_product = product_warehouse::where('product_id', $detail->product_id)
@@ -1493,22 +1351,24 @@ class SalesReturnController extends BaseController
         $detail_id = 0;
         foreach ($SaleReturn['details'] as $detail) {
 
-            // check if detail has sale_unit_id Or Null
-            if ($detail->sale_unit_id !== null) {
-                $unit = Unit::where('id', $detail->sale_unit_id)->first();
-                $data['no_unit'] = 1;
-            } else {
-                $product_unit_sale_id = Product::with('unitSale')
-                    ->where('id', $detail->product_id)
-                    ->first();
+            // Audit fix (Sale Return pack/unit integrity, commit 5): the old code resolved the
+            // product's default sale unit into $unit for a null sale_unit_id line, then
+            // immediately discarded it with an unconditional `$unit = null;` — this always sent
+            // an empty sale_unit_id/unit label back to the form, even when a perfectly good
+            // default unit existed. \App\Support\SaleReturnStock::resolveUnit() keeps the
+            // fallback instead of throwing it away.
+            $unit = \App\Support\SaleReturnStock::resolveUnit($detail->sale_unit_id, $detail->product_id);
+            $data['no_unit'] = $detail->sale_unit_id !== null ? 1 : 0;
 
-                if ($product_unit_sale_id['unitSale']) {
-                    $unit = Unit::where('id', $product_unit_sale_id['unitSale']->id)->first();
-                }
-                $unit = null;
-
-                $data['no_unit'] = 0;
-            }
+            // Audit fix (Sale Return pack/unit integrity, commit 5): the pack snapshot
+            // (product_pack_id/pack_multiplier/pack_name) was never sent back here at all, so the
+            // frontend's `pack_multiplier ?? 1` fallback silently turned a multi-pack sale into a
+            // "return of 1 base unit" the moment it was returned. store()/update() no longer trust
+            // these fields anyway (they re-derive server-side — see SaleReturnStock), but sending
+            // them back lets the form DISPLAY the real pack the customer is returning.
+            $data['product_pack_id'] = $detail->product_pack_id;
+            $data['pack_multiplier'] = $detail->pack_multiplier !== null ? (float) $detail->pack_multiplier : 1.0;
+            $data['pack_name'] = $detail->pack_name;
 
             if ($detail->product_variant_id) {
                 $item_product = product_warehouse::where('product_id', $detail->product_id)
