@@ -1,5 +1,14 @@
 # Latest Delivery Index
 
+## Current: Divisions management page — no longer hardcoded (2026-09-27)
+
+Follow-up to the Zone/Division feature below: Divisions were fixed reference data with no admin UI. New
+"Divisions / States" page (Sales menu) — create, rename, delete (blocked while a Zone/Area still uses it,
+same guard pattern as Zone/Area's own delete). Custom Divisions can be added and picked directly on the
+Zone/Area form (just no auto-suggest, since there's no district list behind a custom one). New:
+`GET/POST bd_divisions`, `PUT`/`DELETE bd_divisions/{division}`, `DivisionManager.vue`,
+`build_division_crud.php`. No migration. Description: `CUSTOMIZATIONS.md`, checklist section 51.
+
 ## Current: Zone/Area → Bangladesh Division linking (2026-09-27)
 
 New feature (not from the external audit), requested directly by the client: the Zone/Area list

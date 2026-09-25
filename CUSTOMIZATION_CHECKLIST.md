@@ -2651,3 +2651,15 @@ This supplements the in-depth Build O1–O9 record appended to
       no behavior change, verified by the existing Option B permission-contract regression test still passing.
 - [ ] No existing Sale-creation, Sale-edit, or Shipment workflow that reads the Zone/Area list changed in any
       way — Division is purely additional, read-only-from-their-perspective metadata on the Zone/Area itself.
+
+## 51. Divisions management page (no longer hardcoded)
+
+- [ ] Divisions can be created, renamed, and deleted from a new "Divisions / States" page (Sales menu) — no
+      longer a fixed, code-only 8-row list.
+- [ ] A Division still linked to any Zone/Area cannot be deleted — a clean 422, matching the Zone/Area delete
+      guard's pattern.
+- [ ] A newly-created custom Division can be picked directly on the Zone/Area form; it simply gets no
+      auto-suggested match (no districts behind it), which is expected, not a bug.
+- [ ] The existing 8 seeded Bangladesh Divisions are editable/deletable the same way as any custom one — nothing
+      is special-cased.
+- [ ] The Zone/Area form's Division dropdown (`GET sale_divisions`) is unaffected — still the plain full list.
