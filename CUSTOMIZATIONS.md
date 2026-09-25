@@ -5387,3 +5387,46 @@ build:admin`).
 `resources/src/pages/reports/ProfitAndLossReport.vue`, `resources/src/pages/dashboard/modern/sections/InsightsSection.vue`,
 `tests/Regression/build_writeoff_expense.php` (new), `tests/Regression/build_costing_large.php`,
 `tests/Regression/audit_b4_profit_and_loss.php`.
+
+### Inventory Costing — update 3 (2026-09-26): Costing Method setting in System Settings
+
+**Problem.** Switching between Legacy and Moving Average required SSH/CLI access to run
+`php artisan costing:rebuild --apply --enable`. The business owner has no CLI access.
+
+**Implementation.** A new, small controller — `App\Http\Controllers\Settings\CostingSettingsController` — wraps the
+exact same flow the console command already uses (`InventoryCostingService::syncProducts()` / `setMethod()` /
+`forgetMethodCache()`), exposed as `GET/POST costing_settings`. It adds **no new costing logic**: switching to
+Moving Average costs every non-service product into the ledger (same chunked loop as
+`CostingRebuild::costAll()`) only if the ledger is still empty or a `resync` flag is passed, then flips
+`costing_method`. A 3,000-product cap refuses the web request for very large catalogs and points to the CLI command
+instead (this business's real catalog is ~5 products, so this never bites in practice — it's a safety margin, not a
+real limitation here).
+
+**Frontend.** New self-contained `resources/src/pages/settings/CostingSettings.vue` (same pattern as the existing
+`FeatureToggles.vue` — its own GET/POST, not part of the giant `settings/{id}` form) registered as a new "Costing
+Method" item in System Settings' sidebar (`SystemSettings.vue`'s `embeddedPages` map + menu). Shows the current
+method, a Legacy/Moving Average dropdown, a products-costed counter, and an optional "re-cost every product now"
+checkbox.
+
+**Explicitly out of scope:** a real lot/batch-level FIFO costing engine. This only switches between the two costing
+methods that already exist.
+
+**Translation:** `Costing_method`, `Costing_method_help`, `Legacy_master_cost`, `Moving_average`,
+`Costing_tables_missing`, `Costing_products_costed` added to `database/seeders/translations/en.php` — reseed after
+deploying.
+
+**Tests:** `tests/Regression/build_costing_settings_ui.php` — GET reports tablesReady/method/stats correctly; POST
+actually flips `InventoryCostingService::isActive()` both ways (checked via direct service calls, not just the JSON
+response); switching to Moving Average with an empty ledger populates `inventory_cost_balances`; switching back to
+Legacy leaves the already-costed ledger in place; `resync=true` re-costs even with existing rows; an unknown method
+is rejected (422); the safety-cap guard's presence is checked in source (seeding 3,000+ real products to exercise it
+end-to-end would be disproportionate for this size of catalog). Re-ran `unit_costing_engine.php`,
+`build_costing_scenario.php`, `build_costing_realworld.php`, `build_writeoff_expense.php` and
+`audit_b4_profit_and_loss.php` against a freshly migrated DB afterwards — all pass, no regression.
+
+**Frontend:** `resources/src/pages/settings/CostingSettings.vue` (new), `resources/src/pages/settings/SystemSettings.vue`
+— rebuild required (`npm run build:admin`).
+
+**Files touched:** `app/Http/Controllers/Settings/CostingSettingsController.php` (new), `routes/api.php`,
+`resources/src/pages/settings/CostingSettings.vue` (new), `resources/src/pages/settings/SystemSettings.vue`,
+`database/seeders/translations/en.php`, `tests/Regression/build_costing_settings_ui.php` (new).

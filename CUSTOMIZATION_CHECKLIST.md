@@ -2498,4 +2498,18 @@ This supplements the in-depth Build O1–O9 record appended to
       segments still add up to 100% of the bar.
 - [ ] `php artisan db:seed --class=Database\Seeders\TranslationSeeder --force` after deploying (new
       `Inventory_writeoff` key) — otherwise the Classic report shows the raw key instead of "Inventory write-off".
+
+## 41. Costing Method setting in System Settings
+
+- [ ] System Settings sidebar shows a new "Costing Method" item (`CostingSettings.vue`).
+- [ ] If the Inventory Costing migration hasn't run yet, it shows an informational "not installed yet" state instead
+      of a broken control.
+- [ ] Switching the dropdown to "Moving Average" and clicking Save costs every product into the ledger (first time
+      only) and flips the method live — Dashboard/P&L/reports switch to ledger-based numbers on their next read, with
+      no page reload needed elsewhere.
+- [ ] Switching back to "Legacy" flips reports back to master cost; the already-built ledger is NOT deleted (switching
+      forward again doesn't re-cost from scratch).
+- [ ] "Re-cost every product now" checkbox forces a full re-sync even if the ledger already has rows.
+- [ ] `php artisan db:seed --class=Database\Seeders\TranslationSeeder --force` after deploying (6 new
+      `Costing_*` keys).
 - [ ] `npm run build:admin` after deploying (two Vue files changed).

@@ -1,5 +1,14 @@
 # Latest Delivery Index
 
+## Current: Inventory Costing update 3 — Costing Method setting in System Settings (2026-09-26)
+
+A "Costing Method" item in System Settings lets the business owner switch Legacy/Moving Average from the UI instead
+of the CLI (`costing:rebuild --apply --enable` under the hood, no new costing logic). Not a FIFO engine — only
+switches between the two existing methods. No migration. **Needs `npm run build:admin`** (1 new Vue file + 1
+changed) and `php artisan db:seed --class=Database\Seeders\TranslationSeeder --force` (6 new translation keys).
+Description: `CUSTOMIZATIONS.md` "Inventory Costing — update 3", checklist section 41, test
+`build_costing_settings_ui.php`.
+
 ## Current: Inventory Costing update 2 — Damage/Adjustment losses expensed (2026-09-26)
 
 Damage documents and Adjustment DECREASES now reduce reported profit (Profit & Loss, Dashboard, Today Summary) —

@@ -26,6 +26,9 @@ All hooks are marked with a comment containing `Audit Batch` / `Audit fix (Batch
 | `tests/Regression/unit_costing_engine.php`, `build_costing_scenario.php`, `build_costing_realworld.php`, `build_costing_stress.php`, `build_costing_large.php` | costing regression + large-data tests |
 | `app/Support/Reporting/InventoryWriteOffFigures.php` | Damage + Adjustment-decrease cost expensed in profit (master cost / legacy, or ledger cost when costing is on) |
 | `tests/Regression/build_writeoff_expense.php` | write-off regression test (both costing modes) |
+| `app/Http/Controllers/Settings/CostingSettingsController.php` | Costing Method settings endpoint (web wrapper around `costing:rebuild --apply --enable`, no new costing logic) |
+| `resources/src/pages/settings/CostingSettings.vue` | Costing Method System Settings UI (own GET/POST, same pattern as `FeatureToggles.vue`) |
+| `tests/Regression/build_costing_settings_ui.php` | Costing Method settings UI regression test |
 
 ## Vendor files that carry hooks (re-check after taking a new vendor version)
 
@@ -54,6 +57,9 @@ Size = lines added / removed against the pre-audit version.
 | `Http/Controllers/ReportController.php`, `DashboardController.php`, `TodaySummaryController.php` (Inventory write-off) | few lines each | Damage + Adjustment-decrease cost expensed in profit, via `App\Support\Reporting\InventoryWriteOffFigures` — NOT gated behind costing, applies always |
 | `resources/src/pages/reports/ProfitAndLossReport.vue`, `resources/src/pages/dashboard/modern/sections/InsightsSection.vue` (Inventory write-off) | small | new write-off row/segment (needs `npm run build:admin`) |
 | `database/seeders/translations/en.php` (Inventory write-off) | 1 line | new `Inventory_writeoff` key (needs re-seeding `TranslationSeeder`) |
+| `resources/src/pages/settings/SystemSettings.vue` (Costing Method) | few lines | new sidebar item + `embeddedPages`/`currentSection` entries for `CostingSettings.vue` |
+| `routes/api.php` (Costing Method) | 2 lines | `GET`/`POST costing_settings` |
+| `database/seeders/translations/en.php` (Costing Method) | 6 lines | new `Costing_*` keys (needs re-seeding `TranslationSeeder`) |
 | `Services/Custom/PurchaseOrderReceiptService.php`, `Support/UniqueRefGenerator.php` | small | GRN line checks, reference collision retry |
 | `routes/api.php` | -5 | dead routes and the public `products_clean_names` route removed |
 | `resources/src/pages/Dashboard.vue` (Batch 6) | ~+45 | hourly line/bars when `hourly` is present (needs `npm run build:admin`) |
