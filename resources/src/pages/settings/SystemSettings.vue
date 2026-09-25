@@ -42,6 +42,7 @@
             <a-menu-item-group :title="$t('System') || 'Workspace'">
               <a-menu-item key="dashboard"><AppstoreOutlined /> {{ $t('Dashboard') }}</a-menu-item>
               <a-menu-item key="modules"><AppstoreAddOutlined /> Modules</a-menu-item>
+              <a-menu-item key="costing"><DollarOutlined /> Costing Method</a-menu-item>
               <a-menu-item key="sidebar"><MenuOutlined /> Sidebar Menu</a-menu-item>
               <a-menu-item key="datatable"><TableOutlined /> DataTable</a-menu-item>
               <a-menu-item key="export"><ExportOutlined /> {{ $t('Export') }}</a-menu-item>
@@ -1015,7 +1016,7 @@ import {
   AppstoreOutlined, AppstoreAddOutlined, SafetyOutlined, CloudUploadOutlined, ToolOutlined,
   CalendarOutlined, SkinOutlined, MobileOutlined, TabletOutlined, MailOutlined, MessageOutlined,
   CreditCardOutlined, FormOutlined, DatabaseOutlined, LaptopOutlined,
-  MenuOutlined, ExperimentOutlined, TableOutlined, PrinterOutlined,
+  MenuOutlined, ExperimentOutlined, TableOutlined, PrinterOutlined, DollarOutlined,
 } from '@ant-design/icons-vue';
 import PageHeader from '../../components/PageHeader.vue';
 import { useUiStore } from '../../stores/ui';
@@ -1074,6 +1075,7 @@ const embeddedPages = {
   devices: lazySection(() => import('./LoginDevices.vue')),
   sidebar: lazySection(() => import('./SidebarMenuManager.vue')),
   modules: lazySection(() => import('./ModuleToggles.vue')),
+  costing: lazySection(() => import('./CostingSettings.vue')),
   invoice_pdf: lazySection(() => import('./InvoicePdfSettings.vue')),
   demo: lazySection(() => import('./DemoDataGenerator.vue')),
 };
@@ -1106,6 +1108,7 @@ const currentSection = computed(() => ({
   pharmacy: { title: 'Pharmacy', desc: 'Batch and expiry tracking for pharmacies.' },
   dashboard: { title: t('Dashboard'), desc: 'What the dashboard shows by default.' },
   modules: { title: 'Modules', desc: 'Enable or disable business modules — Hospital, Fleet, Projects, HRM and more — for all users.' },
+  costing: { title: 'Costing Method', desc: 'Choose how inventory cost, COGS and profit are calculated.' },
   sidebar: { title: 'Sidebar Menu', desc: 'Drag and drop to rearrange the navigation for all users.' },
   datatable: { title: 'DataTable', desc: 'How list tables look on this device: font, size, density and toolbar components.' },
   export: { title: t('Export'), desc: 'Defaults for PDF, Excel and print exports on list and report pages, for all users.' },
