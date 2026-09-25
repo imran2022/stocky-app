@@ -38,7 +38,7 @@ $nextDmg = (int) DB::table('damages')->max('id') + 1; $nextDmgD = (int) DB::tabl
 $nextTr = (int) DB::table('transfers')->max('id') + 1; $nextTrD = (int) DB::table('transfer_details')->max('id') + 1;
 
 $P = []; $PD = []; $SLINES = []; $SR = []; $SRD = []; $PR = []; $PRD = []; $AJ = []; $AJD = []; $DM = []; $DMD = []; $TR = []; $TRD = [];
-$expected = ['sale' => [], 'ret' => [], 'bal' => [], 'month' => [], 'snap' => 0.0];   // sale detail id => cogs ; per key final ; month => cogs ; value on 2029-12-31
+$expected = ['sale' => [], 'ret' => [], 'bal' => [], 'month' => [], 'snap' => 0.0, 'writeoff' => 0.0];   // sale detail id => cogs ; per key final ; month => cogs ; value on 2029-12-31 ; writeoff = damage + adjustment-decrease cost (adjustment-increase excluded, not income)
 $snapDate = '2029-12-31'; $snapValue = 0.0;
 $nowTs = now();
 
@@ -120,7 +120,7 @@ foreach ($pids as $idx => $pid) {
                     if ($e['add']) { $c = $master[$pid]; $s = &$st[$w];
                         if ($s['q'] <= 0) { $nq = $s['q'] + $e['q']; if ($nq > 0) { $s['avg'] = $c; } elseif ($s['avg'] <= 0) { $s['avg'] = $c; } $s['q'] = $nq; }
                         else { $s['avg'] = ($s['q'] * $s['avg'] + $e['q'] * $c) / ($s['q'] + $e['q']); $s['q'] += $e['q']; } unset($s);
-                    } else { $st[$w]['q'] -= $e['q']; }
+                    } else { $expected['writeoff'] += $st[$w]['avg'] * $e['q']; $st[$w]['q'] -= $e['q']; }
                     break;
                 case 'sret':
                     $cand = array_values(array_filter($soldLines[$w] ?? [], fn ($l) => $l[4] < $l[1]));
@@ -149,6 +149,7 @@ foreach ($pids as $idx => $pid) {
                     break;
                 case 'damage':
                     if ($st[$w]['q'] < $e['q']) { break; }
+                    $expected['writeoff'] += $st[$w]['avg'] * $e['q'];
                     $st[$w]['q'] -= $e['q']; $did2 = $nextDmg++;
                     $DM[] = ['id' => $did2, 'user_id' => 2, 'date' => $date, 'Ref' => 'LG-D-'.$did2, 'warehouse_id' => $w, 'items' => 1, 'time' => '12:00:00', 'created_at' => "$date 12:00:00", 'updated_at' => "$date 12:00:00"];
                     $DMD[] = ['id' => $nextDmgD++, 'product_id' => $pid, 'damage_id' => $did2, 'quantity' => $e['q'], 'created_at' => "$date 12:00:00", 'updated_at' => "$date 12:00:00"];
@@ -230,7 +231,8 @@ check(sprintf('P&L 2-year COGS = independent books %.2f', $expCogs), $near($pl['
 foreach ($expected['month'] as $m => $cg) { if (! in_array($m, ['2029-03', '2029-11', '2030-06', '2030-12'], true)) { continue; }
     $r = json_decode(app(RC::class)->ProfitAndLoss($mkReq(['from' => "$m-01", 'to' => date('Y-m-t', strtotime("$m-01"))]))->getContent(), true)['data'];
     check("P&L $m COGS = independent books ".round($cg, 2), $near($r['product_cost_fifo'], $cg, 0.05), (string) $r['product_cost_fifo']); }
-check('profit = revenue - COGS - expenses (+service) on the same data', $near($pl['profit_fifo'], $pl['total_revenue'] - $pl['product_cost_fifo'] - $pl['expenses_sum'] + $pl['service_profit'], 0.05));
+check('inventory write-off (damage + adjustment decreases) == independent books', $near($pl['inventory_writeoff_sum'], $expected['writeoff'], 0.5), json_encode([$pl['inventory_writeoff_sum'], $expected['writeoff']]));
+check('profit = revenue - COGS - expenses - writeoff (+service) on the same data', $near($pl['profit_fifo'], $pl['total_revenue'] - $pl['product_cost_fifo'] - $pl['expenses_sum'] - $pl['inventory_writeoff_sum'] + $pl['service_profit'], 0.05));
 printf("      (legacy P&L would have said COGS %.2f; the books say %.2f)\n", $plLegacy['product_cost_fifo'], $expCogs);
 
 [$prResp, $tProfit] = $time('active Profit report by product', fn () => json_decode(app(PRC::class)->index($mkReq(['from' => $from, 'to' => $to, 'limit' => -1]), 'product')->getContent(), true));

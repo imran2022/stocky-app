@@ -18,8 +18,8 @@ check('shipping charged 10', $near($d['sales_shipping_sum'], 10), $d['sales_ship
 check('net sales 900', $near($d['sales_net_sum'], 900), $d['sales_net_sum']);
 check('sale returns 100 (pending 77 excluded)', $near($d['returns_sales_sum'], 100) && $d['returns_sales_count'] == 1, $d['returns_sales_sum']);
 check('revenue = 900 - 100 = 800', $near($d['total_revenue'], 800), $d['total_revenue']);
-check('profit = revenue - COGS - expenses + service profit (FIFO)', $near($d['profit_fifo'], 800 - $d['product_cost_fifo'] - $d['expenses_sum'] + $d['service_profit']), json_encode([$d['profit_fifo'], $d['product_cost_fifo']]));
-check('profit = revenue - COGS - expenses + service profit (average cost)', $near($d['profit_average_cost'], 800 - $d['averagecost'] - $d['expenses_sum'] + $d['service_profit']));
+check('profit = revenue - COGS - expenses - writeoff + service profit (FIFO)', $near($d['profit_fifo'], 800 - $d['product_cost_fifo'] - $d['expenses_sum'] - $d['inventory_writeoff_sum'] + $d['service_profit']), json_encode([$d['profit_fifo'], $d['product_cost_fifo']]));
+check('profit = revenue - COGS - expenses - writeoff + service profit (average cost)', $near($d['profit_average_cost'], 800 - $d['averagecost'] - $d['expenses_sum'] - $d['inventory_writeoff_sum'] + $d['service_profit']));
 check('UI components reconcile: gross - returns - tax - shipping (net of returns) = revenue',
     $near($d['sales_sum'] - $d['returns_sales_sum'] - $d['tax_net_of_returns'] - $d['shipping_net_of_returns'], $d['total_revenue']));
 finish('Audit B4 profit and loss');
