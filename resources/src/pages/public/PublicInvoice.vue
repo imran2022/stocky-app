@@ -458,9 +458,23 @@ tbody td.col-num {
   .bill-to, .items, .totals, .download-bar { padding-left: 20px; padding-right: 20px; }
 }
 
+/* Chrome's print-dialog "Margins: Default" preset comes from this @page
+   rule, not from the page's own CSS padding — with no @page rule at all,
+   "Default" fell back to the browser's own ~0.4in page margin, which
+   squeezed the fixed-width header/background into a smaller print area
+   and visibly cropped it. Setting it to 0 here makes "Default" behave
+   exactly like the "Minimum" option already did (this page has its own
+   internal padding on every section, so it doesn't need the browser's
+   margin for spacing). */
+@page {
+  size: auto;
+  margin: 0;
+}
+
 @media print {
-  .invoice-page { background: #fff; padding: 0; }
-  .sheet { box-shadow: none; border-radius: 0; }
+  .invoice-page { background: #fff; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .sheet { box-shadow: none; border-radius: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .sheet-header, .status-pill { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .download-bar { display: none; }
 }
 </style>
