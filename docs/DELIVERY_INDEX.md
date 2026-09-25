@@ -1,5 +1,21 @@
 # Latest Delivery Index
 
+## Current: Inventory Costing update 5 — Legacy Profit Report: completed-only, returns netted, base units, per-warehouse cost (2026-09-25)
+
+An external code review of update 4 found the Legacy Profit Report had several further, pre-existing bugs (not
+caused by update 4): pending/draft sales counted as revenue, received sale returns never netted off, box/pack sales
+undercosted (raw sale-unit quantity instead of base units), and — after update 4's fix — the new historical average
+blending different warehouses' costs into one number. All four reproduced live and fixed: new
+`App\Support\Reporting\LegacyProfitLines` (completed sales + received returns, base-unit quantities, mirrors
+`CostingReader::profitLinesTemp()`); `HistoricalCostAtDate` is now warehouse-keyed. Two remaining Legacy limitations
+are deliberately NOT engineered away and are now documented + surfaced in the UI: one flat report-window average
+(not true transaction-time cost) and adjustment history still valued at today's master cost. Legacy is relabeled
+"Legacy / Estimated Cost" with an on-screen warning and a confirm-before-switch-back dialog.
+**Needs `npm run build:admin`** (`CostingSettings.vue` changed) and
+`php artisan db:seed --class=Database\Seeders\TranslationSeeder --force` (reworded + 3 new translation keys). No
+migration. Description: `CUSTOMIZATIONS.md` "Inventory Costing — update 5", checklist section 43, test
+`audit_fix_profit_report_legacy_correctness.php`.
+
 ## Current: Inventory Costing update 4 — Profit Report legacy COGS is now historical (2026-09-25)
 
 Legacy-mode Profit Report used to value every sale line at TODAY's master/variant cost instead of the cost that was

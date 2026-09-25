@@ -5486,3 +5486,73 @@ instead of a technical spec (`Costing_method`, `Costing_method_help`, `Legacy_ma
 `Costing_tables_missing`, `Costing_products_costed` in `database/seeders/translations/en.php` — only the *values*
 changed, the keys are unchanged so nothing else needs updating). Reseed after deploying
 (`php artisan db:seed --class=Database\Seeders\TranslationSeeder --force`).
+
+### Inventory Costing — update 5 (2026-09-25): Legacy Profit Report — completed-only, returns netted, base units, per-warehouse cost
+
+**Problem — found by an external code review of update 4.** Update 4 fixed ONE bug (cost anchored to a date instead
+of today), but the Legacy branch of `ProfitReportController` had several other, independent, PRE-EXISTING defects,
+none introduced by update 4, all confirmed live against a throw-away database before being fixed here:
+
+1. No `sales.statut = 'completed'` filter — a **pending/draft sale was counted as realized revenue and profit**.
+2. No sale-return handling at all — a **received sale return was never netted off** revenue/quantity/cost.
+3. Cost was `quantity * unit_cost` using the raw SALE-unit quantity (e.g. "2 boxes"), not the base-unit quantity — a
+   **box/pack sale understated COGS** by the pack/unit conversion factor (reproduced: a 2-box sale of a 12-per-box
+   product costed as 2 base units instead of 24).
+4. The date-anchored average cost (update 4) was blended across ALL allowed warehouses when no single warehouse was
+   selected — **"Profit by Warehouse" applied the same blended cost to every warehouse row**, even when each
+   warehouse's actual purchase cost was different.
+
+All four were reproduced against a live disposable MySQL database (not just read as code) — see
+`PROFIT_REPORT_REVIEW_RESPONSE_2026-09-25.md` for exact reproduction steps/numbers, shared with the owner.
+
+**Fix.**
+- New `App\Support\Reporting\LegacyProfitLines` — one normalized set of legacy profit lines (completed sales UNION
+  received sale returns, returns negated), with quantity converted to BASE units via `UnitQuantityResolver` using the
+  exact same math `App\Traits\CalculatesCogsAndAverageCost::cogsSoldQty()`/`cogsReturnedQty()` already use for the
+  Profit & Loss report — materialized once per request into an indexed temp table, same pattern as
+  `CostingReader::profitLinesTemp()` (the Moving Average branch).
+- `App\Support\Reporting\HistoricalCostAtDate` now groups and outputs `warehouse_id` as part of the key (was
+  product/variant only), so each warehouse gets its own average cost, never a blended one; also now takes an
+  optional product-id list so it only aggregates history for products actually sold/returned in the report window
+  (performance — the previous version scanned every product with any purchase/adjustment history at all, flagged as
+  a real concern by the review, measured in `build_full_audit_5yr.php`'s timing table).
+- `ProfitReportController` now builds its per-dimension query from `LegacyProfitLines` (legacy) or
+  `CostingReader::profitLinesTemp()` (Moving Average) — the SAME dimension/label/join logic now serves both costing
+  modes (previously duplicated), reading `cost = base_quantity * COALESCE(historical_avg_cost, variant.cost,
+  product.cost, 0)` joined on product_id **+ warehouse_id** + a null-safe variant match.
+
+**Explicitly NOT fixed — documented, permanent Legacy limitations, not further engineering:**
+- **One report-window average, not transaction-time cost.** A purchase recorded AFTER a sale, but still before the
+  report's `to` date, can still move that earlier sale's reported cost within the SAME report. Building true
+  transaction-time costing into Legacy would duplicate the Moving Average ledger — use Moving Average instead if this
+  matters.
+- **Adjustment history has no stamped cost.** A purchase's cost is a value stored on the purchase line itself
+  (stable forever); an old ADJUSTMENT addition has no equivalent — it is still valued at the CURRENT
+  `product(_variant).cost` when the average is computed, so a key with adjustment history in its mix can still shift
+  with a later master-cost edit. Moving Average's ledger stamps a cost once, going forward, and does not have this
+  gap for new documents.
+- Legacy is Legacy — for exact, reliable COGS/inventory value/historical profitability, Moving Average is the
+  authoritative method. Legacy is now labeled "Legacy / Estimated Cost" in System Settings, with an on-screen warning
+  when it's selected, and a confirmation prompt before switching FROM Moving Average back TO Legacy.
+
+**Verification.** `tests/Regression/audit_fix_profit_report_legacy_cost.php` (update 4's test) still passes unchanged
+— its scenarios use the default unit (1:1 base-quantity conversion), so nothing in it depended on the bugs above.
+New checks reproduce all four defects fixed above (before: bug present; after: fixed) plus the two documented
+limitations (before/after: still present, by design) — see `tests/Regression/audit_fix_profit_report_legacy_correctness.php`.
+Re-ran `unit_costing_engine.php`, `build_costing_scenario.php`, `build_costing_realworld.php`,
+`build_writeoff_expense.php`, `build_costing_settings_ui.php`, `audit_b4_profit_and_loss.php` and the full 5-year/
+800k-line `build_full_audit_5yr.php` afterwards — all pass, no regression to Moving Average or any other report.
+
+**Frontend:** `resources/src/pages/settings/CostingSettings.vue` — new warning banner when Legacy is selected, and a
+confirmation dialog before switching from Moving Average to Legacy. **Needs `npm run build:admin`.**
+
+**Translation:** `Legacy_master_cost` reworded to "Legacy / Estimated Cost"; `Moving_average` now says "(tracked
+automatically, accurate)"; new keys `Costing_legacy_warning`, `Costing_switch_to_legacy_confirm_title`,
+`Costing_switch_to_legacy_confirm_body` — reseed after deploying.
+
+**Files touched:** `app/Support/Reporting/LegacyProfitLines.php` (new),
+`app/Support/Reporting/HistoricalCostAtDate.php` (now warehouse-keyed + product-id-scoped),
+`app/Http/Controllers/ProfitReportController.php` (legacy branch rebuilt on `LegacyProfitLines`, unified dimension
+array), `resources/src/pages/settings/CostingSettings.vue`, `database/seeders/translations/en.php`,
+`tests/Regression/audit_fix_profit_report_legacy_correctness.php` (new),
+`tests/Regression/build_full_audit_5yr.php` (stale comment corrected). No migration.

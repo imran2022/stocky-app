@@ -2528,3 +2528,26 @@ This supplements the in-depth Build O1–O9 record appended to
       costed counter) now reads as plain shop-owner language — re-seed translations
       (`php artisan db:seed --class=Database\Seeders\TranslationSeeder --force`) so the new wording shows up; the
       translation KEYS did not change, so nothing else needs updating.
+
+## 43. Legacy Profit Report: completed-only, returns netted, base units, per-warehouse cost
+
+- [ ] A `pending`/draft sale does NOT appear in the Legacy Profit Report (any dimension).
+- [ ] A `received` sale return reduces revenue, quantity AND cost for that product/dimension; a `pending` return does
+      not (until received).
+- [ ] Selling a "box of N" (a unit with an operator/pack-multiplier conversion) costs the FULL base-unit quantity,
+      not the raw sale-unit count.
+- [ ] Two warehouses with different purchase costs for the same product each show THEIR OWN cost in "Profit by
+      Warehouse" — no more blended average across warehouses.
+- [ ] Every dimension (product/category/unit/customer/date/warehouse) still reconciles rows-to-KPI after all of the
+      above.
+- [ ] Moving Average mode is completely unaffected (same `CostingReader::profitLinesTemp()` as before).
+- [ ] Search and pagination still work and do not change KPI/chart totals.
+- [ ] System Settings → Costing Method: option now reads "Legacy / Estimated Cost"; selecting Legacy shows an
+      on-screen warning; switching FROM Moving Average TO Legacy asks for confirmation first.
+- [ ] `npm run build:admin` after deploying (`CostingSettings.vue` changed).
+- [ ] `php artisan db:seed --class=Database\Seeders\TranslationSeeder --force` after deploying (reworded + 3 new
+      `Costing_*` keys).
+- [ ] Documented, NOT fixed (by design — ask before "fixing" further): a purchase recorded after a sale but before
+      the report's end date can still move that sale's reported cost within the same report; a product/variant with
+      adjustment history (not just purchases) can still shift with a later master-cost edit. Moving Average has
+      neither limitation.
