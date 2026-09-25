@@ -41,6 +41,10 @@ All hooks are marked with a comment containing `Audit Batch` / `Audit fix (Batch
 | `tests/Regression/audit_fix_mf03_damage_validation.php` | MF-03: Damage quantity validation + authoritative availability check regression test |
 | `tests/Regression/audit_fix_mf07_sale_null_unit_reversal.php` | MF-07: SalesController legacy null-unit stock reversal regression test |
 | `tests/Regression/audit_fix_mf14_writeoff_historical_cost.php` | MF-14: write-off historical-cost regression test |
+| `database/migrations/2026_09_27_000001_create_bd_geography_and_zone_division_link.php` | Bangladesh Divisions/Districts reference tables (seeded), `sale_zones.division_id`, one-time backfill (additive, idempotent) |
+| `app/Models/BdDivision.php`, `app/Models/BdDistrict.php` | Bangladesh geography reference-data models |
+| `app/Support/BdDistrictMatcher.php` | exact, alias-aware Zone/Area name → Division id resolver (never fuzzy; `null` on no match) |
+| `tests/Regression/build_zone_division_linking.php` | Zone/Area → Division linking regression test (suggest, create/update auto-resolve vs explicit choice, delete guard) |
 
 ## Vendor files that carry hooks (re-check after taking a new vendor version)
 

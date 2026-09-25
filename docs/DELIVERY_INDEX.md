@@ -1,5 +1,30 @@
 # Latest Delivery Index
 
+## Current: Zone/Area → Bangladesh Division linking (2026-09-27)
+
+New feature (not from the external audit), requested directly by the client: the Zone/Area list
+(`sale_zones`) can now optionally be linked to one of Bangladesh's 8 Divisions, auto-detected from the
+Zone's name against a seeded 64-district reference table (with common alternate spellings as aliases) but
+always overridable — never a silent guess — plus a new "delete a Zone/Area once nothing uses it" capability
+that didn't exist before. Groundwork for future Division-wise performance/reporting.
+
+- New reference tables `bd_divisions` (8 rows) / `bd_districts` (64 rows, with `aliases`), seeded and
+  idempotent in `database/migrations/2026_09_27_000001_create_bd_geography_and_zone_division_link.php`.
+- New nullable `sale_zones.division_id`, backfilled for every pre-existing zone whose name exactly matches a
+  known district/alias (case/punctuation-insensitive); left `NULL` on no match.
+- `GET sale_divisions`, `GET sale_zones/suggest_division`, `DELETE sale_zones/{zone}` — new endpoints.
+- The Zone/Area management page (`SaleLookupManager.vue`) gained a Division column, an editable
+  Division dropdown (live-suggested while typing, always human-overridable, both at creation and on edit),
+  and a delete button (disabled with a tooltip while the zone still has linked sales).
+- The Sale form itself is unchanged — still only picks a Zone; Division is always derived server-side, never
+  a separate field there. `SaleCourier` (the sibling lookup sharing the same service) is unaffected.
+
+No migration risk (additive, nullable, idempotent), no change to any existing Sale/Shipment workflow's
+behavior. Full regression suite re-run clean; only the same pre-existing, unrelated test-data-drift failures
+remain (see `AUDIT_MERGE_GUIDE.md`/test comments — not caused by this batch). Description:
+`CUSTOMIZATIONS.md` ("Zone/Area → Bangladesh Division linking"), checklist section 50, new test
+`tests/Regression/build_zone_division_linking.php`.
+
 ## Current: External "Must-Fix" audit — Tier 1 (MF-05, MF-03, MF-07, MF-14) + costing-parity fixes (2026-09-25)
 
 A separately-supplied external audit document (`STOCKY_MUST_FIX_MAJOR_ISSUES_AUDIT_2026-09-25.md`, 16 findings

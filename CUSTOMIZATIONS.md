@@ -5770,3 +5770,67 @@ master cost; Adjustment-decrease priced consistently with Damage). Also updated
 only ever coincidentally right because the test lacked purchase history; it does have a same-day purchase at
 cost 120, so under the fix the correct historical-average basis is 120 — expected figure and comment updated
 (the Moving Average half of that test is untouched). No migration, no frontend change.
+
+### Zone/Area → Bangladesh Division linking (2026-09-27)
+
+**Why.** Imran's Zone/Area list (`sale_zones`) is free text with no geography behind it, so there was no way to
+group sales by Division/State for reporting. He wants each Zone/Area optionally linked to one of Bangladesh's 8
+Divisions, auto-detected from the Zone's name (e.g. a zone named "Gazipur" is under Dhaka Division) but always
+overridable by a human — never a silent, possibly-wrong guess — and a Zone/Area should be deletable once nothing
+still uses it (no delete existed before).
+
+**Schema** — migration `database/migrations/2026_09_27_000001_create_bd_geography_and_zone_division_link.php`
+(idempotent — `Schema::hasTable`/`hasColumn` guarded, safe to run twice):
+- New reference tables `bd_divisions` (id, name unique, sort_order) and `bd_districts` (id, `division_id` FK
+  cascadeOnDelete, name unique, `aliases` JSON nullable) — seeded in the migration itself with Bangladesh's real
+  8 Divisions / 64 Districts (verified against Wikipedia, 2026-09-25), including known alternate spellings as
+  aliases (Bogra/Bogura, Jessore/Jashore, Chittagong/Chattogram, Comilla/Cumilla, Cox's Bazar variants, etc.).
+- New column `sale_zones.division_id` — nullable FK to `bd_divisions`, `nullOnDelete()`. A Zone/Area is not
+  always a real district (custom delivery zones, city sub-areas), so this is never a required field.
+- A one-time backfill in the same migration: every EXISTING `sale_zones` row is matched (exact, normalized,
+  case/punctuation-insensitive) against the district+alias list and linked when it matches — left `NULL`,
+  never guessed, when nothing matches.
+
+**Backend:**
+- `app/Models/BdDivision.php`, `app/Models/BdDistrict.php` — new, trivial reference-data models (`districts()`/
+  `zones()` on Division; `division()` on District).
+- `app/Support/BdDistrictMatcher.php` — new. Resolves a free-text Zone/Area name to a Division id by exact match
+  (never fuzzy/"contains") against every district's canonical name and its aliases, normalized
+  (lower-cased, non-alphanumeric stripped). Returns `null` on no match — a human always makes the final call.
+  Cached forever (`bd_district_matcher_map`), invalidated via `forgetCache()`.
+- `app/Models/SaleZone.php` — `division_id` added to `$fillable`; new `division()` `belongsTo(BdDivision)`.
+- `app/Services/SaleLookupService.php` — `zones()` now eager-loads `division`; new `divisions()` (the 8-row
+  list for the dropdown) and `suggestDivisionId()` (live-suggest while typing). `createZone()`/`updateZone()`
+  gained a `bool $divisionProvided` + `?int $divisionId` pair: when the caller explicitly chose (or explicitly
+  cleared) a Division, that choice always wins; otherwise the Division is (re-)resolved from the name via
+  `BdDistrictMatcher`. This applies symmetrically to both create AND edit, per the client's explicit answer
+  ("auto-detect... both at creation and edit time; a human can always override or clear it"). The shared
+  private `createOrRestore()`/`update()` helpers gained an optional `array $extra` merged into the
+  create/update payload, threaded through so `SaleCourier` (which never passes `$extra`) is unaffected.
+  New `destroyZone()`: refuses (via `ValidationException`) to delete a Zone/Area that still has any Sale
+  referencing it; otherwise deletes it (soft delete, same as the rest of this table).
+- `app/Http/Controllers/SaleMetaController.php` — new `divisions()` (`GET sale_divisions`) and
+  `suggestDivision()` (`GET sale_zones/suggest_division`) endpoints; `storeZone()`/`updateZone()` now read
+  `division_id` explicitly-vs-absent from the request (absent = auto-resolve, used by the quick "+ add new"
+  picker which only ever sends `{name}`; present, even empty, = the human's explicit choice) and return the
+  loaded `division`; new `destroyZone()` (`DELETE sale_zones/{zone}`) returning a clean 422 with a readable
+  message when the zone still has sales, 200 otherwise.
+- `routes/api.php` — added `GET sale_divisions`, `GET sale_zones/suggest_division`,
+  `DELETE sale_zones/{zone}`.
+
+**Frontend:** `resources/src/pages/sales/SaleLookupManager.vue` (the existing Zone/Area & Courier admin page) —
+added a "Division / State" column (Zone tab only, shows "—" when unlinked); a "Division / State" dropdown in the
+create/edit modal (Zone tab only, `allow-clear`), pre-filled by a 400ms-debounced live suggestion while typing
+the name, but any manual pick (or clear) by the user stops further auto-suggestions from overwriting it for the
+rest of that create/edit; opening Edit on an already-linked zone always treats its current Division as a
+deliberate choice (never silently overwritten by a later name tweak). A delete button (Zone tab only) is
+disabled with a tooltip while `sales_count > 0`, otherwise asks for confirmation and calls the new delete
+endpoint. The Sale form itself is unchanged — it still only picks a Zone; Division is always derived, never a
+separate field there, per the client's request.
+
+**Files.** New: `database/migrations/2026_09_27_000001_create_bd_geography_and_zone_division_link.php`,
+`app/Models/BdDivision.php`, `app/Models/BdDistrict.php`, `app/Support/BdDistrictMatcher.php`,
+`tests/Regression/build_zone_division_linking.php`. Modified: `app/Models/SaleZone.php`,
+`app/Services/SaleLookupService.php`, `app/Http/Controllers/SaleMetaController.php`, `routes/api.php`,
+`resources/src/pages/sales/SaleLookupManager.vue` (needs `npm run build:admin`). Nothing about `SaleCourier`
+changed in behavior — verified by the shared `Option B permission contracts` regression test still passing.

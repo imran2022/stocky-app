@@ -2631,3 +2631,23 @@ This supplements the in-depth Build O1–O9 record appended to
 - [ ] Adjustment-decrease write-offs are priced consistently with Damage write-offs (same historical-cost basis).
 - [ ] Moving Average mode is unaffected — it already used the ledger's actual cost, not master cost.
 - [ ] No migration, no frontend change.
+
+## 50. Zone/Area → Bangladesh Division linking
+
+- [ ] All 8 Bangladesh Divisions and all 64 Districts (with known alternate spellings as aliases) are seeded
+      exactly once by the migration — safe to run twice.
+- [ ] Every pre-existing Zone/Area whose name recognizably matches a district (or an alias) is backfilled with
+      its Division automatically; a Zone/Area that matches nothing is left unlinked — NEVER a wrong guess.
+- [ ] Creating a Zone/Area from the quick "+ add new" picker on the Sale form (sends only `{name}`) still
+      auto-resolves its Division server-side from the name — the Sale form itself never shows a Division field.
+- [ ] Creating or editing a Zone/Area from the Zone/Area management page always shows an editable Division
+      dropdown, pre-filled by a live suggestion while typing, but any manual pick (including clearing it) by the
+      user always wins over the suggestion — both at creation and on edit.
+- [ ] Opening Edit on an already-linked Zone/Area never has its existing Division silently overwritten by a
+      later, unrelated tweak to the name.
+- [ ] A Zone/Area still referenced by any Sale cannot be deleted — a clean 422 with a readable message, never a
+      silent no-op or a raw SQL/FK error. One with zero linked sales deletes normally (soft delete).
+- [ ] `SaleCourier` (the sibling lookup, sharing the same service) is completely unaffected — no Division field,
+      no behavior change, verified by the existing Option B permission-contract regression test still passing.
+- [ ] No existing Sale-creation, Sale-edit, or Shipment workflow that reads the Zone/Area list changed in any
+      way — Division is purely additional, read-only-from-their-perspective metadata on the Zone/Area itself.
