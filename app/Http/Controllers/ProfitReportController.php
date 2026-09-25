@@ -54,16 +54,23 @@ class ProfitReportController extends Controller
         }
 
         // Moving-average costing ON: cost is the per-line cost stored in the ledger, only completed sales count and
-        // received returns net off (revenue, quantity and cost), exactly like the Profit & Loss report. OFF: unchanged.
+        // received returns net off (revenue, quantity and cost), exactly like the Profit & Loss report. OFF: cost is
+        // valued at a date-anchored average cost (purchases/adjustments up to $to — see HistoricalCostAtDate), not
+        // today's master/variant cost, so a cost edit made today never rewrites a past period's reported profit
+        // (Inventory Costing — update 4: Profit Report legacy cost is now historical); only a key with no
+        // purchase/adjustment history at all falls back to the current master/variant cost.
         $costing = \App\Services\Costing\CostingReader::active();
         $s = $costing ? 'sd' : 's';   // alias that carries date / warehouse_id / client_id
-        $costExpr = $costing ? 'sd.line_cost' : 'sd.quantity * COALESCE(pv.cost, p.cost, 0)';
+        $costExpr = $costing ? 'sd.line_cost' : 'sd.quantity * COALESCE(hc.avg_cost, pv.cost, p.cost, 0)';
 
         // Costing ON: materialize the (union + ledger-join) rows ONCE into an indexed temp table instead of
         // re-running that join for each of the count/rows/kpi/chart queries below — see CostingReader::profitLinesTemp.
-        // The temp table is uniquely named per request and dies with the connection, so nothing here is reused
+        // Costing OFF: materialize the date-anchored average-cost-per-product/variant temp table once instead of
+        // recomputing the purchase/adjustment aggregation for each of those same queries — see HistoricalCostAtDate.
+        // Both temp tables are uniquely named per request and die with the connection, so nothing here is reused
         // across requests or across a different [from,to]/warehouse scope.
         $tmpTable = $costing ? \App\Services\Costing\CostingReader::profitLinesTemp($from, $to, $warehouseId, $allowed) : null;
+        $histCostTable = $costing ? null : \App\Support\Reporting\HistoricalCostAtDate::temp($to, $warehouseId, $allowed);
 
         $base = fn () => $costing
             ? DB::table("{$tmpTable} as sd")
@@ -71,6 +78,10 @@ class ProfitReportController extends Controller
                 ->join('sales as s', 's.id', '=', 'sd.sale_id')
                 ->join('products as p', 'p.id', '=', 'sd.product_id')
                 ->leftJoin('product_variants as pv', 'pv.id', '=', 'sd.product_variant_id')
+                ->leftJoin("{$histCostTable} as hc", function ($j) {
+                    $j->on('hc.product_id', '=', 'sd.product_id')
+                        ->whereRaw('hc.product_variant_id <=> sd.product_variant_id');
+                })
                 ->whereNull('s.deleted_at')
                 ->whereBetween('s.date', [$from, $to])
                 ->when($allowed !== null, fn ($q) => $q->whereIn('s.warehouse_id', $allowed))
