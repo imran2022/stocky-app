@@ -35,6 +35,12 @@ All hooks are marked with a comment containing `Audit Batch` / `Audit fix (Batch
 | `tests/Regression/audit_fix_profit_report_legacy_correctness.php` | Legacy Profit Report correctness regression test (status/returns/base-units/warehouse) |
 | `app/Support/SaleReturnStock.php` | Sale Return pack/unit resolution + locked stock mutation — ONE implementation used by `store()`/`update()`/`destroy()`/`delete_by_selection()` |
 | `tests/Regression/audit_fix_sale_return_pack_unit.php` | Sale Return pack/unit integrity regression test |
+| `app/Support/Reporting/AdjustmentLineCost.php` | per-adjustment-detail ledger cost (Moving Average) for the Adjustment PDF, matching the on-screen report |
+| `tests/Regression/audit_fix_adjustment_pdf_costing_parity.php` | Adjustment PDF / on-screen report costing-parity regression test |
+| `tests/Regression/audit_fix_mf05_pos_product_type_spoof.php` | MF-05: POS/Sales canonical product type regression test |
+| `tests/Regression/audit_fix_mf03_damage_validation.php` | MF-03: Damage quantity validation + authoritative availability check regression test |
+| `tests/Regression/audit_fix_mf07_sale_null_unit_reversal.php` | MF-07: SalesController legacy null-unit stock reversal regression test |
+| `tests/Regression/audit_fix_mf14_writeoff_historical_cost.php` | MF-14: write-off historical-cost regression test |
 
 ## Vendor files that carry hooks (re-check after taking a new vendor version)
 
@@ -70,6 +76,14 @@ Size = lines added / removed against the pre-audit version.
 | `database/seeders/translations/en.php` (Costing Method) | 6 lines | new `Costing_*` keys (needs re-seeding `TranslationSeeder`); wording reworded to plain shop-owner language in update 4 (same keys, values only); 3 more `Costing_*` keys + relabeled Legacy option in update 5 |
 | `resources/src/pages/settings/CostingSettings.vue` (Inventory Costing update 5) | few lines | warning banner when Legacy is selected; confirmation dialog before switching from Moving Average back to Legacy (needs `npm run build:admin`) |
 | `Http/Controllers/SalesReturnController.php` (Sale Return pack/unit integrity) | rewritten | `create_sell_return()`/`edit_sell_return()` prefill now carry the pack snapshot + a resolved unit; `store()`/`update()`/`destroy()`/`delete_by_selection()` rebuilt on `App\Support\SaleReturnStock` — re-derives pack/unit server-side, one locked stock mutation, a clean 422 instead of an uncaught SQL error |
+| `Http/Controllers/AdjustmentController.php` (costing parity) | few lines | `adjustment_pdf()` prefers `AdjustmentLineCost::forDetails()` (ledger cost) over live master cost when Moving Average is on |
+| `Services/Costing/CostingReader.php`, `Support/Reporting/LegacyProfitLines.php` (costing parity) | few lines each | `profitLinesBase()`/`profitLinesTemp()`/`temp()` gain optional `$viewRecords`/`$userId` params, default unchanged |
+| `Services/ReportQuestionService.php` (costing parity) | rewritten | `salesByProduct()` rebuilt on `LegacyProfitLines`/`CostingReader::profitLinesTemp()` instead of a raw `SaleDetail` join |
+| `Http/Controllers/PosController.php`, `SalesController.php` (MF-05) | few lines each | `product_type` for stock-check/oversell-guard decisions always resolved from the database, never from the request; `CreatePOS()`'s stock deduction uses `StockMutator::lockOrCreate()` |
+| `Support/StockGuard.php` (MF-05) | few lines | `needsFromLines()` resolves product type from the database before including a line, closing the same client-trust gap at the shared layer |
+| `Http/Controllers/DamageController.php` (MF-03) | ~+30 | quantity validation before any write; `$clampFloor` removed, replaced by `StockGuard::assertAvailable()`; `store()` gained warehouse authorization |
+| `Http/Controllers/SalesController.php` (MF-07) | 8 one-line fixes | a legacy line with no `sale_unit_id` no longer has its resolved fallback unit discarded — fixes a stock-reversal leak in `update()`/`delete_by_selection()` and a missing unit label in 6 display/PDF/prefill methods |
+| `Support/Reporting/HistoricalCostAtDate.php`, `InventoryWriteOffFigures.php` (MF-14) | few lines / rewritten | `temp()` gains `$includeAdjustments` (default true, unchanged for existing callers); write-off cost now uses a purchases-only historical average as of the report's `to` date instead of today's master cost |
 | `Services/Custom/PurchaseOrderReceiptService.php`, `Support/UniqueRefGenerator.php` | small | GRN line checks, reference collision retry |
 | `routes/api.php` | -5 | dead routes and the public `products_clean_names` route removed |
 | `resources/src/pages/Dashboard.vue` (Batch 6) | ~+45 | hourly line/bars when `hourly` is present (needs `npm run build:admin`) |

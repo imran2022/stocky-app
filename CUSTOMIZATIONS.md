@@ -5628,3 +5628,145 @@ pack snapshot and a resolved unit; `store()`/`update()`/`destroy()`/`delete_by_s
 `SaleReturnStock`), `tests/Regression/audit_fix_sale_return_pack_unit.php` (new). No migration, no frontend change
 (the existing Vue form already round-trips whatever the prefill sends — the fix is entirely in what the backend
 sends/derives/trusts).
+
+### Adjustment PDF costing parity + ReportQuestionService salesByProduct rebuild (2026-09-25)
+
+**Problem.** `AdjustmentController::adjustment_pdf()` valued every line at `$unitCost * $qty` where `$unitCost`
+came straight off the product/variant's live master cost — even when Moving Average costing was ON, so the
+printed Adjustment PDF's "purchase cost" column disagreed with `stockAdjustmentReport()` (the on-screen report),
+which already used the ledger. Separately, `ReportQuestionService::salesByProduct()` (the natural-language "sales
+by product" report question) built its own raw `SaleDetail` join with the same live-master-cost problem the
+Legacy Profit Report had already been fixed for elsewhere, so it could disagree with the Profit Report for the
+same period/product.
+
+**Fix.** New `App\Support\Reporting\AdjustmentLineCost::forDetails(array $detailIds): array` — returns the
+absolute ledger cost per adjustment-detail id when Moving Average is active (summed `ABS(value_delta)` from
+`inventory_cost_ledger` for `source_type = 'adjustment'`), or an empty array when costing is off (caller falls
+back to the existing master-cost calculation, unchanged for Legacy). `adjustment_pdf()` now looks up this map
+once before the details loop and prefers it: `$costByDetailId[$detail->id] ?? ($unitCost * $qty)`.
+
+`ReportQuestionService::salesByProduct()` was rebuilt on the same normalized-lines infrastructure the Legacy
+Profit Report fix already introduced — `App\Support\Reporting\LegacyProfitLines::temp()` /
+`App\Services\Costing\CostingReader::profitLinesTemp()` — instead of its own raw join, so it now agrees with the
+Profit Report by construction. Both of those methods also gained optional `bool $viewRecords = true, ?int $userId
+= null` parameters (default preserves every existing caller) so a future "my records only" filter can reuse them
+without another rewrite; `qty` stays the raw sale-unit `SUM(sd.quantity)` (unchanged display semantics), only
+`cost` changed.
+
+**Files.** `app/Support/Reporting/AdjustmentLineCost.php` (new), `app/Http/Controllers/AdjustmentController.php`
+(`adjustment_pdf()`), `app/Services/Costing/CostingReader.php` (`profitLinesBase()`/`profitLinesTemp()` signature
+extension), `app/Support/Reporting/LegacyProfitLines.php` (`temp()` signature extension),
+`app/Services/ReportQuestionService.php` (`salesByProduct()` rebuilt), `tests/Regression/
+audit_fix_adjustment_pdf_costing_parity.php` (new — proves `AdjustmentLineCost` total equals the on-screen
+report's `purchase_cost` for the same document, in both costing modes; smoke-tests the PDF itself renders).
+No migration, no frontend change.
+
+### MF-05: POS/Sales canonical product type — no client-trust bypass (2026-09-25)
+
+**Problem (external "Must-Fix" audit 2026-09-25, MF-05).** `PosController::CreatePOS()` decided whether a line
+was a service (skip stock validation/deduction entirely) from the client-submitted `product_type` field. A
+request could describe a genuinely physical product as `is_service` and bypass stock deduction completely — sell
+any quantity of a real product with zero effect on stock. The identical spoof existed in the Multi-Pack
+oversell guard (`assertPackStockSufficient()`, duplicated verbatim in both `PosController` and `SalesController`)
+via the same client-trusted field. Also found in the same pass: `CreatePOS()`'s stock-deduction block still used
+a raw `product_warehouse::where(...)->first()` lookup — silently skipped the deduction when no row existed yet
+for a product never stocked in that warehouse (instead of creating one), the same defect class already fixed
+elsewhere via `StockMutator::lockOrCreate()`.
+
+**Fix.** `product_type` is never read from the request again for this decision: `PosController::CreatePOS()` now
+resolves `$isService` from `Product::find($id)->type` and `assertPackStockSufficient()` in both controllers now
+loads the product first and checks ITS `type` column, not the request line. The shared
+`App\Support\StockGuard::needsFromLines()` (used by Sales/Transfers/Adjustment/etc. to build the "what do we
+need" list `assertAvailable()` then checks) had the same client-trust bug — it now resolves the product from the
+database before deciding whether to include a line in the needs list at all, so a spoofed line can no longer
+avoid the availability check either. `CreatePOS()`'s stock-deduction block now uses
+`StockMutator::lockOrCreate()`, matching every other stock-mutating controller.
+
+**Files.** `app/Http/Controllers/PosController.php` (`CreatePOS()`, `assertPackStockSufficient()`),
+`app/Http/Controllers/SalesController.php` (`assertPackStockSufficient()`, identical duplicated method),
+`app/Support/StockGuard.php` (`needsFromLines()`), `tests/Regression/audit_fix_mf05_pos_product_type_spoof.php`
+(new — type-spoof stock-deduction bypass, type-spoof pack-oversell-guard bypass, never-stocked-product row
+creation). No migration, no frontend change (the client field is simply ignored server-side now).
+
+### MF-03: Damage quantity validation + authoritative availability check (2026-09-25)
+
+**Problem (external "Must-Fix" audit 2026-09-25, MF-03).** `DamageController::store()`/`update()` had no
+positive-quantity rule at all — a negative damage quantity literally INCREASED stock (`delta = -(-5) = +5`) — and
+no authoritative locked availability check. An over-large damage recorded the FULL submitted quantity on the
+document (batches, movement history, write-off expense all read that stored quantity), while
+`applyStockDelta()`'s `$clampFloor` silently truncated the REAL stock movement to whatever was actually on hand
+— so the document could permanently disagree with the real stock movement it supposedly caused. `store()` also
+had no warehouse authorization at all (a restricted user could submit any `warehouse_id`), unlike every other
+stock-changing module.
+
+**Fix.** A validation pass (`firstInvalidDamageQuantity()`) runs before any write and rejects a non-numeric,
+non-finite, zero or negative quantity with a clean 422 — no partial mutation. The silent clamp is removed
+entirely; `App\Support\StockGuard::assertAvailable()` (the same locked, "Allow overselling"-aware check every
+other stock-changing module already uses) now runs first inside the transaction and rejects with 422 when the
+submitted quantity exceeds what is actually on hand — so a damage document's quantity and the real stock
+movement can never disagree again. With "Allow overselling" ON, the full quantity is still applied (goes
+negative, matching every other module's behavior under that switch) rather than floored at zero.
+`abortIfWarehouseDenied($request->warehouse_id)` was added to `store()` (parity with `update()` and every other
+module).
+
+**Files.** `app/Http/Controllers/DamageController.php` (`firstInvalidDamageQuantity()`, `damageStockNeeds()` new;
+`store()`/`update()` call both before mutating; `$clampFloor` argument removed from all `applyStockDelta()`
+calls), `tests/Regression/audit_fix_mf03_damage_validation.php` (new — negative/zero/non-numeric rejection,
+over-large-damage rejection not clamped, valid-damage exact reconciliation, overselling-ON negative-stock
+behavior, `update()` increase/decrease scenarios). No migration, no frontend change (a client already sending a
+sane quantity sees no difference; only invalid/over-large submissions now get a clear rejection instead of a
+silently wrong document).
+
+### MF-07: SalesController legacy null-unit stock reversal leak (2026-09-25)
+
+**Problem (external "Must-Fix" audit 2026-09-25, MF-07).** The same "resolve a fallback unit, then immediately
+discard it via an unconditional `$unit = null;`/`$old_unit = null;` placed AFTER the resolution attempt" defect
+already found and fixed in `SaleReturnStock`/`SalesReturnController` (see "Sale Return pack/unit integrity"
+above) turned out to be present INDEPENDENTLY in 8 more locations in `SalesController.php` — evidently the same
+copy-paste pattern, not a shared root cause. In `update()` and `delete_by_selection()` specifically, the
+discarded unit gated the entire stock-restore block (`if ($old_unit) { ... }`), so editing or bulk-deleting an
+old/legacy sale line whose `sale_unit_id` was NULL silently skipped giving its stock back — the deducted stock
+leaked permanently even though the sale itself was changed or removed. The other 6 occurrences (`show()`,
+`Print_Invoice_POS()`, `Sale_PDF()`, `Sale_PDF_Inline()`, `edit()`, `get_Products_by_sale()`) are display/PDF/
+prefill methods where the same discard caused a missing unit label instead of a stock leak.
+
+**Fix.** All 8 occurrences keep the resolved fallback unit instead of discarding it (the null-init moved BEFORE
+the resolve attempt, matching the correct pattern already used by `publicInvoiceView()` elsewhere in the same
+file). Two structurally similar but NOT-buggy occurrences were deliberately left untouched:
+`renderSaleInvoiceHtml()` (a deliberate no-fallback design) and a Quotation-to-Sale conversion method (a
+different, out-of-scope issue — no fallback attempted at all, not a discard-after-resolve).
+
+**Files.** `app/Http/Controllers/SalesController.php` (`update()`, `delete_by_selection()`, `show()`,
+`Print_Invoice_POS()`, `Sale_PDF()`, `Sale_PDF_Inline()`, `edit()`, `get_Products_by_sale()`),
+`tests/Regression/audit_fix_mf07_sale_null_unit_reversal.php` (new — proves exact stock arithmetic, old quantity
+handed back then new quantity reapplied, across `update()` qty-increase, `update()` qty-decrease and
+`delete_by_selection()`, all using a simulated legacy NULL `sale_unit_id` row). No migration, no frontend change.
+
+### MF-14: write-off expense valued at date-anchored historical cost (2026-09-25)
+
+**Problem (external "Must-Fix" audit 2026-09-25, MF-14).** `App\Support\Reporting\InventoryWriteOffFigures::cost()`
+(the legacy/costing-off branch feeding the inventory-write-off figure in Profit & Loss, Dashboard and Today
+Summary) valued every Damage and Adjustment-decrease loss at TODAY's live product/variant `cost` column. Editing
+a product's cost today silently rewrote the write-off expense of every past period that had already reported it
+— the same bug class already fixed for legacy COGS in `ProfitReportController` via `HistoricalCostAtDate`.
+
+**Fix.** Anchored the same way: one date-anchored average cost per (product, variant, warehouse) as of the
+report's `to` date, built from purchase history up to that date, via the existing `HistoricalCostAtDate::temp()`.
+A NULL average (no purchase history yet for that key) falls back to today's master/variant cost — the same
+documented fallback contract that class already has. `HistoricalCostAtDate::temp()` gained a new
+`bool $includeAdjustments = true` parameter (default preserves `ProfitReportController`'s existing call
+unchanged). `InventoryWriteOffFigures` passes `false`: it is itself pricing Adjustment-decrease write-offs, so
+folding adjustments into the very average used to price them is self-referential — a `'sub'` adjustment in that
+average is valued at today's master cost (not a stamped historical one), and when the same adjustment being
+priced is also in the average, this produced badly wrong (even negative) blended averages, confirmed by a
+failing test before this restriction was added. A purchases-only average avoids that for this caller.
+
+**Files.** `app/Support/Reporting/HistoricalCostAtDate.php` (`temp()` gains `$includeAdjustments`),
+`app/Support/Reporting/InventoryWriteOffFigures.php` (`cost()` rebuilt on the historical-cost temp table),
+`tests/Regression/audit_fix_mf14_writeoff_historical_cost.php` (new — report figure uses the purchase cost in
+force at the time; an already-reported figure is unchanged by a later master-cost edit; no-history fallback to
+master cost; Adjustment-decrease priced consistently with Damage). Also updated
+`tests/Regression/build_writeoff_expense.php`: its legacy-mode expectation was hard-coded to master cost 100,
+only ever coincidentally right because the test lacked purchase history; it does have a same-day purchase at
+cost 120, so under the fix the correct historical-average basis is 120 — expected figure and comment updated
+(the Moving Average half of that test is untouched). No migration, no frontend change.

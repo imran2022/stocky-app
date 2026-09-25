@@ -2572,3 +2572,62 @@ This supplements the in-depth Build O1–O9 record appended to
       corrected persisted `sale_return_details` row.
 - [ ] No migration, no frontend rebuild needed (backend-only fix; the existing form already round-trips whatever
       the prefill sends).
+
+## 45. Adjustment PDF costing parity + ReportQuestionService salesByProduct rebuild
+
+- [ ] The printed Adjustment PDF's "purchase cost" column matches the on-screen Stock Adjustment report's
+      `purchase_cost` for the same document, in BOTH costing modes (was only guaranteed to match with costing
+      OFF before this fix).
+- [ ] With Moving Average ON, the Adjustment PDF uses the ledger's actual cost for each line, not the product's
+      live master/variant cost.
+- [ ] The "sales by product" report-question answer agrees with the Profit & Loss report for the same
+      product/period (both now built on the same normalized lines).
+- [ ] No migration, no frontend change.
+
+## 46. MF-05: POS/Sales canonical product type (no client-trust bypass)
+
+- [ ] A POS/Sales line cannot bypass stock deduction or the Multi-Pack oversell guard by submitting
+      `product_type: is_service` for a genuinely physical product — the server always resolves type from the
+      database.
+- [ ] Selling a product never before stocked in a warehouse now correctly creates a `product_warehouse` row and
+      deducts from it (POS `CreatePOS()`), instead of silently skipping the deduction.
+- [ ] A real service product is still correctly skipped (no stock check, no deduction) — only the CLIENT-CLAIMED
+      type is no longer trusted.
+- [ ] No migration, no frontend change.
+
+## 47. MF-03: Damage quantity validation + authoritative availability check
+
+- [ ] A negative, zero, or non-numeric Damage quantity is rejected with a clean 422 — never accepted, never
+      silently increases stock.
+- [ ] Damaging more than what's on hand is REJECTED (422) when "Allow overselling" is off — never silently
+      clamped to whatever stock exists. The damage document's quantity and the real stock movement can no longer
+      disagree.
+- [ ] With "Allow overselling" ON, a damage can still drive stock negative, applying the FULL requested quantity
+      (no clamp) — matching every other stock-changing module's behavior under that switch.
+- [ ] `store()` now enforces the submitted `warehouse_id` against the user's assigned warehouses (parity with
+      `update()` and every other module) — was previously unchecked.
+- [ ] `update()`'s increase/decrease scenarios respect the same availability check, crediting the old quantity
+      back first.
+- [ ] No migration, no frontend change (only invalid/over-large submissions behave differently now).
+
+## 48. MF-07: SalesController legacy null-unit stock reversal leak
+
+- [ ] Editing an old/legacy sale line that has no stored `sale_unit_id` correctly hands its stock back before
+      reapplying the new line — no permanent stock leak.
+- [ ] Bulk-deleting (`delete_by_selection()`) a sale containing such a legacy line correctly restores its stock.
+- [ ] The 6 display/PDF/prefill methods (`show()`, `Print_Invoice_POS()`, `Sale_PDF()`, `Sale_PDF_Inline()`,
+      `edit()`, `get_Products_by_sale()`) now correctly resolve and show a unit for such a line instead of a blank.
+- [ ] No migration, no frontend change.
+
+## 49. MF-14: write-off expense valued at date-anchored historical cost
+
+- [ ] The Damage/Adjustment-decrease "inventory write-off" figure in Profit & Loss / Dashboard / Today Summary
+      (legacy/costing-off mode) uses the purchase cost that was actually in force at the time of the write-off,
+      not today's live master/variant cost.
+- [ ] Editing a product's master cost TODAY no longer silently changes an ALREADY-REPORTED past period's
+      write-off figure.
+- [ ] A product with no purchase/adjustment history yet still correctly falls back to today's master/variant
+      cost (unchanged behavior for that case).
+- [ ] Adjustment-decrease write-offs are priced consistently with Damage write-offs (same historical-cost basis).
+- [ ] Moving Average mode is unaffected — it already used the ledger's actual cost, not master cost.
+- [ ] No migration, no frontend change.

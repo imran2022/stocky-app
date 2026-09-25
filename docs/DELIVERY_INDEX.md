@@ -1,6 +1,44 @@
 # Latest Delivery Index
 
-## Current: Sale Return pack/unit integrity (2026-09-25)
+## Current: External "Must-Fix" audit — Tier 1 (MF-05, MF-03, MF-07, MF-14) + costing-parity fixes (2026-09-25)
+
+A separately-supplied external audit document (`STOCKY_MUST_FIX_MAJOR_ISSUES_AUDIT_2026-09-25.md`, 16 findings
+MF-01–MF-16 plus RP-01) was triaged into tiers with the client; Tier 1 (the 4 most urgent, no business decision
+needed) is fixed and fully regression-tested. Also delivered in the same batch: two costing-parity fixes found
+independently (Adjustment PDF vs on-screen report; `ReportQuestionService::salesByProduct()` vs Profit Report).
+
+- **MF-05** — POS/Sales could no longer be spoofed into skipping stock deduction/oversell-guard checks by
+  submitting `product_type: is_service` for a genuinely physical product; type is now always resolved from the
+  database. `CreatePOS()`'s stock deduction also moved onto the locked `StockMutator::lockOrCreate()`.
+- **MF-03** — Damage no longer accepts a negative/zero/non-numeric quantity, and no longer silently CLAMPS an
+  over-large damage to whatever stock exists (document quantity and real stock movement could disagree before);
+  it is now REJECTED with a clean 422 when unavailable (unless "Allow overselling" is on). `store()` also gained
+  warehouse authorization it was missing.
+- **MF-07** — A "resolve a fallback unit then discard it" copy-paste bug, the same class already fixed in Sale
+  Return, was found independently in 8 more places in `SalesController.php` — in `update()`/
+  `delete_by_selection()` it silently leaked stock forever on an old/legacy sale line with no stored unit; in 6
+  display/PDF/prefill methods it just showed a blank unit. All 8 fixed.
+- **MF-14** — The Damage/Adjustment write-off expense in Profit & Loss/Dashboard/Today Summary (legacy costing
+  mode) no longer values every past loss at TODAY's live master cost — it uses a date-anchored historical
+  (purchase) cost as of the report's own end date, the same approach already used for legacy COGS.
+- **Costing parity** — the Adjustment PDF's cost column now matches the on-screen Stock Adjustment report in
+  Moving Average mode too; the "sales by product" report-question answer is rebuilt on the same normalized lines
+  the Profit Report uses, so the two can no longer disagree.
+
+No migrations, no frontend changes in any of the six fixes. Full regression suite re-run clean after each fix;
+only the same 15 pre-existing, unrelated test-cleanup/display-quirk failures remain (documented in
+`AUDIT_MERGE_GUIDE.md`/test comments — not caused by this batch). Description: `CUSTOMIZATIONS.md` (six new
+entries), checklist sections 45–49, new tests `audit_fix_adjustment_pdf_costing_parity.php`,
+`audit_fix_mf05_pos_product_type_spoof.php`, `audit_fix_mf03_damage_validation.php`,
+`audit_fix_mf07_sale_null_unit_reversal.php`, `audit_fix_mf14_writeoff_historical_cost.php`.
+
+Still open from the same external audit, pending the client's business decision (Tier 3, not blocking): MF-04
+(Transfer — `sent` stage has no availability guard, and no row-lock before the completion check; the
+sent/completed stock-movement timing itself was confirmed correct as-is), MF-13 (Combo products — whether a combo
+should carry its own independent stock, or be purely virtual/derived from its components' stock; Sale/POS and
+Damage/Adjustment currently disagree on this and cannot be safely unified without that decision).
+
+## Earlier: Sale Return pack/unit integrity (2026-09-25)
 
 A follow-up external review of update 5 found the Sale Return flow itself had two further,
 pre-existing bugs (not caused by update 5): `create_sell_return()` (the return-form prefill
