@@ -382,7 +382,16 @@ if ($createdAdj2) {
 $pwRow->refresh();
 $approx($pwRow->qte, 5 + 7 - 3, 'Adjustment: "subtract" must decrease the row correctly.');
 
-// --- Damage: subtract with floor-at-zero, on a BRAND NEW row (never stocked) ---
+// --- Damage: lock-or-create row creation, on a BRAND NEW row (never stocked) ---
+// Audit fix (MF-03, external "Must-Fix" audit 2026-09-25): DamageController::store() used to silently CLAMP an
+// over-large damage to whatever stock actually existed (here: floor at 0), regardless of the "Allow overselling"
+// setting -- so the damage document could claim a quantity that never actually left the warehouse. MF-03 replaced
+// that silent clamp with the same authoritative StockGuard::assertAvailable() check every other stock-changing
+// module already honours: with overselling OFF (this suite's default) damaging 4 units from a brand-new 0-stock row
+// is now correctly REJECTED, not silently clamped -- so this sub-test turns overselling ON (a scenario already
+// proven correct by tests/Regression/audit_fix_mf03_damage_validation.php) to keep exercising its original point,
+// lock-or-create row creation for Damage, and now asserts the FULL requested quantity actually moves (no clamp).
+DB::table('settings')->whereNull('deleted_at')->update(['allow_overselling' => 1]);
 $freshWarehouse3 = Warehouse::create(['name' => 'Build N2 Fresh Warehouse Damage '.time()]);
 $cleanup['warehouses'][] = $freshWarehouse3->id;
 $damageController = app(DamageController::class);
@@ -405,9 +414,11 @@ $dmgPwRow = product_warehouse::whereNull('deleted_at')
 $assert($dmgPwRow !== null, 'Damage (C-02/H-02): a product_warehouse row must be created (was previously silently skipped when none existed).');
 if ($dmgPwRow) {
     $cleanup['product_warehouse'][] = $dmgPwRow->id;
-    // Started at 0 (freshly created), damaging 4 must floor at 0, not go negative.
-    $approx($dmgPwRow->qte, 0, 'Damage: qte must floor at zero rather than go negative on a brand-new (qte=0) row.');
+    // Started at 0 (freshly created), damaging 4 with overselling ON goes to -4 -- the FULL quantity moves,
+    // matching the document (MF-03: no silent clamp), not floored at 0 the way the old buggy code forced it to.
+    $approx($dmgPwRow->qte, -4, 'Damage (MF-03): qte must reflect the full damaged quantity (-4), not be silently clamped to 0.');
 }
+DB::table('settings')->whereNull('deleted_at')->update(['allow_overselling' => 0]);
 
 // --- Transfer: resolveProductWarehouseRow() must lock AND correctly
 //     filter NULL variant (the bug fixed alongside adding the lock) ---

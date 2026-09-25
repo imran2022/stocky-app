@@ -991,7 +991,10 @@ class SalesController extends BaseController
                 foreach ($old_sale_details as $key => $value) {
                     $old_products_id[] = $value->id;
 
-                    // check if detail has sale_unit_id Or Null
+                    // Audit fix (MF-07): a legacy line with no sale_unit_id used to have its resolved fallback
+                    // unit immediately discarded by an unconditional `$old_unit = null;` right here, which then
+                    // skipped the entire stock-restore block below (gated on `if ($old_unit)`) — so editing or
+                    // deleting an old sale line with no stored unit silently failed to give its stock back.
                     if ($value['sale_unit_id'] !== null) {
                         $old_unit = Unit::where('id', $value['sale_unit_id'])->first();
                     } else {
@@ -999,11 +1002,10 @@ class SalesController extends BaseController
                             ->where('id', $value['product_id'])
                             ->first();
 
+                        $old_unit = null;
                         if ($product_unit_sale_id['unitSale']) {
                             $old_unit = Unit::where('id', $product_unit_sale_id['unitSale']->id)->first();
                         }
-                        $old_unit = null;
-
                     }
 
                     // Multi-Pack Selling: reverse using the pack multiplier snapshot
@@ -1644,18 +1646,19 @@ class SalesController extends BaseController
 
                     foreach ($old_sale_details as $key => $value) {
 
-                        // check if detail has sale_unit_id Or Null
+                        // Audit fix (MF-07): see the matching note in update() above — the resolved fallback unit
+                        // used to be discarded by an unconditional `$old_unit = null;` right here too, silently
+                        // skipping the stock restore for a legacy null-unit line on bulk delete.
                         if ($value['sale_unit_id'] !== null) {
                             $old_unit = Unit::where('id', $value['sale_unit_id'])->first();
                         } else {
                             $product_unit_sale_id = Product::with('unitSale')
                                 ->where('id', $value['product_id'])
                                 ->first();
+                            $old_unit = null;
                             if ($product_unit_sale_id['unitSale']) {
                                 $old_unit = Unit::where('id', $product_unit_sale_id['unitSale']->id)->first();
                             }
-                            $old_unit = null;
-
                         }
 
                         // Multi-Pack Selling: restock using the pack multiplier snapshot.
@@ -1852,7 +1855,6 @@ class SalesController extends BaseController
                 if ($product_unit_sale_id['unitSale']) {
                     $unit = Unit::where('id', $product_unit_sale_id['unitSale']->id)->first();
                 }
-                $unit = null;
 
             }
 
@@ -1991,7 +1993,6 @@ class SalesController extends BaseController
                 if ($product_unit_sale_id['unitSale']) {
                     $unit = Unit::where('id', $product_unit_sale_id['unitSale']->id)->first();
                 }
-                $unit = null;
 
             }
 
@@ -3428,7 +3429,6 @@ class SalesController extends BaseController
                 if ($product_unit_sale_id['unitSale']) {
                     $unit = Unit::where('id', $product_unit_sale_id['unitSale']->id)->first();
                 }
-                $unit = null;
 
             }
 
@@ -3598,7 +3598,6 @@ class SalesController extends BaseController
                 if ($product_unit_sale_id['unitSale']) {
                     $unit = Unit::where('id', $product_unit_sale_id['unitSale']->id)->first();
                 }
-                $unit = null;
             }
 
             if ($detail->product_variant_id) {
@@ -3877,7 +3876,6 @@ class SalesController extends BaseController
                     if ($product_unit_sale_id['unitSale']) {
                         $unit = Unit::where('id', $product_unit_sale_id['unitSale']->id)->first();
                     }
-                    $unit = null;
 
                     $data['no_unit'] = 0;
                 }
@@ -4260,7 +4258,6 @@ class SalesController extends BaseController
                 if ($product_unit_sale_id['unitSale']) {
                     $unit = Unit::where('id', $product_unit_sale_id['unitSale']->id)->first();
                 }
-                $unit = null;
 
                 $data['no_unit'] = 0;
             }
