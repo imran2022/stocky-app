@@ -459,12 +459,16 @@ $expWriteoffLegacy += (float) DB::table('adjustment_details as d')->join('adjust
 check('legacy write-off (ALL history) = SUM(damage+adjustment-sub qty x TODAY master/variant cost)', $near($plFull['inventory_writeoff_sum'], $expWriteoffLegacy, 1.0), json_encode([$plFull['inventory_writeoff_sum'], $expWriteoffLegacy]));
 
 [$prLegacy, $tProfitLegacy] = $time('LEGACY Profit report by product (full range)', fn () => json_decode(app(PRC::class)->index($mkReq(['from' => $FULL_FROM, 'to' => $FULL_TO, 'limit' => -1]), 'product')->getContent(), true));
-// NOTE: in legacy mode, ProfitReportController values COGS at TODAY's master/variant cost x qty, while
-// ReportController::ProfitAndLoss burns FIFO purchase layers (CalculatesCogsAndAverageCost) — two genuinely
-// different legacy cost bases by design (build_costing_large.php only asserts this tie in Moving-Average mode,
-// where both reports read the same ledger). They are expected to diverge whenever purchase cost drifts over time,
-// which it does here on purpose — so this is a loose sanity check (same order of magnitude, both positive), not
-// an exact tie. See the audit report for a note on this divergence.
+// NOTE: in legacy mode (updates 4/5), ProfitReportController values COGS at a WAREHOUSE-SPECIFIC, date-anchored
+// AVERAGE cost (one flat average per product/variant/warehouse across the whole report window — see
+// App\Support\Reporting\HistoricalCostAtDate), while ReportController::ProfitAndLoss burns FIFO purchase layers in
+// sale order (CalculatesCogsAndAverageCost) — two genuinely different legacy cost bases by design
+// (build_costing_large.php only asserts an exact tie in Moving-Average mode, where both reports read the same
+// ledger). They are expected to diverge somewhat whenever purchase cost drifts over time and sales/purchases
+// interleave, which they do here on purpose — so this remains a loose sanity check (same order of magnitude, both
+// positive), not an exact tie. See tests/Regression/audit_fix_profit_report_legacy_correctness.php for exact-value
+// scenario tests of the Legacy branch's own correctness (status/returns/base-units/warehouse), and
+// CUSTOMIZATIONS.md "Inventory Costing — update 5" for the documented (not a bug) remaining Legacy limitations.
 check('legacy Profit report KPI cost is positive and within 2x of P&L legacy COGS (different legacy cost bases by design — see report)', $prLegacy['kpis']['cost'] > 0 && $prLegacy['kpis']['cost'] < 2 * $plFull['product_cost_fifo'] && $prLegacy['kpis']['cost'] > 0.5 * $plFull['product_cost_fifo'], json_encode([$prLegacy['kpis']['cost'], $plFull['product_cost_fifo']]));
 foreach (['warehouse', 'date', 'category', 'customer', 'unit'] as $dim) {
     $r = json_decode(app(PRC::class)->index($mkReq(['from' => $FULL_FROM, 'to' => $FULL_TO, 'limit' => -1]), $dim)->getContent(), true);
