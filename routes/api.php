@@ -1261,6 +1261,10 @@ Route::middleware(['auth:api', 'Is_Active', 'request.safety', 'token.timeout'])-
     Route::get('sale_meta', 'SaleMetaController@index');
     Route::get('sale_divisions', 'SaleMetaController@divisions');
     Route::get('sale_zones/suggest_division', 'SaleMetaController@suggestDivision');
+    Route::get('bd_divisions', 'SaleMetaController@bdDivisions');
+    Route::post('bd_divisions', 'SaleMetaController@storeDivision');
+    Route::put('bd_divisions/{division}', 'SaleMetaController@updateDivisionRow');
+    Route::delete('bd_divisions/{division}', 'SaleMetaController@destroyDivision');
     Route::get('sale_zones', 'SaleMetaController@zones');
     Route::post('sale_zones', 'SaleMetaController@storeZone');
     Route::put('sale_zones/{zone}', 'SaleMetaController@updateZone');

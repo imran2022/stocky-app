@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\BdDivision;
 use App\Models\Sale;
 use App\Models\SaleCourier;
 use App\Models\SaleZone;
@@ -90,7 +91,7 @@ class SaleMetaController extends Controller
         ]);
     }
 
-    /** The 8 Bangladesh Divisions, for the Zone/Area create/edit form's Division dropdown. */
+    /** The Divisions (Bangladesh's 8, plus any custom ones added), for the Zone/Area form's Division dropdown. */
     public function divisions(Request $request)
     {
         $this->authorizeReadAccess($request);
@@ -108,6 +109,58 @@ class SaleMetaController extends Controller
         $divisionId = $this->lookups->suggestDivisionId((string) $request->input('name', ''));
 
         return response()->json(['division_id' => $divisionId]);
+    }
+
+    /** Paginated list for the Divisions management page (Divisions are no longer hardcoded/fixed). */
+    public function bdDivisions(Request $request)
+    {
+        $this->authorizeReadAccess($request);
+        $rows = $this->lookups->divisionsPaginated([
+            'search' => $request->input('search'),
+            'sort_field' => $request->input('SortField'),
+            'sort_type' => $request->input('SortType'),
+            'limit' => $request->input('limit'),
+        ]);
+
+        return response()->json([
+            'divisions' => $rows->items(),
+            'totalRows' => $rows->total(),
+        ]);
+    }
+
+    public function storeDivision(Request $request)
+    {
+        $this->authorizeUpdateAccess($request);
+        $division = $this->lookups->createDivision((string) $request->input('name', ''));
+
+        return response()->json(['division' => $division->only(['id', 'name'])]);
+    }
+
+    public function updateDivisionRow(Request $request, BdDivision $division)
+    {
+        $this->authorizeUpdateAccess($request);
+        $division = $this->lookups->updateDivision($division, (string) $request->input('name', ''));
+
+        return response()->json(['division' => $division->only(['id', 'name'])]);
+    }
+
+    /**
+     * Audit-style guard: a Division still linked to a Zone/Area can never be deleted -- 422, never a silent no-op.
+     */
+    public function destroyDivision(Request $request, BdDivision $division)
+    {
+        $this->authorizeUpdateAccess($request);
+
+        try {
+            $this->lookups->destroyDivision($division);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->errors()['division'][0] ?? 'This Division cannot be deleted.',
+            ], 422);
+        }
+
+        return response()->json(['success' => true]);
     }
 
     public function storeZone(Request $request)

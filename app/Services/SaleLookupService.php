@@ -30,10 +30,80 @@ class SaleLookupService
         return $this->paginate(SaleCourier::query(), $filters);
     }
 
-    /** The 8 Bangladesh Divisions, for the Zone/Area form's Division dropdown. */
+    /** The Bangladesh Divisions, for the Zone/Area form's Division dropdown. */
     public function divisions()
     {
         return BdDivision::orderBy('sort_order')->get(['id', 'name']);
+    }
+
+    /** Paginated Division list for the Divisions management page (district/zone counts, search, sort). */
+    public function divisionsPaginated(array $filters = []): LengthAwarePaginator
+    {
+        $query = BdDivision::query()->withCount(['districts', 'zones']);
+
+        $search = trim((string) ($filters['search'] ?? ''));
+        if ($search !== '') {
+            $query->where('name', 'like', '%'.$search.'%');
+        }
+
+        $allowedSorts = ['id', 'name', 'sort_order', 'districts_count', 'zones_count', 'created_at', 'updated_at'];
+        $sortField = in_array($filters['sort_field'] ?? '', $allowedSorts, true) ? $filters['sort_field'] : 'sort_order';
+        $sortType = strtolower((string) ($filters['sort_type'] ?? 'asc')) === 'desc' ? 'desc' : 'asc';
+        $limit = max(1, min(100000, (int) ($filters['limit'] ?? 10)));
+
+        return $query->orderBy($sortField, $sortType)->orderBy('id')->paginate($limit);
+    }
+
+    /** Divisions are plain reference data (no soft delete), unlike Zone/Courier -- a simple unique-name create. */
+    public function createDivision(string $name): BdDivision
+    {
+        $name = $this->normalizeName($name);
+        if ($this->divisionNameTaken($name)) {
+            throw ValidationException::withMessages(['name' => 'A Division with this name already exists.']);
+        }
+
+        $nextOrder = ((int) BdDivision::max('sort_order')) + 1;
+
+        return BdDivision::create(['name' => $name, 'sort_order' => $nextOrder]);
+    }
+
+    public function updateDivision(BdDivision $division, string $name): BdDivision
+    {
+        $name = $this->normalizeName($name);
+        if ($this->divisionNameTaken($name, $division->id)) {
+            throw ValidationException::withMessages(['name' => 'Another Division already uses this name.']);
+        }
+
+        $division->update(['name' => $name]);
+
+        return $division->fresh();
+    }
+
+    /**
+     * @throws ValidationException when the Division still has Zones/Areas linked to it. Its reference Districts
+     *                              (if any) are allowed to cascade-delete with it -- they only exist to power the
+     *                              name-matching suggestion, never a Sale/report dependency by themselves.
+     */
+    public function destroyDivision(BdDivision $division): void
+    {
+        if ($division->zones()->count() > 0) {
+            throw ValidationException::withMessages([
+                'division' => 'This Division still has Zones/Areas linked to it and cannot be deleted.',
+            ]);
+        }
+
+        $division->delete();
+        BdDistrictMatcher::forgetCache();
+    }
+
+    private function divisionNameTaken(string $name, ?int $excludeId = null): bool
+    {
+        $query = BdDivision::whereRaw('LOWER(TRIM(name)) = LOWER(?)', [$name]);
+        if ($excludeId !== null) {
+            $query->where('id', '!=', $excludeId);
+        }
+
+        return $query->exists();
     }
 
     /** Live suggestion while typing a Zone/Area name — never authoritative, always overridable. */
