@@ -5838,28 +5838,34 @@ changed in behavior — verified by the shared `Option B permission contracts` r
 ### Divisions are now a manageable list, not a hardcoded 8 rows (2026-09-27)
 
 **Why.** The Divisions seeded above were fixed reference data with no admin UI — the client couldn't rename one
-or add a custom (non-Bangladesh) Division of their own. This gives Divisions the same create/rename/delete
-management the Zone/Area and Courier lists already have.
+or add a custom (non-Bangladesh) Division of their own. First delivered as a separate "Divisions / States" page
+(own route/menu entry) mirroring Zone/Area's management page; the client asked for it to be folded into the
+existing Zone/Area page instead, matching how a Zone/Area name itself is created/edited there — so that's the
+final shape below (the standalone page was removed before this shipped).
 
-**Backend.** `app/Services/SaleLookupService.php` — new `divisionsPaginated()` (search/sort/pagination, with
-`districts_count`/`zones_count` via `withCount`), `createDivision()`/`updateDivision()` (simple unique-name
+**Backend.** `app/Services/SaleLookupService.php` — `createDivision()`/`updateDivision()` (simple unique-name
 validation — Divisions have no soft-delete, unlike Zone/Courier, so this doesn't reuse their
 `createOrRestore()`/`update()` helpers), and `destroyDivision()` (blocks, via `ValidationException`, while any
 Zone/Area still references it; its reference Districts, if any, are allowed to cascade-delete since they only
 power the name-matching suggestion, never a Sale/report dependency on their own — clears
-`BdDistrictMatcher`'s cache after). `app/Http/Controllers/SaleMetaController.php` — new `bdDivisions()`,
-`storeDivision()`, `updateDivisionRow()`, `destroyDivision()` actions (same Sales_edit-gated pattern as Zone/
-Courier). `routes/api.php` — `GET/POST bd_divisions`, `PUT`/`DELETE bd_divisions/{division}` (the existing
-`GET sale_divisions` plain-list dropdown endpoint is untouched).
+`BdDistrictMatcher`'s cache after). `app/Http/Controllers/SaleMetaController.php` — new `storeDivision()`
+(same Sales_add/update/POS/Shipment-gated `authorizeCreateAccess()` as `storeZone()`, since it's reached from
+the same inline quick-add control), `updateDivisionRow()`/`destroyDivision()` (Sales_edit-gated
+`authorizeUpdateAccess()`, matching `updateZone()`/`destroyZone()`). `routes/api.php` —
+`POST bd_divisions`, `PUT`/`DELETE bd_divisions/{division}` (the existing `GET sale_divisions` plain-list
+dropdown endpoint, which now doubles as the source for the inline control below, is untouched).
 
-**Frontend.** New page `resources/src/pages/sales/DivisionManager.vue` (own route `sales/divisions`, menu entry
-"Divisions / States" under Sales) — a focused create/rename/delete list (District count and Zones-Used count
-shown per row; delete disabled with a tooltip while any Zone/Area is still linked), built on the same
-`useCrudTable`/`DataTable` pattern as `Units.vue` rather than folding a third "kind" into the already-branching
-`SaleLookupManager.vue`.
+**Frontend.** No separate page. `resources/src/pages/sales/SaleLookupManager.vue`'s Zone/Area create/edit
+modal: the Division field is now `CreatableSelect` (the same "type an existing name to select it, type a new
+one to create it" component already used for Zone/Courier quick-add elsewhere in the app) instead of a plain
+dropdown, plus a small rename (pencil) and delete icon pair next to it that act on whichever Division is
+currently selected — rename opens a tiny "Rename Division" modal, delete is a popconfirm (disabled with a
+tooltip, matching the existing Zone/Area row delete's style, while the Division still has any Zone/Area linked).
+Renaming/deleting the selected Division also refreshes the underlying Zone/Area table, since other rows'
+Division column can be showing that same Division.
 
-**Files.** New: `tests/Regression/build_division_crud.php`,
-`resources/src/pages/sales/DivisionManager.vue`. Modified: `app/Services/SaleLookupService.php`,
-`app/Http/Controllers/SaleMetaController.php`, `routes/api.php`, `resources/src/router/index.js`,
-`resources/src/config/menu.js` (needs `npm run build:admin`). No migration, no change to the auto-suggest/
-auto-link behavior from the previous entry (verified by that entry's regression test still passing unchanged).
+**Files.** New: `tests/Regression/build_division_crud.php`. Modified:
+`app/Services/SaleLookupService.php`, `app/Http/Controllers/SaleMetaController.php`, `routes/api.php`,
+`resources/src/pages/sales/SaleLookupManager.vue` (needs `npm run build:admin`). No migration, no change to
+the auto-suggest/auto-link behavior from the previous entry (verified by that entry's regression test still
+passing unchanged).

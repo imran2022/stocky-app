@@ -45,8 +45,7 @@ All hooks are marked with a comment containing `Audit Batch` / `Audit fix (Batch
 | `app/Models/BdDivision.php`, `app/Models/BdDistrict.php` | Bangladesh geography reference-data models |
 | `app/Support/BdDistrictMatcher.php` | exact, alias-aware Zone/Area name → Division id resolver (never fuzzy; `null` on no match) |
 | `tests/Regression/build_zone_division_linking.php` | Zone/Area → Division linking regression test (suggest, create/update auto-resolve vs explicit choice, delete guard) |
-| `resources/src/pages/sales/DivisionManager.vue` | Divisions management page (create/rename/delete — Divisions are no longer hardcoded) |
-| `tests/Regression/build_division_crud.php` | Divisions management regression test |
+| `tests/Regression/build_division_crud.php` | Divisions management regression test (create/rename/delete, inline on the Zone/Area page — Divisions are no longer hardcoded) |
 
 ## Vendor files that carry hooks (re-check after taking a new vendor version)
 
